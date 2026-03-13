@@ -12,6 +12,17 @@ pip install -r requirements.txt
 
 关键依赖包括：`torch`、`pykan`、`sympy`、`scikit-learn`、`pandas`、`matplotlib`。
 
+## 数据准备
+
+`kan.ipynb` 与 `symkanbenchmark.py` 默认优先读取以下数据文件：
+
+- `X_train.npy`
+- `X_test.npy`
+- `Y_train_cat.npy`
+- `Y_test_cat.npy`
+
+若文件缺失，会自动按 SymbolNet 风格获取 MNIST 并生成同名 `*.npy` 文件（优先 `tensorflow.keras.datasets.mnist`，回退 `sklearn.fetch_openml("mnist_784")`）。
+
 ## 快速开始
 
 下面的例子展示最短闭环：构建数据集，分阶段训练，再执行符号化。

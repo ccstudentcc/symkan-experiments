@@ -1,14 +1,42 @@
-# SymbolNet / symkan requirements
-# Python version: 3.9.25 (recommended)
-# Compatible range: >=3.9,<3.11
+# Extended requirements for symkan-experiments
+# Source: project imports + versions from local 'kan' environment
+# Python: 3.9.25
 
 numpy==1.24.4
 pandas==2.0.1
 scipy==1.11.4
+
+## --- Core numerical / scientific ---
+numpy==1.24.4
+scipy==1.11.4
+pandas==2.0.1
+
+## --- Machine learning / statistics ---
 scikit-learn==1.3.2
-matplotlib==3.7.1
-sympy==1.12
+
+## --- Deep learning (PyTorch ecosystem) ---
 torch==2.1.2
+torchvision==0.16.2
+torchaudio==2.1.2
+
+## --- Deep learning (optional: TensorFlow for MNIST fallback) ---
+# Only needed by SymbolNet-style MNIST fallback path in notebook/benchmark
+tensorflow==2.10.0
+
+## --- Symbolic / mathematical tools ---
+sympy==1.12
 pykan==0.2.8
-PyYAML==6.0.3
-psutil==7.0.0
+
+## --- Visualization / rich output ---
+matplotlib==3.7.1
+rich==14.3.3
+
+## --- Development / Notebook support ---
+ipykernel==6.31.0
+mdurl==0.1.2
+
+## --- Utilities / system / packaging ---
+pyyaml==6.0.3
+psutil==7.1.2
+tqdm==4.66.4
+setuptools==68.2.2

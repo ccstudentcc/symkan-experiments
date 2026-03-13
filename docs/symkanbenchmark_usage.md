@@ -16,6 +16,8 @@ python symkanbenchmark.py --tasks all --verbose
 
 说明：`all = full + eval-bench + parallel-bench`。
 
+数据说明：默认优先读取 `X_train.npy/X_test.npy/Y_train_cat.npy/Y_test_cat.npy`。若缺失，脚本会自动按 SymbolNet 风格拉取 MNIST 并生成上述文件（优先 `tensorflow.keras.datasets.mnist`，回退 `sklearn.fetch_openml`）。
+
 ### 1.2 只跑主实验（最常用）
 
 ```bash
@@ -116,6 +118,8 @@ benchmark_runs/
 - `--output-dir benchmark_runs_alt`：指定输出根目录，避免和已有实验互相覆盖。
 - `--verbose`：打印过程日志，便于观察训练与剪枝过程。
 - `--quiet`：静默运行，只保留必要结果输出。
+- `--auto-fetch-mnist/--no-auto-fetch-mnist`：是否在 `*.npy` 缺失时自动获取并生成 MNIST 数据文件（默认开启）。
+- `--mnist-classes 0,1,2,3,4,5,6,7,8,9`：自动获取 MNIST 时保留的类别集合。
 
 ### 4.3 函数库预设
 

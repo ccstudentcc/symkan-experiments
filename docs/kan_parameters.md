@@ -6,7 +6,7 @@
 
 当前 notebook 主线固定为 6 段：
 
-1. 读取 `X_train.npy/X_test.npy/Y_train_cat.npy/Y_test_cat.npy`，统一成 one-hot 标签。
+1. 优先读取 `X_train.npy/X_test.npy/Y_train_cat.npy/Y_test_cat.npy`；缺失时自动按 SymbolNet 风格拉取 MNIST 并落盘，再统一成 one-hot 标签。
 2. 初始化 `symkan.core` 运行时，统一设备和 `BATCH_SIZE`。
 3. 训练 baseline KAN，得到基准精度与归因分数。
 4. 用归因做 top-k 输入筛选，构造降维后的 `dataset_enhanced`。
@@ -21,6 +21,7 @@
 
 - `X_train/X_test`：输入特征，当前为 `float32`。
 - `Y_train_cat/Y_test_cat`：标签，可以是 one-hot，也可以是类别索引。notebook 会自动转换成 one-hot。
+- 当上述 `*.npy` 不存在时，notebook 会自动尝试 `tensorflow.keras.datasets.mnist.load_data()`；若环境无 TensorFlow，则回退到 `sklearn.fetch_openml("mnist_784")`，并生成同名 `*.npy` 文件供后续复用。
 - `input_dim`：输入维度，直接来自 `X_train.shape[1]`。
 - `n_classes`：类别数，来自标签维度。
 
@@ -290,7 +291,7 @@ $$
 
 ### 1.1 数据构建：`build_dataset`
 
-- 输入：`X_train/X_test` 与 one-hot 标签 `Y_train/Y_test`。
+- 输入：`X_train/X_test` 与 one-hot 标签 `Y_train/Y_test`（若 `*.npy` 缺失，会先自动生成）。
 - 输出：`train_input/train_label/test_input/test_label`（`torch.float32`）。
 - 关键点：训练、符号化、评估都复用这一份 dataset 格式。
 

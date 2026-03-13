@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import torch
 from scipy.special import softmax as scipy_softmax
+from sklearn.datasets import fetch_openml
 
 from kan import KAN
 from symkan.core import (
@@ -119,7 +120,88 @@ def write_json(path: Path, payload: Dict[str, Any]) -> None:
     path.write_text(json.dumps(to_jsonable(payload), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _select_classes(x: np.ndarray, y: np.ndarray, classes: List[int]) -> tuple[np.ndarray, np.ndarray]:
+    mask = np.zeros_like(y, dtype=bool)
+    for cls in classes:
+        mask |= y == cls
+    return x[mask], y[mask]
+
+
+def _onehot_from_labels(y: np.ndarray, classes: List[int]) -> np.ndarray:
+    class_to_idx = {cls: idx for idx, cls in enumerate(classes)}
+    mapped = np.array([class_to_idx[int(v)] for v in y], dtype=np.int64)
+    return np.eye(len(classes), dtype=np.float32)[mapped]
+
+
+def _fetch_mnist_via_keras(classes: List[int]) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    from tensorflow import keras  # type: ignore
+
+    (x_train, y_train), (x_test, y_test) = keras.datasets.mnist.load_data()
+    x_train = x_train.reshape(x_train.shape[0], -1).astype(np.float32) / 255.0
+    x_test = x_test.reshape(x_test.shape[0], -1).astype(np.float32) / 255.0
+    y_train = y_train.astype(np.int64)
+    y_test = y_test.astype(np.int64)
+    x_train, y_train = _select_classes(x_train, y_train, classes)
+    x_test, y_test = _select_classes(x_test, y_test, classes)
+    y_train_onehot = _onehot_from_labels(y_train, classes)
+    y_test_onehot = _onehot_from_labels(y_test, classes)
+    return x_train, x_test, y_train_onehot, y_test_onehot
+
+
+def _fetch_mnist_via_openml(classes: List[int]) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    mnist = fetch_openml("mnist_784", version=1, as_frame=False)
+    x = mnist.data.astype(np.float32) / 255.0
+    y = mnist.target.astype(np.int64)
+    x_train, x_test = x[:60000], x[60000:]
+    y_train, y_test = y[:60000], y[60000:]
+    x_train, y_train = _select_classes(x_train, y_train, classes)
+    x_test, y_test = _select_classes(x_test, y_test, classes)
+    y_train_onehot = _onehot_from_labels(y_train, classes)
+    y_test_onehot = _onehot_from_labels(y_test, classes)
+    return x_train, x_test, y_train_onehot, y_test_onehot
+
+
+def ensure_numpy_dataset_files(args: argparse.Namespace, repo_root: Path) -> None:
+    x_train_path = resolve_path(args.x_train, repo_root)
+    x_test_path = resolve_path(args.x_test, repo_root)
+    y_train_path = resolve_path(args.y_train, repo_root)
+    y_test_path = resolve_path(args.y_test, repo_root)
+    expected_files = [x_train_path, x_test_path, y_train_path, y_test_path]
+    if all(path.exists() for path in expected_files):
+        return
+    if not args.auto_fetch_mnist:
+        missing = [str(path) for path in expected_files if not path.exists()]
+        raise FileNotFoundError(
+            "缺少输入数据文件，且已禁用自动拉取 MNIST: " + ", ".join(missing)
+        )
+
+    for path in expected_files:
+        ensure_dir(path.parent)
+
+    classes = sorted(set(int(v) for v in args.mnist_classes))
+    if not classes:
+        raise ValueError("--mnist-classes 不能为空")
+
+    source = "tensorflow.keras.datasets.mnist"
+    try:
+        x_train, x_test, y_train, y_test = _fetch_mnist_via_keras(classes)
+    except Exception:
+        source = "sklearn.fetch_openml(mnist_784)"
+        x_train, x_test, y_train, y_test = _fetch_mnist_via_openml(classes)
+
+    np.save(x_train_path, x_train.astype(np.float32))
+    np.save(x_test_path, x_test.astype(np.float32))
+    np.save(y_train_path, y_train.astype(np.float32))
+    np.save(y_test_path, y_test.astype(np.float32))
+    print(
+        "[data] 已自动生成数据文件: "
+        f"{x_train_path.name}, {x_test_path.name}, {y_train_path.name}, {y_test_path.name} "
+        f"(source={source}, classes={classes})"
+    )
+
+
 def load_data(args: argparse.Namespace, repo_root: Path) -> Dict[str, Any]:
+    ensure_numpy_dataset_files(args, repo_root)
     x_train = np.load(resolve_path(args.x_train, repo_root)).astype(np.float32)
     x_test = np.load(resolve_path(args.x_test, repo_root)).astype(np.float32)
     y_train_raw = np.load(resolve_path(args.y_train, repo_root))
@@ -770,6 +852,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--x-test", default="X_test.npy")
     parser.add_argument("--y-train", default="Y_train_cat.npy")
     parser.add_argument("--y-test", default="Y_test_cat.npy")
+    parser.add_argument("--auto-fetch-mnist", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--mnist-classes", type=parse_csv_ints, default=list(range(10)))
 
     parser.add_argument("--inner-dim", type=int, default=16)
     parser.add_argument("--grid", type=int, default=5)
