@@ -1,0 +1,10 @@
+﻿variant,stage_seed,rounds,effective_rounds,total_edges_removed,mean_drop_ratio,max_drop_ratio
+baseline,42,11,6,27,,
+baseline,52,17,8,40,,
+baseline,62,22,14,25,,
+adaptive,42,1,1,11,,
+adaptive,52,1,1,17,,
+adaptive,62,1,1,19,,
+adaptive_auto,42,5,1,4,0.0086021505376344,0.043010752688172
+adaptive_auto,52,4,4,11,0.029701579830875048,0.0659340659340659
+adaptive_auto,62,4,4,13,0.03292460074697725,0.0679611650485436

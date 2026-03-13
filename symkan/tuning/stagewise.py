@@ -358,6 +358,10 @@ def stagewise_train(
     max_lamb_ratio=1.5,
     adaptive_ft=False,
     min_ft_ratio=0.3,
+    stage_early_stop=False,
+    stage_early_stop_patience=2,
+    stage_early_stop_min_acc_gain=0.002,
+    stage_early_stop_edge_buffer=0,
     verbose=True,
 ):
     """@brief 分阶段训练并自动选择最优快照。
@@ -403,6 +407,10 @@ def stagewise_train(
     @param max_lamb_ratio lamb 上界倍数。
     @param adaptive_ft 是否按稀疏进度缩放剪枝后微调步数。
     @param min_ft_ratio 微调步数下界比例。
+    @param stage_early_stop 是否启用阶段级早停。
+    @param stage_early_stop_patience 达到目标后连续低收益阶段耐心值。
+    @param stage_early_stop_min_acc_gain 阶段级最小有效精度提升阈值。
+    @param stage_early_stop_edge_buffer 早停判定时允许的目标边数缓冲。
     @param verbose 是否打印详细日志。
     @return tuple(best_model, result_dict) 最优模型与阶段训练结果。
     """
@@ -439,6 +447,9 @@ def stagewise_train(
     max_acc_seen = 0.0
     initial_edges = get_n_edge(model)
     controller = None
+    stage_stall_count = 0
+    stage_early_stopped = False
+    stage_early_stop_reason = ""
     if adaptive_threshold:
         controller = AdaptiveThresholdController(
             base_step=threshold_base_step,
@@ -657,6 +668,28 @@ def stagewise_train(
                 f"{'⚠ ' + rollback if rollback else ''}"
             )
 
+        if stage_early_stop and si >= prune_start_stage:
+            close_to_target = (
+                _valid_edge_count(edge_after)
+                and float(edge_after) <= float(target_edges + max(0, int(stage_early_stop_edge_buffer)))
+            )
+            stage_gain = float(acc_after - acc_before)
+            if close_to_target and stage_gain < float(stage_early_stop_min_acc_gain):
+                stage_stall_count += 1
+            else:
+                stage_stall_count = 0
+
+            if stage_stall_count >= max(1, int(stage_early_stop_patience)):
+                stage_early_stopped = True
+                stage_early_stop_reason = (
+                    f"stage_early_stop: close_to_target={close_to_target}, "
+                    f"gain={stage_gain:.6f} < {float(stage_early_stop_min_acc_gain):.6f}, "
+                    f"stall={stage_stall_count}"
+                )
+                if verbose:
+                    print(f"[stage {si}] {stage_early_stop_reason}")
+                break
+
     try:
         final_res = safe_fit(
             model,
@@ -750,6 +783,8 @@ def stagewise_train(
         "selected_score": float(best_snap["score"]),
         "best_state_dict": copy.deepcopy(selected_state),
         "stage_snapshots": stage_snapshots,
+        "stage_early_stopped": bool(stage_early_stopped),
+        "stage_early_stop_reason": stage_early_stop_reason,
     }
     if keep_topk_models and keep_topk_models > 0:
         result["topk_models"] = topk_models

@@ -126,6 +126,10 @@ class StagewiseConfig:
     max_lamb_ratio: float = 1.5
     adaptive_ft: bool = False
     min_ft_ratio: float = 0.3
+    stage_early_stop: bool = False
+    stage_early_stop_patience: int = 2
+    stage_early_stop_min_acc_gain: float = 0.002
+    stage_early_stop_edge_buffer: int = 0
     verbose: bool = True
 
 
@@ -152,6 +156,15 @@ class SymbolizeConfig:
     prune_attr_sample_adaptive: bool = False
     prune_attr_sample_min: int = 512
     prune_attr_sample_max: int = 2048
+    prune_threshold_start: float = 0.02
+    prune_threshold_end: float = 0.03
+    prune_max_drop_ratio_per_round: float = 1.0
+    prune_threshold_backoff: float = 0.7
+    prune_adaptive_threshold: bool = False
+    prune_adaptive_step: float = 0.0
+    prune_adaptive_acc_drop_tol: float = 0.02
+    prune_adaptive_min_edges_gain: int = 1
+    prune_adaptive_low_gain_patience: int = 4
     heavy_ft_early_stop_patience: int = 0
     heavy_ft_early_stop_min_delta: float = 1e-4
     collect_timing: bool = True

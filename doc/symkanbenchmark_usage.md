@@ -1,23 +1,70 @@
-# symkanbenchmark.py 使用说明
+# symkanbenchmark.py 使用说明（精简版）
 
-[`symkanbenchmark.py`](../symkanbenchmark.py) 是把当前 kan.ipynb 主实验和后半段两个 benchmark 单元抽成命令行脚本后的版本。它的目标不是取代 notebook 做交互分析，而是把“同一组参数批量跑多次、稳定导出 CSV”这件事做干净。
+[symkanbenchmark.py](../symkanbenchmark.py) 将 kan.ipynb 的主实验流程与两个 benchmark 流程脚本化，核心目标是：
 
-## 1. 脚本做什么
+1. 支持同一参数集的批量多 seed 运行。
+2. 稳定导出结构化 CSV 结果。
+3. 避免 notebook 手工执行带来的覆盖和漏记。
 
-默认情况下，脚本会按当前 notebook 的参数顺序执行：
+## 1. 快速开始
 
-1. 训练 baseline KAN。
-2. 做 `safe_attribute` 归因并保留 top-k 输入。
-3. 执行 `stagewise_train`。
-4. 执行 `symbolize_pipeline`。
-5. 导出符号汇总、阶段日志、R² 验证和 AUC 摘要。
-6. 可选再跑评估链路 benchmark 和并行策略 benchmark。
+### 1.1 一条命令跑完整流程
 
-它不是另起一套配置。默认值就是 notebook 当前那组参数。
+```bash
+python symkanbenchmark.py --tasks all --verbose
+```
 
-## 2. 输出结构
+说明：`all = full + eval-bench + parallel-bench`。
 
-默认输出目录是 `benchmark_runs/`。如果你传了多个 `stagewise` seed，每个 run 会落到独立子目录：
+### 1.2 只跑主实验（最常用）
+
+```bash
+python symkanbenchmark.py --tasks full
+```
+
+静默模式：
+
+```bash
+python symkanbenchmark.py --tasks full --quiet
+```
+
+说明：`--quiet` 会压制训练和符号化的过程输出；若与 `--verbose` 同时设置，`--quiet` 优先。
+
+### 1.3 批量 seed（论文统计建议）
+
+```bash
+python symkanbenchmark.py --tasks all --stagewise-seeds 42,52,62
+```
+
+## 2. 任务与命令速查
+
+- 主实验：
+
+```bash
+python symkanbenchmark.py --tasks full
+```
+
+- 评估链路 benchmark（仍会先构造主流程上下文）：
+
+```bash
+python symkanbenchmark.py --tasks eval-bench
+```
+
+- 并行策略 benchmark：
+
+```bash
+python symkanbenchmark.py --tasks parallel-bench --parallel-modes auto,off,thread4,thread8
+```
+
+- 组合任务：
+
+```bash
+python symkanbenchmark.py --tasks full,parallel-bench
+```
+
+## 3. 输出目录与文件含义
+
+默认输出目录为 `benchmark_runs/`，每个 seed 对应一个独立 run 子目录（即使只有一个 seed 也会建子目录，避免覆盖）：
 
 ```text
 benchmark_runs/
@@ -38,135 +85,65 @@ benchmark_runs/
     benchmark_symbolic_parallel_quick.csv
 ```
 
-如果你只跑一个 seed，也照样会生成一个 run 子目录。这样不会把多轮结果互相覆盖。
+重点文件：
 
-## 3. 最常用命令
+1. `symkanbenchmark_runs.csv`：多 seed/多配置横向对比主表。
+2. `kan_stage_logs.csv`：阶段训练是否频繁回滚。
+3. `symbolize_trace.csv`：剪枝节奏是否过猛。
+4. `formula_validation.csv`：R² 与数值稳定性。
+5. `benchmark_symbolic_parallel_quick.csv`：并行加速是否真实有效。
 
-### 3.1 完整复现 notebook 主流程
+## 4. 参数速查
 
-```bash
-python symkanbenchmark.py --tasks all --verbose
-```
+### 4.1 主实验默认值（与 notebook 对齐）
 
-这会执行主实验、评估 benchmark 和并行 benchmark。
+- `--inner-dim 16`：隐藏层宽度（主干表达能力与训练成本的平衡点）。
+- `--top-k 120`：归因后保留的输入特征数（越大保留信息越多，搜索也更慢）。
+- `--stage-target-edges 120`：stagewise 阶段期望保留的边数目标。
+- `--symbolic-target-edges 90`：symbolize 后期望收敛到的边数目标（控制最终复杂度）。
+- `--steps-per-stage 60`：每个 stage 的训练步数。
+- `--finetune-steps 50`：阶段内常规微调步数。
+- `--layerwise-finetune-steps 120`：逐层微调步数（用于稳定结构变更后的收敛）。
+- `--affine-finetune-steps 200`：仿射参数微调步数（提高最后拟合质量）。
 
-### 3.2 只跑主实验，不跑额外 benchmark
+### 4.2 常用控制参数
 
-```bash
-python symkanbenchmark.py --tasks full
-```
+- `--tasks full`：只跑主实验链路。
+- `--tasks eval-bench`：只跑评估性能专题（会复用主流程上下文）。
+- `--tasks parallel-bench`：只跑并行策略对照。
+- `--tasks all`：一次跑完 full + eval-bench + parallel-bench。
+- `--stagewise-seeds 42,52,62`：指定一组 stagewise 随机种子并逐个运行。
+- `--output-dir benchmark_runs_alt`：指定输出根目录，避免和已有实验互相覆盖。
+- `--verbose`：打印过程日志，便于观察训练与剪枝过程。
+- `--quiet`：静默运行，只保留必要结果输出。
 
-如果你只是想安静地把结果跑完，不想在终端里看训练进度条和阶段日志，直接加：
+### 4.3 函数库预设
 
-```bash
-python symkanbenchmark.py --tasks full --quiet
-```
+- `--lib-preset layered`：分层函数库，精度与复杂度较均衡（默认推荐）。
+- `--lib-preset fast`：精简函数库，优先降低搜索成本与运行时间。
+- `--lib-preset expressive`：增强表达能力，适合分层库不足时尝试。
+- `--lib-preset full`：完整函数库，搜索空间最大，通常最慢但最灵活。
 
-`--quiet` 会屏蔽 baseline、`stagewise_train`、`symbolize_pipeline` 以及并行 benchmark 中的过程输出，只保留脚本最终完成提示。
+### 4.4 评估 benchmark 参数
 
-### 3.3 批量跑多个 stagewise seed
+- `--bench-repeat 3`：每项 benchmark 的正式重复次数（用于统计均值/方差）。
+- `--bench-warmup 1`：预热轮数（减少首次执行的冷启动偏差）。
+- `--eval-rounds 3`：评估回合数（跨回合汇总稳定性）。
+- `--validate-n-sample 500`：验证抽样规模（越大越稳，耗时也更高）。
 
-```bash
-python symkanbenchmark.py --tasks all --stagewise-seeds 42,52,62
-```
+### 4.5 并行 benchmark 参数
 
-这是脚本支持“命令行批量测试”的核心方式。每个 seed 会单独输出一个 run 目录，顶层再汇总成总表。
+- `--parallel-modes auto,off,thread4`：并行策略候选集合（用于横向测速）。
+- `--parallel-target-min 40`：并行实验中的最小目标边数。
+- `--parallel-target-max 80`：并行实验中的最大目标边数。
+- `--parallel-max-prune-rounds 8`：并行实验允许的最大剪枝轮数。
+- `--parallel-finetune-steps 20`：并行实验常规微调步数。
+- `--parallel-layerwise-finetune-steps 40`：并行实验逐层微调步数。
+- `--parallel-affine-finetune-steps 0`：并行实验仿射微调步数（0 代表跳过）。
 
-### 3.4 只跑性能与内存专题
+## 5. 结果解读最小集合
 
-```bash
-python symkanbenchmark.py --tasks eval-bench
-```
-
-注意：脚本仍然会先构造完整主流程上下文，因为 benchmark 需要 `enhanced_model` 和 `export_model`。
-
-### 3.5 只跑并行速度对照
-
-```bash
-python symkanbenchmark.py --tasks parallel-bench --parallel-modes auto,off,thread4,thread8
-```
-
-## 4. 关键参数
-
-### 4.1 与 notebook 一致的默认值
-
-主实验默认值已经和 notebook 对齐：
-
-- `--inner-dim 16`
-- `--top-k 120`
-- `--stage-target-edges 120`
-- `--symbolic-target-edges 90`
-- `--steps-per-stage 60`
-- `--finetune-steps 50`
-- `--layerwise-finetune-steps 120`
-- `--affine-finetune-steps 200`
-
-### 4.2 任务开关
-
-- `--tasks full`
-- `--tasks eval-bench`
-- `--tasks parallel-bench`
-- `--tasks all`
-
-多个任务用逗号分隔，例如：
-
-```bash
-python symkanbenchmark.py --tasks full,parallel-bench
-```
-
-### 4.3 输出控制
-
-- `--verbose`：显示阶段训练和符号化过程日志。
-- `--quiet`：静默运行，压掉训练进度条和中间输出。
-
-两者同时传入时，`--quiet` 优先，否则静默就没有意义。
-
-### 4.4 批量测试参数
-
-- `--stagewise-seeds 42,52,62`
-- `--output-dir benchmark_runs_alt`
-
-如果你主要想比较不同随机初始化对最终符号化结果的影响，这两个参数就够了。
-
-### 4.5 函数库预设
-
-- `--lib-preset layered`
-- `--lib-preset fast`
-- `--lib-preset expressive`
-- `--lib-preset full`
-
-建议：
-
-- 主实验优先用 `layered`。
-- 只关心速度时可以试 `fast`。
-- 只有在分层库明显不够表达时再上 `expressive/full`。
-
-### 4.6 评估 benchmark 参数
-
-- `--bench-repeat 3`
-- `--bench-warmup 1`
-- `--eval-rounds 3`
-- `--validate-n-sample 500`
-
-这部分直接对应 notebook 第 11 节。
-
-### 4.7 并行 benchmark 参数
-
-- `--parallel-modes auto,off,thread4`
-- `--parallel-target-min 40`
-- `--parallel-target-max 80`
-- `--parallel-max-prune-rounds 8`
-- `--parallel-finetune-steps 20`
-- `--parallel-layerwise-finetune-steps 40`
-- `--parallel-affine-finetune-steps 0`
-
-这部分直接对应 notebook 第 12 节的快速对照实验。
-
-## 5. 结果怎么看
-
-### 5.1 顶层总表
-
-[`symkanbenchmark_runs.csv`](../benchmark_runs/symkanbenchmark_runs.csv) 里最重要的列是：
+建议重点关注 `symkanbenchmark_runs.csv` 这些列：
 
 - `base_acc`
 - `enhanced_acc`
@@ -178,138 +155,114 @@ python symkanbenchmark.py --tasks full,parallel-bench
 - `validation_mean_r2`
 - `symbolic_total_seconds`
 
-这张表用于横向比较多个 seed 或多组参数。
+论文用途建议：不要用单次结果下结论，至少跑 3 个 seed，再统计：
 
-### 5.2 每个 run 目录
-
-- `kan_stage_logs.csv`：看阶段训练是否频繁回滚。
-- `symbolize_trace.csv`：看剪枝轮是否过猛。
-- `formula_validation.csv`：看 R² 和数值稳定性。
-- `benchmark_symbolic_parallel_quick.csv`：看并行加速是否真的有收益。
-
-## 6. 一个建议
-
-如果你想做论文表格，不要直接拿单次运行结果写结论。至少跑 3 个 seed，然后再看：
-
-1. `symkanbenchmark_runs.csv` 的均值和方差。
-2. `benchmark_multi_round_summary_cn.csv` 的速度均值和标准差。
+1. `symkanbenchmark_runs.csv` 的均值与方差。
+2. `benchmark_multi_round_summary_cn.csv` 的速度均值与标准差。
 3. `benchmark_symbolic_parallel_quick.csv` 的 `vs_off_speedup_x`。
-
-否则你最后只是拿一次碰巧不错的结果替自己背书，这种结论没有技术说服力。
 
 ---
 
-## 7. Adaptive 与 Baseline A/B 对比实验
+## 6. Adaptive A/B 实验（baseline / adaptive / adaptive_auto）
 
-`stagewise_train` 新增了一组可选优化参数。这节给出一套可复现的 A/B 实验配置：在固定所有其他参数条件下，仅切换 adaptive 开关，观察对 `final_acc`、`final_n_edge`、`validation_mean_r2` 以及训练阶段日志的影响。
+三组定义：
 
-### 7.1 新增参数说明
+1. `baseline`：不启用 adaptive。
+2. `adaptive`：启用验证反馈 + 自适应阈值 + 自适应 lamb/ft。
+3. `adaptive_auto`：在 adaptive 上增加阶段早停与 symbolize 自适应剪枝节奏。
 
-| 参数 | 默认值 | 含义 |
-|---|---|---|
-| `--use-validation` | 关闭 | 将训练集切出一部分作验证集，用于剪枝接受判断而非 test 集 |
-| `--validation-ratio` | `0.15` | 验证集比例；`--use-validation` 开启时生效 |
-| `--validation-seed` | 跟随 `--global-seed` | 验证集切分随机种子 |
-| `--adaptive-threshold` | 关闭 | 根据最近剪枝成败动态调整阈值，取代固定步长递增 |
-| `--threshold-base-step` | `0.005` | 自适应阈值的基础调整步长 |
-| `--threshold-min` | `0.001` | 阈值下界 |
-| `--threshold-max` | `0.1` | 阈值上界 |
-| `--success-boost` | `0.5` | 连续成功时的阈值加速系数 |
-| `--failure-penalty` | `0.3` | 连续失败时的阈值惩罚系数 |
-| `--stage-min-gain-threshold` | `3` | 最近三次剪枝平均移除边数低于该值时停止当阶段剪枝 |
-| `--stage-max-prune-attempts` | `20` | 单阶段最多剪枝尝试次数 |
-| `--adaptive-lamb` | 关闭 | 按当前稀疏进度动态调整 `lamb` |
-| `--min-lamb-ratio` | `0.3` | lamb 下界倍数 |
-| `--max-lamb-ratio` | `1.5` | lamb 上界倍数 |
-| `--adaptive-ft` | 关闭 | 按当前稀疏进度缩放剪枝后恢复步数，模型越稀疏恢复步数越少 |
-| `--min-ft-ratio` | `0.3` | 恢复步数下界比例 |
+### 6.1 命令模板（减少重复）
 
-所有新参数默认关闭，旧脚本调用一字不改仍等价于 baseline 行为。
-
-### 7.2 Baseline 组命令
+公共参数：
 
 ```bash
 python symkanbenchmark.py \
   --tasks full \
   --stagewise-seeds 42,52,62 \
   --global-seed 123 \
-  --output-dir benchmark_ab/baseline \
+  --output-dir <OUT_DIR> \
+  <EXTRA_FLAGS> \
   --quiet
 ```
 
-### 7.3 Adaptive 组命令（全功能开启）
+实例：
 
 ```bash
-python symkanbenchmark.py \
-  --tasks full \
-  --stagewise-seeds 42,52,62 \
-  --global-seed 123 \
-  --output-dir benchmark_ab/adaptive \
-  --use-validation \
-  --validation-ratio 0.15 \
-  --adaptive-threshold \
-  --adaptive-lamb \
-  --adaptive-ft \
-  --quiet
+# baseline
+python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 --global-seed 123 --output-dir benchmark_ab/baseline --quiet
+
+# adaptive
+python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 --global-seed 123 --output-dir benchmark_ab/adaptive --use-validation --validation-ratio 0.15 --adaptive-threshold --adaptive-lamb --adaptive-ft --quiet
+
+# adaptive_auto
+python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 --global-seed 123 --output-dir benchmark_ab/adaptive_auto --use-validation --validation-ratio 0.15 --adaptive-threshold --adaptive-lamb --adaptive-ft --stage-early-stop --stage-early-stop-patience 2 --stage-early-stop-min-acc-gain 0.002 --stage-early-stop-edge-buffer 5 --symbolic-prune-threshold-start 0.010 --symbolic-prune-threshold-end 0.030 --symbolic-prune-max-drop-ratio 0.25 --symbolic-prune-threshold-backoff 0.65 --symbolic-prune-adaptive-threshold --symbolic-prune-adaptive-acc-drop-tol 0.025 --symbolic-prune-adaptive-min-edges-gain 2 --symbolic-prune-adaptive-low-gain-patience 6 --quiet
 ```
 
-其余所有参数（`--stage-lamb-schedule`、`--steps-per-stage`、`--stage-target-edges` 等）均保持脚本默认值，确保两组唯一变量只有 adaptive 开关。
+### 6.2 新增参数分组
 
-### 7.4 分步对照（逐项开启）
+stagewise 相关：
 
-如果想知道每个开关单独贡献了多少，可以按以下顺序依次新增参数，每次一个前缀目录：
+- `--stage-early-stop`：开启 stagewise 早停。
+- `--stage-early-stop-patience`：早停耐心轮数（连续多少轮无改进后停止）。
+- `--stage-early-stop-min-acc-gain`：判定“有效改进”的最小精度提升阈值。
+- `--stage-early-stop-edge-buffer`：边数缓冲区（避免过早因边数抖动触发早停）。
+
+symbolize 相关：
+
+- `--symbolic-prune-threshold-start`：初始剪枝阈值。
+- `--symbolic-prune-threshold-end`：目标/上限剪枝阈值。
+- `--symbolic-prune-max-drop-ratio`：单轮允许的最大性能下降比例。
+- `--symbolic-prune-threshold-backoff`：触发回退时的阈值收缩系数。
+- `--symbolic-prune-adaptive-threshold`：开启自适应阈值调节。
+- `--symbolic-prune-adaptive-step`：每轮阈值调节步长。
+- `--symbolic-prune-adaptive-acc-drop-tol`：可容忍的精度下降阈值。
+- `--symbolic-prune-adaptive-min-edges-gain`：每轮至少要减少的边数下限。
+- `--symbolic-prune-adaptive-low-gain-patience`：连续低收益轮数容忍度，超过后调整策略。
+
+说明：当前默认启用 `symbolic-prune-adaptive-threshold`。禁用时显式传 `--no-symbolic-prune-adaptive-threshold`。
+
+### 6.3 结果自动汇总
+
+推荐使用 [benchmark_ab_compare.py](../benchmark_ab_compare.py)：
 
 ```bash
-# 只开验证集引导
-python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 \
-  --global-seed 123 --output-dir benchmark_ab/val_only \
-  --use-validation --validation-ratio 0.15 --quiet
-
-# 验证集 + 自适应阈值
-python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 \
-  --global-seed 123 --output-dir benchmark_ab/val_thresh \
-  --use-validation --validation-ratio 0.15 \
-  --adaptive-threshold --quiet
-
-# 验证集 + 自适应阈值 + 自适应 lamb
-python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 \
-  --global-seed 123 --output-dir benchmark_ab/val_thresh_lamb \
-  --use-validation --validation-ratio 0.15 \
-  --adaptive-threshold --adaptive-lamb --quiet
+python benchmark_ab_compare.py --root benchmark_ab --baseline baseline --variants adaptive,adaptive_auto --output benchmark_ab/comparison
 ```
 
-### 7.5 对比结果的做法
+输出：
 
-运行结束后，用以下 Python 片段快速提取核心对比指标：
+- [benchmark_ab/comparison/variant_summary.csv](../benchmark_ab/comparison/variant_summary.csv)
+- [benchmark_ab/comparison/pairwise_delta_summary.csv](../benchmark_ab/comparison/pairwise_delta_summary.csv)
+- [benchmark_ab/comparison/seedwise_delta.csv](../benchmark_ab/comparison/seedwise_delta.csv)
+- [benchmark_ab/comparison/trace_seedwise.csv](../benchmark_ab/comparison/trace_seedwise.csv)
+- [benchmark_ab/comparison/trace_summary.csv](../benchmark_ab/comparison/trace_summary.csv)
 
-```python
-import pandas as pd
+### 6.4 当前结论（seed: 42/52/62）
 
-baseline = pd.read_csv("benchmark_ab/baseline/symkanbenchmark_runs.csv")
-adaptive  = pd.read_csv("benchmark_ab/adaptive/symkanbenchmark_runs.csv")
+基于 [benchmark_ab/comparison/pairwise_delta_summary.csv](../benchmark_ab/comparison/pairwise_delta_summary.csv)：
 
-cols = ["stage_seed", "enhanced_acc", "final_acc", "final_n_edge",
-        "macro_auc", "validation_mean_r2", "symbolic_total_seconds"]
+1. `adaptive` 与 `adaptive_auto` 相对 baseline 在 `final_acc` 均为 `1胜2负`，中位数差值为负。
+2. `macro_auc` 同样为 `1胜2负`，中位数差值为负。
+3. `validation_mean_r2` 两组均为 `2胜1负`，中位数差值为正。
 
-comp = (
-    baseline[cols].set_index("stage_seed")
-    .join(adaptive[cols].set_index("stage_seed"), lsuffix="_base", rsuffix="_adapt")
-)
+基于 [benchmark_ab/comparison/trace_summary.csv](../benchmark_ab/comparison/trace_summary.csv)：
 
-# 核心差值
-for metric in ["final_acc", "macro_auc", "validation_mean_r2"]:
-    comp[f"Δ{metric}"] = comp[f"{metric}_adapt"] - comp[f"{metric}_base"]
+1. `adaptive`：`rounds_mean = 1.0`，剪枝过快。
+2. `adaptive_auto`：`rounds_mean = 4.33`，`effective_rounds_mean = 3.0`，剪枝节奏改善。
+3. `baseline`：`rounds_mean = 16.67`，最慢但有效剪枝轮最多。
 
-print(comp[[c for c in comp.columns if c.startswith("Δ")]].to_string())
-print("\n--- 均值 ---")
-print(comp[[c for c in comp.columns if c.startswith("Δ")]].mean())
-```
+结论：
 
-### 7.6 解读要点
+1. baseline 仍是“上限高但波动大”。
+2. adaptive 系列主要提升流程稳定性，不保证每个 seed 精度更高。
+3. adaptive_auto 修复“单轮过剪”，但暂未形成稳定精度优势。
 
-- **`Δfinal_acc` > 0**：adaptive 提升了进入符号化之前的模型精度；这通常源于剪枝决策更稳、触发回滚更少。
-- **`Δvalidation_mean_r2` > 0**：符号化后的表达式数值拟合质量更好，说明传递给 symbolize_pipeline 的模型本身精度更高。
-- **`final_n_edge` 变化**：adaptive 模式不保证边数更少，它优化的是稳定性而非极端稀疏度。如果 `final_n_edge` 大幅升高，说明 `prune_acc_drop_tol` 偏严，可以适当放宽。
-- **`symbolic_total_seconds` 升高**：adaptive 在单阶段内允许多次剪枝尝试（`--stage-max-prune-attempts`），带来更多计算；如果时间超出预算，可降低 `--stage-max-prune-attempts` 或仅开 `--use-validation` 而不开 `--adaptive-threshold`。
+## 7. 论文写作建议
 
-如果三个 seed 的 `Δfinal_acc` 符号不一致，说明改进效果不稳定，不应在论文中下结论。
+避免只报告均值，至少同时给出：
+
+1. 均值与标准差。
+2. 中位数差值。
+3. 相对 baseline 的胜负计数（win/lose/tie）。
+
+如果 `final_acc` 与 `macro_auc` 仍是 `1胜2负`，建议表述为“稳定性改善，但精度优势尚不稳定”，不要写“显著优于 baseline”。

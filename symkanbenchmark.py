@@ -483,6 +483,15 @@ def run_parallel_benchmark(context: Dict[str, Any], args: argparse.Namespace, ou
                 prune_attr_sample_adaptive=args.parallel_prune_attr_sample_adaptive,
                 prune_attr_sample_min=args.parallel_prune_attr_sample_min,
                 prune_attr_sample_max=args.parallel_prune_attr_sample_max,
+                prune_threshold_start=args.symbolic_prune_threshold_start,
+                prune_threshold_end=args.symbolic_prune_threshold_end,
+                prune_max_drop_ratio_per_round=args.symbolic_prune_max_drop_ratio,
+                prune_threshold_backoff=args.symbolic_prune_threshold_backoff,
+                prune_adaptive_threshold=args.symbolic_prune_adaptive_threshold,
+                prune_adaptive_step=args.symbolic_prune_adaptive_step,
+                prune_adaptive_acc_drop_tol=args.symbolic_prune_adaptive_acc_drop_tol,
+                prune_adaptive_min_edges_gain=args.symbolic_prune_adaptive_min_edges_gain,
+                prune_adaptive_low_gain_patience=args.symbolic_prune_adaptive_low_gain_patience,
                 heavy_ft_early_stop_patience=args.parallel_heavy_ft_patience,
                 heavy_ft_early_stop_min_delta=args.parallel_heavy_ft_min_delta,
                 collect_timing=True,
@@ -605,6 +614,10 @@ def run_single_experiment(
             max_lamb_ratio=args.max_lamb_ratio,
             adaptive_ft=args.adaptive_ft,
             min_ft_ratio=args.min_ft_ratio,
+            stage_early_stop=args.stage_early_stop,
+            stage_early_stop_patience=args.stage_early_stop_patience,
+            stage_early_stop_min_acc_gain=args.stage_early_stop_min_acc_gain,
+            stage_early_stop_edge_buffer=args.stage_early_stop_edge_buffer,
             verbose=(args.verbose and not silent),
         )
     enhanced_acc = float(model_acc_ds(enhanced_model, dataset_enhanced))
@@ -634,6 +647,15 @@ def run_single_experiment(
             prune_attr_sample_adaptive=args.prune_attr_sample_adaptive,
             prune_attr_sample_min=args.prune_attr_sample_min,
             prune_attr_sample_max=args.prune_attr_sample_max,
+            prune_threshold_start=args.symbolic_prune_threshold_start,
+            prune_threshold_end=args.symbolic_prune_threshold_end,
+            prune_max_drop_ratio_per_round=args.symbolic_prune_max_drop_ratio,
+            prune_threshold_backoff=args.symbolic_prune_threshold_backoff,
+            prune_adaptive_threshold=args.symbolic_prune_adaptive_threshold,
+            prune_adaptive_step=args.symbolic_prune_adaptive_step,
+            prune_adaptive_acc_drop_tol=args.symbolic_prune_adaptive_acc_drop_tol,
+            prune_adaptive_min_edges_gain=args.symbolic_prune_adaptive_min_edges_gain,
+            prune_adaptive_low_gain_patience=args.symbolic_prune_adaptive_low_gain_patience,
             heavy_ft_early_stop_patience=args.heavy_ft_early_stop_patience,
             heavy_ft_early_stop_min_delta=args.heavy_ft_early_stop_min_delta,
             collect_timing=True,
@@ -841,6 +863,29 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--adaptive-ft", action=argparse.BooleanOptionalAction, default=False,
                         help="按当前稀疏进度缩放剪枝后恢复步数")
     parser.add_argument("--min-ft-ratio", type=float, default=0.3)
+
+    parser.add_argument("--stage-early-stop", action=argparse.BooleanOptionalAction, default=False,
+                        help="达到目标边数附近后，阶段收益不足时提前结束后续 stage")
+    parser.add_argument("--stage-early-stop-patience", type=int, default=2)
+    parser.add_argument("--stage-early-stop-min-acc-gain", type=float, default=0.002)
+    parser.add_argument("--stage-early-stop-edge-buffer", type=int, default=0)
+
+    parser.add_argument("--symbolic-prune-threshold-start", type=float, default=0.02)
+    parser.add_argument("--symbolic-prune-threshold-end", type=float, default=0.03)
+    parser.add_argument("--symbolic-prune-max-drop-ratio", type=float, default=1.0,
+                        help="单轮剪枝最大允许边数降幅比例，建议 0.15~0.35")
+    parser.add_argument("--symbolic-prune-threshold-backoff", type=float, default=0.7,
+                        help="单轮过剪时的阈值回退倍数")
+    parser.add_argument("--symbolic-prune-adaptive-threshold", action=argparse.BooleanOptionalAction, default=True,
+                        help="在 symbolize 阶段启用自适应阈值控制")
+    parser.add_argument("--symbolic-prune-adaptive-step", type=float, default=0.0,
+                        help="自适应阈值基础步长，<=0 自动估计")
+    parser.add_argument("--symbolic-prune-adaptive-acc-drop-tol", type=float, default=0.02,
+                        help="自适应判定中的单轮允许精度回落")
+    parser.add_argument("--symbolic-prune-adaptive-min-edges-gain", type=int, default=1,
+                        help="单轮最小有效剪枝收益")
+    parser.add_argument("--symbolic-prune-adaptive-low-gain-patience", type=int, default=4,
+                        help="连续低收益轮次达到该值时停止 symbolize 剪枝")
     return parser
 
 

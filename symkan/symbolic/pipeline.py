@@ -157,6 +157,15 @@ def symbolize_pipeline(
     prune_attr_sample_adaptive=False,
     prune_attr_sample_min=512,
     prune_attr_sample_max=2048,
+    prune_threshold_start=0.02,
+    prune_threshold_end=0.03,
+    prune_max_drop_ratio_per_round=1.0,
+    prune_threshold_backoff=0.7,
+    prune_adaptive_threshold=False,
+    prune_adaptive_step=0.0,
+    prune_adaptive_acc_drop_tol=0.02,
+    prune_adaptive_min_edges_gain=1,
+    prune_adaptive_low_gain_patience=4,
     heavy_ft_early_stop_patience=0,
     heavy_ft_early_stop_min_delta=1e-4,
     collect_timing=True,
@@ -192,6 +201,15 @@ def symbolize_pipeline(
     @param prune_attr_sample_adaptive 是否启用归因采样分级。
     @param prune_attr_sample_min 归因最小采样数。
     @param prune_attr_sample_max 归因最大采样数。
+    @param prune_threshold_start 渐进剪枝阈值起点。
+    @param prune_threshold_end 渐进剪枝阈值终点。
+    @param prune_max_drop_ratio_per_round 单轮允许的最大边数降幅比例（超出则回滚并降阈值重试）。
+    @param prune_threshold_backoff 超降幅时阈值回退倍数。
+    @param prune_adaptive_threshold 是否启用自适应阈值控制（按每轮收益与精度回落动态调阈值）。
+    @param prune_adaptive_step 自适应阈值基础步长；<=0 时按区间自动估计。
+    @param prune_adaptive_acc_drop_tol 自适应判定中的单轮允许精度回落。
+    @param prune_adaptive_min_edges_gain 自适应判定中的单轮最小有效剪枝收益。
+    @param prune_adaptive_low_gain_patience 连续低收益轮数达到该值时提前停止剪枝。
     @param heavy_ft_early_stop_patience 强化微调早停耐心轮数。
     @param heavy_ft_early_stop_min_delta 早停最小改进阈值。
     @param collect_timing 是否收集并返回详细耗时统计。
@@ -219,16 +237,28 @@ def symbolize_pipeline(
     if np.isfinite(n_edge_input) and n_edge_input > target_edges * 1.5:
         effective_target = max(target_edges, int(n_edge_input * 0.5))
 
-    thresholds = np.linspace(0.02, 0.03, max_prune_rounds)
+    thresholds = np.linspace(float(prune_threshold_start), float(prune_threshold_end), max_prune_rounds)
     trace = []
     prune_eval_interval = max(1, int(prune_eval_interval))
     last_acc = float(baseline_acc)
+    adaptive_mode = bool(prune_adaptive_threshold)
+    th_low = min(float(prune_threshold_start), float(prune_threshold_end))
+    th_high = max(float(prune_threshold_start), float(prune_threshold_end))
+    adaptive_step = float(prune_adaptive_step)
+    if adaptive_step <= 0:
+        adaptive_step = max((th_high - th_low) / max(1, max_prune_rounds - 1), 1e-4)
+    current_threshold = th_low
+    success_count = 0
+    failure_count = 0
+    low_gain_rounds = 0
 
-    for rd, th in enumerate(thresholds):
+    for rd in range(max_prune_rounds):
+        th = float(current_threshold if adaptive_mode else thresholds[rd])
         t_round = time.perf_counter()
         n_before = get_n_edge(work)
         if np.isfinite(n_before) and n_before <= effective_target:
             break
+        acc_ref = float(last_acc)
 
         snap_prune_state = {k: v.detach().cpu().clone() for k, v in work.state_dict().items()}
         try:
@@ -247,6 +277,25 @@ def symbolize_pipeline(
             break
 
         n_after = get_n_edge(work)
+        drop_ratio = 0.0
+        if np.isfinite(n_before) and np.isfinite(n_after) and float(n_before) > 0:
+            drop_ratio = max(0.0, (float(n_before) - float(n_after)) / float(n_before))
+
+        if drop_ratio > float(prune_max_drop_ratio_per_round):
+            # 单轮剪枝过猛，回滚并用更低阈值重试一次，避免直接塌缩到低边数区。
+            work.load_state_dict(snap_prune_state)
+            safer_th = max(1e-4, float(th) * float(prune_threshold_backoff))
+            try:
+                safe_attribute(work, dataset, n_sample=int(attr_n_sample))
+                work.prune_edge(threshold=safer_th)
+                n_after = get_n_edge(work)
+                if np.isfinite(n_before) and np.isfinite(n_after) and float(n_before) > 0:
+                    drop_ratio = max(0.0, (float(n_before) - float(n_after)) / float(n_before))
+                th = safer_th
+            except Exception:
+                work.load_state_dict(snap_prune_state)
+                break
+
         if n_after == 0:
             work.load_state_dict(snap_prune_state)
             break
@@ -269,9 +318,11 @@ def symbolize_pipeline(
                 timing_fit.append({"stage": "prune_round", "round": int(rd), "seconds": float(time.perf_counter() - t_fit)})
 
         should_eval = (rd % prune_eval_interval == 0)
+        if adaptive_mode:
+            should_eval = True
         if np.isfinite(n_after) and np.isfinite(effective_target) and n_after <= effective_target * 1.3:
             should_eval = True
-        if rd == len(thresholds) - 1:
+        if rd == max_prune_rounds - 1:
             should_eval = True
 
         if should_eval:
@@ -280,7 +331,23 @@ def symbolize_pipeline(
         else:
             acc_now = float(last_acc)
 
-        trace.append({"round": rd, "threshold": float(th), "edges_before": n_before, "edges_after": n_after, "acc": float(acc_now)})
+        edges_removed = 0
+        if np.isfinite(n_before) and np.isfinite(n_after):
+            edges_removed = max(0, int(round(float(n_before) - float(n_after))))
+        acc_drop = float(acc_ref - float(acc_now))
+
+        trace.append(
+            {
+                "round": rd,
+                "threshold": float(th),
+                "edges_before": n_before,
+                "edges_after": n_after,
+                "drop_ratio": float(drop_ratio),
+                "edges_removed": int(edges_removed),
+                "acc_drop": float(acc_drop),
+                "acc": float(acc_now),
+            }
+        )
         if collect_timing:
             timing_prune_rounds.append(
                 {
@@ -288,11 +355,50 @@ def symbolize_pipeline(
                     "threshold": float(th),
                     "edges_before": float(n_before),
                     "edges_after": float(n_after),
+                    "drop_ratio": float(drop_ratio),
+                    "edges_removed": int(edges_removed),
+                    "acc_drop": float(acc_drop),
                     "attr_n_sample": int(attr_n_sample) if prune_attr_sample_adaptive else 2048,
                     "eval_skipped": bool(not should_eval),
                     "seconds": float(time.perf_counter() - t_round),
                 }
             )
+
+        if adaptive_mode:
+            no_gain = edges_removed <= 0
+            too_much_drop = acc_drop > float(prune_adaptive_acc_drop_tol)
+            success = (not no_gain) and (not too_much_drop)
+
+            if no_gain:
+                # 没剪掉任何边时，说明阈值过低，应上调而不是下调。
+                success_count = 0
+                failure_count += 1
+                low_gain_rounds += 1
+                probe = 1.2 + min(2.5, failure_count * 0.5)
+                current_threshold = min(th_high, float(th) + adaptive_step * probe)
+            elif success:
+                success_count += 1
+                failure_count = 0
+                if edges_removed <= int(prune_adaptive_min_edges_gain):
+                    low_gain_rounds += 1
+                else:
+                    low_gain_rounds = 0
+                boost = 1.0 + min(3.0, success_count * 0.4)
+                if edges_removed <= int(prune_adaptive_min_edges_gain):
+                    boost *= 1.5
+                current_threshold = min(th_high, float(th) + adaptive_step * boost)
+            else:
+                # 有剪枝但精度掉太多，说明阈值偏高，回退。
+                failure_count += 1
+                success_count = 0
+                low_gain_rounds += 1
+                penalty = 0.3 * (1.0 + min(2.0, failure_count * 0.3))
+                current_threshold = max(th_low, float(th) - adaptive_step * penalty)
+
+            # 只有在阈值已接近上界时仍持续低收益，才判定为收敛并停止。
+            near_ceiling = current_threshold >= (th_high - max(adaptive_step, 1e-4))
+            if near_ceiling and low_gain_rounds >= max(1, int(prune_adaptive_low_gain_patience)):
+                break
 
         if acc_now < baseline_acc * 0.6:
             work.load_state_dict(snap_prune_state)

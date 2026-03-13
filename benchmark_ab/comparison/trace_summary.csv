@@ -1,0 +1,4 @@
+﻿variant,rounds_mean,effective_rounds_mean,total_edges_removed_mean,mean_drop_ratio_mean,max_drop_ratio_mean
+adaptive,1.0,1.0,15.666666666666666,,
+adaptive_auto,4.333333333333333,3.0,9.333333333333334,0.023742777038495564,0.058968661223593836
+baseline,16.666666666666668,9.333333333333334,30.666666666666668,,
