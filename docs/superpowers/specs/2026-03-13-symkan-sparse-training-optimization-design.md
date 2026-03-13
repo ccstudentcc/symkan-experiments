@@ -240,6 +240,83 @@ def _create_validation_split(dataset, ratio=0.15, min_val_samples=10):
 - If validation accuracy cannot be computed (no validation data), fall back to training accuracy for prune decisions
 - All exceptions during adaptive pruning should be caught and logged, with fallback to original pruning logic
 
+### 5.1.3 Extending Existing Functions
+
+The optimization requires extending two existing functions to support validation data:
+
+#### `model_acc_ds` Extension
+The current `model_acc_ds` function in `symkan/core/infer.py` needs to support "val" split:
+
+```python
+def model_acc_ds(model, dataset, split: str = "test", device: Optional[str] = None):
+    """Compute model accuracy for train/test/val splits."""
+    try:
+        return model_acc_ds_fast(model, dataset, split=split, device=device)
+    except (KeyError, ValueError) as e:
+        # Handle missing validation split by raising clear exception
+        if split == "val":
+            raise ValueError(f"Validation split ('val_input', 'val_label') not found in dataset. "
+                           f"Ensure validation_ratio > 0 in build_dataset or disable validation.") from e
+        raise
+
+def model_acc_ds_fast(model, dataset, split: str = "test", device: Optional[str] = None):
+    """Fast version with split validation."""
+    if split not in dataset or dataset[split] is None:
+        raise ValueError(f"Split '{split}' not available in dataset")
+
+    # Existing implementation logic...
+    # Use dataset[f"{split}_input"] and dataset[f"{split}_label"]
+```
+
+#### `build_dataset` Extension
+The existing `build_dataset` function can be extended with optional validation split:
+
+```python
+def build_dataset(Xtr, Ytr, Xte, Yte, device=None, validation_ratio=0.0, seed=None):
+    """Build dataset with optional validation split (backward compatible)."""
+    # Existing logic for train/test split...
+
+    # Add validation split if requested
+    if validation_ratio > 0:
+        # Use the logic from build_dataset_with_validation
+        dataset["val_input"] = ...
+        dataset["val_label"] = ...
+    else:
+        dataset["val_input"] = None
+        dataset["val_label"] = None
+
+    return dataset
+```
+
+**Backward Compatibility**: The extended functions maintain compatibility:
+- `model_acc_ds(model, dataset)` defaults to "test" split
+- `build_dataset(Xtr, Ytr, Xte, Yte)` defaults to `validation_ratio=0.0` (no validation)
+
+#### Implementation Dependencies
+
+The following existing functions and imports are required:
+
+1. **Function Availability**:
+   - `clone_model`: Import from `symkan.io.clone_model` (already used in `stagewise_train`)
+   - `get_n_edge`: Import from `symkan.core.infer.get_n_edge`
+   - `safe_fit`: Import from `symkan.core.train.safe_fit`
+   - `safe_attribute`: Import from `symkan.pruning.attribution.safe_attribute`
+
+2. **Parameter Verification**:
+   - `safe_fit` must support `update_grid=False` parameter (verified in current implementation)
+   - `model_acc_ds` must support `split` parameter (to be extended as described)
+   - `build_dataset` must support `validation_ratio` parameter (to be extended as described)
+
+3. **Error Handling**:
+   - All new functions should catch and log exceptions appropriately
+   - Fallback to original logic when validation data is unavailable
+   - Warn users when validation is disabled due to insufficient data
+
+4. **Testing Requirements**:
+   - Verify extended functions maintain backward compatibility
+   - Test validation split with various dataset sizes
+   - Ensure `model_acc_ds` with "val" split doesn't break existing code
+
 ### 5.2 Adaptive Threshold Controller
 
 #### 5.2.1 Controller State
@@ -369,11 +446,29 @@ def attempt_prune_with_validation(
     to use only training data.
     """
 
+    # Helper function to get validation accuracy with fallback and warning
+    def _get_val_acc(split: str = "val"):
+        """Get validation accuracy, fallback to training accuracy if validation not available."""
+        try:
+            return model_acc_ds(model, dataset, split=split)
+        except (KeyError, ValueError) as e:
+            # Validation split not available, fallback to training accuracy
+            # This allows backward compatibility when validation is disabled
+            import warnings
+            warnings.warn(
+                f"Validation split '{split}' not available in dataset. "
+                f"Falling back to training accuracy for prune decisions. "
+                f"Original error: {e}",
+                category=UserWarning,
+                stacklevel=2
+            )
+            return model_acc_ds(model, dataset, split="train")
+
     # 1. Save snapshot for rollback
     snapshot = clone_model(model)
     snapshot_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
     acc_before_train = model_acc_ds(model, dataset, split="train")
-    acc_before_val = model_acc_ds(model, dataset, split="val")
+    acc_before_val = _get_val_acc("val")
 
     # 2. Perform attribution and pruning (using only training data)
     # Note: safe_attribute internally uses dataset["train_input"]
@@ -395,8 +490,8 @@ def attempt_prune_with_validation(
             update_grid=False
         )
 
-    # 4. Check validation accuracy
-    acc_after_val = model_acc_ds(model, dataset, split="val")
+    # 4. Check validation accuracy (with fallback)
+    acc_after_val = _get_val_acc("val")
     val_drop = acc_before_val - acc_after_val
 
     # 5. Decision logic
@@ -580,6 +675,7 @@ def stagewise_train(
 | Training stages to target | 8-12 stages | 20-40% reduction | Count stages to reach `target_edges` |
 | Final symbolic accuracy | Variable | 5-15% improvement | Compare `final_acc` after symbolize_pipeline |
 | Total training time | Baseline | 10-25% reduction | Wall-clock time measurement |
+| Validation overhead | N/A | < 5% increase | Measure extra time for validation split & accuracy computation |
 
 ### 7.2 Qualitative Improvements
 
