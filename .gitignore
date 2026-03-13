@@ -2,3 +2,10 @@ X_test.npy
 X_train.npy
 Y_test_cat.npy
 Y_train_cat.npy
+
+__pycache__/
+*.py[cod]
+
+MNIST/raw/
+
+_safe_copy_temp*
