@@ -1,7 +1,6 @@
-"""@file
-@brief symkan I/O 模块公共接口导出。
+"""symkan I/O 模块公共接口导出。
 
-包含模型克隆、结果保存与实验 bundle 读写能力。
+该模块集中导出模型克隆、结果保存与实验 bundle 读写能力。
 """
 
 from .checkpoint import clone_model, clone_model_in_memory, clone_model_via_ckpt

@@ -1,3 +1,8 @@
+"""symkan 符号函数库与表达式处理工具。
+
+该模块维护符号搜索函数库、表达式复杂度估计以及格式化辅助函数。
+"""
+
 import re as _re
 from math import floor, log10
 
@@ -19,10 +24,10 @@ _CUSTOM_REGISTERED = False
 
 
 def register_custom_functions():
-    """@brief 注册 symkan 额外符号函数到 pykan SYMBOLIC_LIB。
+    """注册 symkan 额外符号函数到 pykan 符号库。
 
-    当前默认注册 `sigmoid` 与 `softplus`，用于扩展符号搜索空间。
-    幂等：重复调用不会重复注册。
+    当前默认注册 ``sigmoid`` 与 ``softplus``，用于扩展符号搜索空间。
+    该函数是幂等的，重复调用不会重复注册。
     """
     global _CUSTOM_REGISTERED
     if _CUSTOM_REGISTERED:
@@ -58,10 +63,13 @@ def _is_nontrivial_expr(expr):
 
 
 def count_expression_complexity(expr):
-    """@brief 估计表达式复杂度（节点计数）。
+    """估计表达式复杂度。
 
-    @param expr 可被 sympy 解析的表达式。
-    @return int 表达式复杂度分数，越大表示结构越复杂。
+    Args:
+        expr: 可被 sympy 解析的表达式。
+
+    Returns:
+        int: 表达式复杂度分数，越大表示结构越复杂。
     """
     try:
         sx = sp.sympify(expr)
@@ -89,10 +97,13 @@ def _to_formula_list(formulas):
 
 
 def collect_valid_formulas(formulas):
-    """@brief 提取有效表达式并附带复杂度。
+    """提取有效表达式并附带复杂度信息。
 
-    @param formulas `symbolic_formula()` 返回对象或其变体。
-    @return list 每项包含 `index/expr/complexity` 的有效表达式记录。
+    Args:
+        formulas: ``symbolic_formula()`` 返回对象或其变体。
+
+    Returns:
+        list[dict]: 每项包含 ``index``、``expr`` 和 ``complexity`` 的有效表达式记录。
     """
     raw = _to_formula_list(formulas)
     valid = []
@@ -104,10 +115,13 @@ def collect_valid_formulas(formulas):
 
 
 def collect_all_formulas(formulas):
-    """@brief 收集全部表达式（含零/常数表达式）。
+    """收集全部表达式，包括零表达式和常数表达式。
 
-    @param formulas `symbolic_formula()` 返回对象或其变体。
-    @return list 每项包含 `index/expr/complexity` 的表达式记录。
+    Args:
+        formulas: ``symbolic_formula()`` 返回对象或其变体。
+
+    Returns:
+        list[dict]: 每项包含 ``index``、``expr`` 和 ``complexity`` 的表达式记录。
     """
     raw = _to_formula_list(formulas)
     result = []
@@ -119,14 +133,17 @@ def collect_all_formulas(formulas):
 
 
 def get_layer_lib(layer_idx, depth, lib_hidden=None, lib_output=None, lib=None):
-    """@brief 按层选择函数库。
+    """按层选择符号函数库。
 
-    @param layer_idx 当前层索引。
-    @param depth 网络深度（层数）。
-    @param lib_hidden 隐藏层函数库。
-    @param lib_output 输出层函数库。
-    @param lib 统一函数库（若提供则覆盖分层库）。
-    @return list 当前层用于符号拟合的函数库。
+    Args:
+        layer_idx: 当前层索引。
+        depth: 网络深度。
+        lib_hidden: 隐藏层函数库。
+        lib_output: 输出层函数库。
+        lib: 统一函数库；若提供则覆盖分层库。
+
+    Returns:
+        list: 当前层用于符号拟合的函数库。
     """
     if lib is not None:
         return lib
@@ -136,11 +153,14 @@ def get_layer_lib(layer_idx, depth, lib_hidden=None, lib_output=None, lib=None):
 
 
 def format_expr(expr_str, n_digits: int = 2):
-    """@brief 将表达式中的浮点系数格式化为有限有效数字。
+    """将表达式中的浮点系数格式化为有限有效数字。
 
-    @param expr_str 原始表达式字符串。
-    @param n_digits 有效数字位数。
-    @return str 格式化后的表达式字符串。
+    Args:
+        expr_str: 原始表达式字符串。
+        n_digits: 有效数字位数。
+
+    Returns:
+        str: 格式化后的表达式字符串。
     """
     def _round_match(m):
         val = float(m.group())

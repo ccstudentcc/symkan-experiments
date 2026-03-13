@@ -27,13 +27,16 @@ def _resolve_parallel_workers(parallel_mode="auto", parallel_workers=None):
 def layerwise_symbolic(work, dataset, layer_idx, lib, weight_simple=0.0, verbose=True):
     """逐层符号候选搜索与 fix。
 
-    @param work KAN 模型（会被就地修改）。
-    @param dataset 数据集字典。
-    @param layer_idx 目标层索引。
-    @param lib 符号函数库。
-    @param weight_simple 简洁性偏好权重。
-    @param verbose 是否打印日志。
-    @return dict 搜索结果统计。
+    Args:
+        work: KAN 模型，会被就地修改。
+        dataset: 数据集字典。
+        layer_idx: 目标层索引。
+        lib: 符号函数库。
+        weight_simple: 简洁性偏好权重。
+        verbose: 是否打印日志。
+
+    Returns:
+        dict: 搜索结果统计。
     """
     work.eval()
     with torch.no_grad():
@@ -61,6 +64,7 @@ def layerwise_symbolic(work, dataset, layer_idx, lib, weight_simple=0.0, verbose
 
             active_count += 1
             try:
+                # suggest_symbolic 会暂时修改模型内部状态，因此这里必须严格串行执行。
                 name, _, r2, _ = work.suggest_symbolic(
                     l, i, j, lib=lib, verbose=False, weight_simple=weight_simple
                 )
@@ -103,6 +107,23 @@ def fast_symbolic(
     """逐层符号化主入口。
 
     遍历所有层，依次执行候选搜索与 fix，层间可选微调。
+
+    Args:
+        work: 待符号化模型。
+        dataset: 数据集字典。
+        lib: 统一函数库。
+        weight_simple: 简洁性偏好权重。
+        lib_hidden: 隐藏层函数库。
+        lib_output: 输出层函数库。
+        layerwise_finetune_steps: 每层符号化后的微调步数。
+        batch_size: 批大小。
+        parallel_mode: 并行模式配置。
+        parallel_workers: 期望 worker 数。
+        parallel_min_tasks: 启用并行的最小任务阈值。
+        verbose: 是否打印日志。
+
+    Returns:
+        dict: 包含逐层 fix 统计、R2 记录和耗时信息的结果。
     """
     from .library import LIB_HIDDEN, LIB_OUTPUT, get_layer_lib, register_custom_functions
     import time

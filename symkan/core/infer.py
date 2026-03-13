@@ -31,12 +31,15 @@ def _pick_device(model, device: Optional[str] = None):
 
 
 def model_logits(model, X, device: Optional[str] = None):
-    """@brief 计算模型 logits（NumPy 输入路径）。
+    """计算模型 logits（NumPy 输入路径）。
 
-    @param model KAN/symkan 模型对象。
-    @param X 输入特征数组。
-    @param device 可选设备；为空时自动推断模型设备。
-    @return numpy.ndarray logits 数组。
+    Args:
+        model: KAN/symkan 模型对象。
+        X: 输入特征数组。
+        device: 可选设备；为空时自动推断模型设备。
+
+    Returns:
+        numpy.ndarray: logits 数组。
     """
     model.eval()
     dev = _pick_device(model, device)
@@ -46,13 +49,19 @@ def model_logits(model, X, device: Optional[str] = None):
 
 
 def model_logits_ds(model, dataset, split: str = "test", device: Optional[str] = None):
-    """@brief 计算模型 logits（Tensor 快路径）。
+    """计算模型 logits（Tensor 快路径）。
 
-    @param model KAN/symkan 模型对象。
-    @param dataset 由 `build_dataset` 构建的数据字典。
-    @param split 数据划分，支持 `train`、`val` 或 `test`。
-    @param device 可选设备；为空时自动推断模型设备。
-    @return torch.Tensor logits 张量。
+    Args:
+        model: KAN/symkan 模型对象。
+        dataset: 由 ``build_dataset`` 构建的数据字典。
+        split: 数据划分，支持 ``train``、``val`` 或 ``test``。
+        device: 可选设备；为空时自动推断模型设备。
+
+    Returns:
+        torch.Tensor: logits 张量。
+
+    Raises:
+        ValueError: 当请求的 split 不存在或为空时抛出。
     """
     model.eval()
     dev = _pick_device(model, device)
@@ -70,26 +79,35 @@ def model_logits_ds(model, dataset, split: str = "test", device: Optional[str] =
 
 
 def model_acc(model, X, y_cls, device: Optional[str] = None):
-    """@brief 基于 NumPy 路径计算分类准确率。
+    """基于 NumPy 路径计算分类准确率。
 
-    @param model KAN/symkan 模型对象。
-    @param X 输入特征数组。
-    @param y_cls 类别索引标签。
-    @param device 可选设备；为空时自动推断模型设备。
-    @return float 分类准确率。
+    Args:
+        model: KAN/symkan 模型对象。
+        X: 输入特征数组。
+        y_cls: 类别索引标签。
+        device: 可选设备；为空时自动推断模型设备。
+
+    Returns:
+        float: 分类准确率。
     """
     pred = np.argmax(model_logits(model, X, device=device), axis=1)
     return accuracy_score(y_cls, pred)
 
 
 def model_acc_ds_fast(model, dataset, split: str = "test", device: Optional[str] = None):
-    """@brief 基于 Tensor 快路径计算分类准确率。
+    """基于 Tensor 快路径计算分类准确率。
 
-    @param model KAN/symkan 模型对象。
-    @param dataset 由 `build_dataset` 构建的数据字典。
-    @param split 数据划分，支持 `train`、`val` 或 `test`。
-    @param device 可选设备；为空时自动推断模型设备。
-    @return float 分类准确率。
+    Args:
+        model: KAN/symkan 模型对象。
+        dataset: 由 ``build_dataset`` 构建的数据字典。
+        split: 数据划分，支持 ``train``、``val`` 或 ``test``。
+        device: 可选设备；为空时自动推断模型设备。
+
+    Returns:
+        float: 分类准确率。
+
+    Raises:
+        ValueError: 当请求的 split 不存在或为空时抛出。
     """
     logits = model_logits_ds(model, dataset, split=split, device=device)
     label_key = f"{split}_label"
@@ -106,13 +124,19 @@ def model_acc_ds_fast(model, dataset, split: str = "test", device: Optional[str]
 
 
 def model_acc_ds(model, dataset, split: str = "test", device: Optional[str] = None):
-    """@brief 统一准确率接口（优先快路径，失败时自动回退）。
+    """统一准确率接口（优先快路径，失败时自动回退）。
 
-    @param model KAN/symkan 模型对象。
-    @param dataset 由 `build_dataset` 构建的数据字典。
-    @param split 数据划分，支持 `train`、`val` 或 `test`。
-    @param device 可选设备；为空时自动推断模型设备。
-    @return float 分类准确率。
+    Args:
+        model: KAN/symkan 模型对象。
+        dataset: 由 ``build_dataset`` 构建的数据字典。
+        split: 数据划分，支持 ``train``、``val`` 或 ``test``。
+        device: 可选设备；为空时自动推断模型设备。
+
+    Returns:
+        float: 分类准确率。
+
+    Raises:
+        ValueError: 当 ``split='val'`` 且验证集不可用时抛出。
     """
     try:
         return model_acc_ds_fast(model, dataset, split=split, device=device)
@@ -124,6 +148,7 @@ def model_acc_ds(model, dataset, split: str = "test", device: Optional[str] = No
             ) from exc
         raise
     except Exception:
+        # 极端情况下回退到 NumPy 路径，优先保证可用性而非最优性能。
         x = dataset[f"{split}_input"]
         y = dataset[f"{split}_label"]
         if torch.is_tensor(x):
@@ -139,10 +164,13 @@ def model_acc_ds(model, dataset, split: str = "test", device: Optional[str] = No
 
 
 def get_n_edge(model):
-    """@brief 获取模型当前边数。
+    """获取模型当前边数。
 
-    @param model KAN/symkan 模型对象。
-    @return int|float 当可读时返回整数边数，否则返回 `numpy.nan`。
+    Args:
+        model: KAN/symkan 模型对象。
+
+    Returns:
+        int | float: 当可读时返回整数边数，否则返回 ``numpy.nan``。
     """
     try:
         return int(model.n_edge)

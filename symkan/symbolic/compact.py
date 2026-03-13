@@ -50,7 +50,13 @@ def first_layer_active_inputs(work):
 def compact_inputs_for_symbolic(work, dataset):
     """尝试压缩模型输入维度。
 
-    @return dict|None 成功时返回 model/dataset/active_inputs/original_input_id。
+    Args:
+        work: 待压缩的模型。
+        dataset: 原始数据集字典。
+
+    Returns:
+        dict | None: 成功时返回包含 ``model``、``dataset``、``active_inputs``
+        和 ``original_input_id`` 的字典；若无需压缩则返回 ``None``。
     """
     if not hasattr(work, "prune_input"):
         return None
@@ -67,6 +73,7 @@ def compact_inputs_for_symbolic(work, dataset):
     if hasattr(compact_model, "auto_save"):
         compact_model.auto_save = False
 
+    # 压缩后模型只看见子集输入，因此需要重建连续 input_id；原始映射会在外层恢复。
     original_input_id = compact_model.input_id.detach().clone()
     compact_model.input_id = torch.arange(
         len(active_inputs), dtype=torch.long, device=original_input_id.device

@@ -1,3 +1,5 @@
+"""symkan 模型克隆与检查点复制工具。"""
+
 import copy
 import io
 from typing import Optional
@@ -11,16 +13,20 @@ from symkan.core.runtime import get_device, resolve_device
 
 
 def clone_model_in_memory(model, device: Optional[str] = None):
-    """@brief 使用内存路径深拷贝模型。
+    """使用内存路径深拷贝模型。
 
-    @param model 待克隆模型。
-    @param device 目标设备；为空时使用当前运行时设备。
-    @return 模型副本（迁移到目标设备）。
+    Args:
+        model: 待克隆模型。
+        device: 目标设备；为空时使用当前运行时设备。
+
+    Returns:
+        Any: 模型副本（迁移到目标设备）。
     """
     dev = resolve_device(device or get_device())
     try:
         model_load = copy.deepcopy(model)
     except Exception:
+        # deepcopy 失败时回退到 torch 序列化路径，兼容不可 deepcopy 的对象。
         buf = io.BytesIO()
         torch.save(model, buf)
         buf.seek(0)
@@ -32,12 +38,15 @@ def clone_model_in_memory(model, device: Optional[str] = None):
 
 
 def clone_model_via_ckpt(model, path: str = "_safe_copy_temp", device: Optional[str] = None):
-    """@brief 通过 ckpt 文件路径深拷贝 KAN 模型。
+    """通过 ckpt 文件路径深拷贝 KAN 模型。
 
-    @param model 待克隆模型。
-    @param path 临时 ckpt 前缀路径。
-    @param device 目标设备；为空时使用当前运行时设备。
-    @return 模型副本（迁移到目标设备）。
+    Args:
+        model: 待克隆模型。
+        path: 临时 ckpt 前缀路径。
+        device: 目标设备；为空时使用当前运行时设备。
+
+    Returns:
+        Any: 模型副本（迁移到目标设备）。
     """
     dev = resolve_device(device or get_device())
     model.saveckpt(path)
@@ -96,15 +105,18 @@ def clone_model(
     use_disk_clone: bool = False,
     ckpt_path: str = "_safe_copy_temp",
 ):
-    """@brief 统一模型克隆入口。
+    """统一模型克隆入口。
 
     默认优先内存克隆；当失败或显式指定时回退到磁盘 ckpt 克隆。
 
-    @param model 待克隆模型。
-    @param device 目标设备；为空时使用当前运行时设备。
-    @param use_disk_clone 是否强制使用磁盘克隆。
-    @param ckpt_path 磁盘克隆临时路径前缀。
-    @return 模型副本。
+    Args:
+        model: 待克隆模型。
+        device: 目标设备；为空时使用当前运行时设备。
+        use_disk_clone: 是否强制使用磁盘克隆。
+        ckpt_path: 磁盘克隆临时路径前缀。
+
+    Returns:
+        Any: 模型副本。
     """
     if use_disk_clone:
         return clone_model_via_ckpt(model, path=ckpt_path, device=device)

@@ -36,21 +36,24 @@ def safe_fit(
     singularity_avoiding: bool = True,
     log: int = 10,
 ):
-    """@brief 带自动降级与容错的训练封装。
+    """带自动降级与容错的训练封装。
 
-    @param model KAN/symkan 模型对象。
-    @param dataset 由 `build_dataset` 构建的数据字典。
-    @param opt 优化器名称，如 `Adam` 或 `LBFGS`。
-    @param steps 训练步数。
-    @param lr 学习率。
-    @param lamb 稀疏正则权重。
-    @param lamb_l1 L1 正则系数。
-    @param lamb_entropy 熵正则系数。
-    @param batch 批大小；`-1` 表示全量。
-    @param update_grid 是否更新 grid。
-    @param singularity_avoiding 是否启用奇异点规避。
-    @param log 日志间隔。
-    @return dict 训练过程结果字典（失败时返回空字典）。
+    Args:
+        model: KAN/symkan 模型对象。
+        dataset: 由 ``build_dataset`` 构建的数据字典。
+        opt: 优化器名称，如 ``Adam`` 或 ``LBFGS``。
+        steps: 训练步数。
+        lr: 学习率。
+        lamb: 稀疏正则权重。
+        lamb_l1: L1 正则系数。
+        lamb_entropy: 熵正则系数。
+        batch: 批大小；``-1`` 表示全量。
+        update_grid: 是否更新 grid。
+        singularity_avoiding: 是否启用奇异点规避。
+        log: 日志间隔。
+
+    Returns:
+        dict: 训练过程结果字典（失败时返回空字典）。
     """
     kw = dict(
         dataset=dataset,
@@ -105,9 +108,24 @@ def safe_fit_report(
     singularity_avoiding: bool = True,
     log: int = 10,
 ) -> FitReport:
-    """@brief safe_fit 的结构化报告版本。
+    """``safe_fit`` 的结构化报告版本。
 
-    返回 FitReport 而非裸字典，便于调用方区分成功/失败/降级。
+    Args:
+        model: KAN/symkan 模型对象。
+        dataset: 由 ``build_dataset`` 构建的数据字典。
+        opt: 优化器名称，如 ``Adam`` 或 ``LBFGS``。
+        steps: 训练步数。
+        lr: 学习率。
+        lamb: 稀疏正则权重。
+        lamb_l1: L1 正则系数。
+        lamb_entropy: 熵正则系数。
+        batch: 批大小；``-1`` 表示全量。
+        update_grid: 是否更新 grid。
+        singularity_avoiding: 是否启用奇异点规避。
+        log: 日志间隔。
+
+    Returns:
+        FitReport: 结构化结果，便于区分成功/失败/降级。
     """
     kw = dict(
         dataset=dataset,

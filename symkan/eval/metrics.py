@@ -1,3 +1,5 @@
+"""symkan 评估指标与可视化工具。"""
+
 import numpy as np
 import pandas as pd
 import sympy as sp
@@ -32,13 +34,16 @@ def _get_compiled_formula(expr_str, n_feat):
 
 
 def validate_formula_numerically(model, formulas, dataset, n_sample: int = 500):
-    """@brief 验证符号表达式与模型输出的一致性。
+    """验证符号表达式与模型输出的一致性。
 
-    @param model 符号化后的模型对象。
-    @param formulas `symbolic_formula()` 返回对象。
-    @param dataset 由 `build_dataset` 构建的数据字典。
-    @param n_sample 用于数值验证的测试样本上限。
-    @return pandas.DataFrame|None 每个表达式的 R²、复杂度与稳定性信息。
+    Args:
+        model: 符号化后的模型对象。
+        formulas: ``symbolic_formula()`` 返回对象。
+        dataset: 由 ``build_dataset`` 构建的数据字典。
+        n_sample: 用于数值验证的测试样本上限。
+
+    Returns:
+        pandas.DataFrame | None: 每个表达式的 R²、复杂度与稳定性信息。
     """
     if formulas is None:
         return None
@@ -79,11 +84,14 @@ def validate_formula_numerically(model, formulas, dataset, n_sample: int = 500):
 
 
 def compute_multiclass_roc_auc(y_true_onehot, y_score):
-    """@brief 计算多分类 ROC 曲线与 AUC。
+    """计算多分类 ROC 曲线与 AUC。
 
-    @param y_true_onehot one-hot 真值标签。
-    @param y_score 每类别预测分数或概率。
-    @return dict 每个类别对应的 `fpr/tpr/auc`。
+    Args:
+        y_true_onehot: one-hot 真值标签。
+        y_score: 每类别预测分数或概率。
+
+    Returns:
+        dict: 每个类别对应的 ``fpr/tpr/auc``。
     """
     n_classes = y_true_onehot.shape[1]
     roc_data = {}
@@ -98,11 +106,12 @@ def compute_multiclass_roc_auc(y_true_onehot, y_score):
 
 
 def plot_roc_curves(roc_data, class_labels=None, title="ROC Curves (Per Class)"):
-    """@brief 绘制多分类 ROC 曲线图。
+    """绘制多分类 ROC 曲线图。
 
-    @param roc_data `compute_multiclass_roc_auc` 返回的结果字典。
-    @param class_labels 类别显示名称列表。
-    @param title 图标题。
+    Args:
+        roc_data: ``compute_multiclass_roc_auc`` 返回的结果字典。
+        class_labels: 类别显示名称列表。
+        title: 图标题。
     """
     import matplotlib.pyplot as plt
 

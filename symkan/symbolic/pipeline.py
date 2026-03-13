@@ -1,3 +1,9 @@
+"""symkan 主符号化流水线。
+
+该模块负责将训练后的 KAN 模型推进到符号表达式导出阶段，涵盖渐进剪枝、
+输入压缩、逐层符号拟合和末端强化微调。
+"""
+
 import time
 
 import numpy as np
@@ -80,6 +86,21 @@ def _heavy_finetune(
     early_stop_patience=0,
     early_stop_min_delta=1e-4,
 ):
+    """执行符号化后的强化微调。
+
+    Args:
+        work: 待微调模型。
+        dataset: 微调数据集。
+        total_steps: 总微调步数。
+        batch_size: 批大小。
+        verbose: 是否打印日志。
+        lr_schedule: 分阶段学习率序列。
+        early_stop_patience: 早停耐心值。
+        early_stop_min_delta: 判定有效改进的最小精度增量。
+
+    Returns:
+        float: 恢复最佳参数后的模型精度。
+    """
     if batch_size is None:
         batch_size = default_batch_size()
 
@@ -171,50 +192,48 @@ def symbolize_pipeline(
     collect_timing=True,
     verbose=True,
 ):
-    """@brief 执行 symkan 主符号化流水线。
+    """执行 symkan 主符号化流水线。
 
-    流程包含：
-    1) 渐进剪枝与短微调；
-    2) 可选输入压缩；
-    3) 严格逐层符号拟合（支持 suggest 并行）；
-    4) 末端强化微调；
-    5) 公式与统计结果导出。
+    流程依次包含渐进剪枝、可选输入压缩、逐层符号拟合、强化微调和结果导出。
 
-    @param model 待符号化的 KAN/symkan 模型。
-    @param dataset 由 `build_dataset` 构建的数据字典。
-    @param target_edges 目标边数。
-    @param max_prune_rounds 最大剪枝轮数。
-    @param lib 统一函数库（可选）。
-    @param lib_hidden 隐藏层函数库。
-    @param lib_output 输出层函数库。
-    @param weight_simple 函数复杂度偏好权重。
-    @param finetune_steps 剪枝轮短微调步数。
-    @param finetune_lr 剪枝轮短微调学习率。
-    @param affine_finetune_steps 末端强化微调总步数。
-    @param affine_finetune_lr_schedule 强化微调学习率序列。
-    @param layerwise_finetune_steps 每层符号化后微调步数。
-    @param batch_size 批大小；为空时自动使用默认值。
-    @param parallel_mode 并行模式：`auto/off/thread`。
-    @param parallel_workers 并行 worker 数，`None` 表示自动推断。
-    @param parallel_min_tasks 并行最小任务阈值。
-    @param prune_eval_interval 剪枝评估间隔。
-    @param prune_attr_sample_adaptive 是否启用归因采样分级。
-    @param prune_attr_sample_min 归因最小采样数。
-    @param prune_attr_sample_max 归因最大采样数。
-    @param prune_threshold_start 渐进剪枝阈值起点。
-    @param prune_threshold_end 渐进剪枝阈值终点。
-    @param prune_max_drop_ratio_per_round 单轮允许的最大边数降幅比例（超出则回滚并降阈值重试）。
-    @param prune_threshold_backoff 超降幅时阈值回退倍数。
-    @param prune_adaptive_threshold 是否启用自适应阈值控制（按每轮收益与精度回落动态调阈值）。
-    @param prune_adaptive_step 自适应阈值基础步长；<=0 时按区间自动估计。
-    @param prune_adaptive_acc_drop_tol 自适应判定中的单轮允许精度回落。
-    @param prune_adaptive_min_edges_gain 自适应判定中的单轮最小有效剪枝收益。
-    @param prune_adaptive_low_gain_patience 连续低收益轮数达到该值时提前停止剪枝。
-    @param heavy_ft_early_stop_patience 强化微调早停耐心轮数。
-    @param heavy_ft_early_stop_min_delta 早停最小改进阈值。
-    @param collect_timing 是否收集并返回详细耗时统计。
-    @param verbose 是否打印详细日志。
-    @return dict 包含模型、表达式、边数、精度、轨迹、统计与耗时信息。
+    Args:
+        model: 待符号化的 KAN/symkan 模型。
+        dataset: 由 ``build_dataset`` 构建的数据字典。
+        target_edges: 目标边数。
+        max_prune_rounds: 最大剪枝轮数。
+        lib: 统一函数库。
+        lib_hidden: 隐藏层函数库。
+        lib_output: 输出层函数库。
+        weight_simple: 函数复杂度偏好权重。
+        finetune_steps: 每轮剪枝后的短微调步数。
+        finetune_lr: 每轮剪枝后的短微调学习率。
+        affine_finetune_steps: 末端强化微调总步数。
+        affine_finetune_lr_schedule: 强化微调学习率序列。
+        layerwise_finetune_steps: 每层符号化后微调步数。
+        batch_size: 批大小；为空时自动使用默认值。
+        parallel_mode: 并行模式配置，当前实现会强制回退到串行。
+        parallel_workers: 期望 worker 数。
+        parallel_min_tasks: 启用并行的最小任务阈值。
+        prune_eval_interval: 剪枝评估间隔。
+        prune_attr_sample_adaptive: 是否启用归因采样分级。
+        prune_attr_sample_min: 归因最小采样数。
+        prune_attr_sample_max: 归因最大采样数。
+        prune_threshold_start: 渐进剪枝阈值起点。
+        prune_threshold_end: 渐进剪枝阈值终点。
+        prune_max_drop_ratio_per_round: 单轮允许的最大边数降幅比例。
+        prune_threshold_backoff: 超降幅时的阈值回退倍数。
+        prune_adaptive_threshold: 是否启用自适应阈值控制。
+        prune_adaptive_step: 自适应阈值基础步长；小于等于 0 时自动估计。
+        prune_adaptive_acc_drop_tol: 自适应判定中的单轮允许精度回落。
+        prune_adaptive_min_edges_gain: 自适应判定中的单轮最小有效剪枝收益。
+        prune_adaptive_low_gain_patience: 连续低收益轮数达到该值时提前停止剪枝。
+        heavy_ft_early_stop_patience: 强化微调早停耐心轮数。
+        heavy_ft_early_stop_min_delta: 早停最小改进阈值。
+        collect_timing: 是否收集详细耗时统计。
+        verbose: 是否打印详细日志。
+
+    Returns:
+        dict: 包含模型、表达式、边数、精度、轨迹、统计与耗时信息。
     """
     register_custom_functions()
 
@@ -235,6 +254,7 @@ def symbolize_pipeline(
         "fit": timing_fit,
     }
     if np.isfinite(n_edge_input) and n_edge_input > target_edges * 1.5:
+        # 保留旧版的宽松目标边数策略，避免极宽模型在早期轮次直接卡死。
         effective_target = max(target_edges, int(n_edge_input * 0.5))
 
     thresholds = np.linspace(float(prune_threshold_start), float(prune_threshold_end), max_prune_rounds)
@@ -395,7 +415,8 @@ def symbolize_pipeline(
                 penalty = 0.3 * (1.0 + min(2.0, failure_count * 0.3))
                 current_threshold = max(th_low, float(th) - adaptive_step * penalty)
 
-            # 只有在阈值已接近上界时仍持续低收益，才判定为收敛并停止。
+            # 只有在阈值已接近上界时仍持续低收益，才判定为收敛并停止，
+            # 否则继续探索阈值空间。
             near_ceiling = current_threshold >= (th_high - max(adaptive_step, 1e-4))
             if near_ceiling and low_gain_rounds >= max(1, int(prune_adaptive_low_gain_patience)):
                 break
@@ -513,10 +534,15 @@ def symbolize_pipeline(
 
 
 def symbolize_pipeline_report(model, dataset, **kwargs):
-    """@brief symbolize_pipeline 的结构化报告版本。
+    """返回 ``symbolize_pipeline`` 的结构化报告版本。
 
-    参数与 symbolize_pipeline 完全一致。
-    @return SymbolizeResult 结构化结果对象。
+    Args:
+        model: 待符号化模型。
+        dataset: 数据集字典。
+        **kwargs: 传递给 ``symbolize_pipeline`` 的其余参数。
+
+    Returns:
+        SymbolizeResult: 结构化结果对象。
     """
     from symkan.core.types import SymbolizeResult
 

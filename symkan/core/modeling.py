@@ -1,7 +1,7 @@
-"""@file
-@brief 兼容层 — 所有公共名字已迁移到 infer.py 和 train.py。
+"""兼容导出层。
 
-旧代码可继续 ``from symkan.core.modeling import ...`` 而不会中断。
+所有公共名字已迁移到 ``infer.py`` 和 ``train.py``，
+旧代码仍可通过 ``symkan.core.modeling`` 导入以保持向后兼容。
 """
 
 # Re-export inference primitives
