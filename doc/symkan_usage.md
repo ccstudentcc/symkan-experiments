@@ -429,6 +429,7 @@ sym_res = symbolize_pipeline(
 
 - `stagewise_train_report` -> `StagewiseResult`
 - `symbolize_pipeline_report` -> `SymbolizeResult`
+
 ---
 
 ### 8.4 批量基准实验（symkanbenchmark.py）

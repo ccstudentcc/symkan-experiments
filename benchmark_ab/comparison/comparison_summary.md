@@ -6,7 +6,7 @@
 ## Variant Metrics
 
 | variant | metric | mean | median | std | min | max |
-|---|---|---:|---:|---:|---:|---:|
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
 | adaptive | export_wall_time_s | 94.478758 | 92.841081 | 12.924166 | 79.532457 | 111.062736 |
 | adaptive | final_acc | 0.754033 | 0.755300 | 0.017741 | 0.731700 | 0.775100 |
 | adaptive | final_n_edge | 86.666667 | 88.000000 | 3.399346 | 82.000000 | 90.000000 |
@@ -29,7 +29,7 @@
 ## Baseline Pairwise Delta
 
 | baseline | variant | metric | mean_delta | median_delta | std_delta | win | lose | tie |
-|---|---|---|---:|---:|---:|---:|---:|---:|
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | baseline | adaptive | export_wall_time_s | -29.764060 | -28.813728 | 11.448184 | 0 | 3 | 0 |
 | baseline | adaptive | final_acc | 0.021800 | -0.013300 | 0.076442 | 1 | 2 | 0 |
 | baseline | adaptive | final_n_edge | -2.333333 | -2.000000 | 3.681787 | 1 | 2 | 0 |
@@ -46,7 +46,7 @@
 ## Symbolize Trace Rhythm
 
 | variant | rounds_mean | effective_rounds_mean | total_edges_removed_mean | mean_drop_ratio_mean | max_drop_ratio_mean |
-|---|---:|---:|---:|---:|---:|
+| --- | ---: | ---: | ---: | ---: | ---: |
 | adaptive | 1.0000 | 1.0000 | 15.6667 |  |  |
 | adaptive_auto | 4.3333 | 3.0000 | 9.3333 | 0.023743 | 0.058969 |
 | baseline | 16.6667 | 9.3333 | 30.6667 |  |  |
