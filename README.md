@@ -102,16 +102,63 @@ print(validation_df.head() if validation_df is not None else "No valid formulas"
 ## 核心流程
 
 ```mermaid
-flowchart TD
-	A[原始数据 X/Y] --> B[build_dataset]
-	B --> C[stagewise_train]
-	C --> D[阶段快照与最优模型]
-	D --> E[progressive pruning]
-	E --> F[input compaction]
-	F --> G[layer-wise symbolic search]
-	G --> H[affine heavy finetune]
-	H --> I[symbolic_formula]
-	I --> J[formula validation and export]
+%%{
+  init: {
+    "theme": "base",
+    "themeVariables": {
+      "fontFamily": "Inter, system-ui, -apple-system, sans-serif",
+      "fontSize": "10px",
+      "textColor": "#334155",
+      "lineColor": "#94a3b8",
+      "clusterBkg": "#f8fafc"
+    },
+    "flowchart": {
+      "curve": "basis",
+      "nodeSpacing": 30,
+      "rankSpacing": 40
+    }
+  }
+}%%
+flowchart TB
+  %% 现代扁平化配色：蓝色(数据/准备) -> 紫色(核心算法) -> 青绿(输出结果)
+  classDef nodeBlue fill:#eff6ff,stroke:#3b82f6,stroke-width:2px,color:#1e40af,rx:8,ry:8
+  classDef nodePurple fill:#faf5ff,stroke:#a855f7,stroke-width:2px,color:#6b21a8,rx:8,ry:8
+  classDef nodeTeal fill:#f0fdfa,stroke:#14b8a6,stroke-width:2px,color:#0f766e,rx:8,ry:8
+  classDef highlight fill:#fffbeb,stroke:#f59e0b,stroke-width:2.5px,color:#92400e,rx:8,ry:8
+
+  %% 左列：训练准备
+  subgraph Phase1_A["第一阶段 1/2：训练与准备"]
+    direction TB
+    A["Raw Data X, Y<br>原始数据"]:::nodeBlue -->|输入| B["build_dataset<br>构建数据集"]:::nodeBlue
+    B -->|训练| C["stagewise_train<br>分阶段训练"]:::nodeBlue
+    C -->|保存| D["Best KAN Snapshot<br>最优 KAN 快照"]:::highlight
+  end
+
+  %% 中列：核心流水线
+  subgraph Phase1_B["第一阶段 2/2：符号化流水线"]
+    direction TB
+    E1["1. Progressive Pruning<br>渐进剪枝"]:::nodePurple --> E2["2. Input Compaction<br>压缩输入维度"]:::nodePurple
+    E2 --> E3["3. Layer-wise Symbolic Search<br>逐层候选函数搜索"]:::nodePurple
+    E3 --> E4["4. Affine-heavy Finetune<br>仿射参数强化微调"]:::nodePurple
+  end
+
+  %% 右列：验证与导出
+  subgraph Phase2["第二阶段：输出与导出"]
+    direction TB
+    F["symbolic_formula<br>符号公式"]:::nodeTeal -->|验证| G["validate_numerically<br>数值验证"]:::nodeTeal
+    H["trace / sym_stats<br>耗时与统计"]:::nodeTeal -->|日志写入| I["Export: CSV / PKL<br>导出结果"]:::nodeTeal
+    G -->|结果写入| I
+  end
+
+  %% 跨列的粗线条引导逻辑
+  D ==>|转入流水线| E1
+  E4 ==>|公式输出| F
+  E4 ==>|日志输出| H
+
+  %% 子图虚线边框及柔和背景
+  style Phase1_A fill:#f8fafc,stroke:#cbd5e1,stroke-width:2px,stroke-dasharray: 6 4,rx:12,ry:12
+  style Phase1_B fill:#fdf4ff,stroke:#e879f9,stroke-width:2px,stroke-dasharray: 6 4,rx:12,ry:12
+  style Phase2 fill:#f0fdf4,stroke:#86efac,stroke-width:2px,stroke-dasharray: 6 4,rx:12,ry:12
 ```
 
 ## 包结构
