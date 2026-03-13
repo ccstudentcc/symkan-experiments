@@ -12,11 +12,13 @@ This document outlines the design for optimizing sparse training in symkan, focu
 ## 2. Problem Analysis
 
 ### 2.1 Current Limitations
+
 1. **Pruning instability**: Fixed threshold increments (`prune_edge_threshold_step`) lead to either overly conservative pruning (slow convergence) or aggressive pruning (accuracy drops).
 2. **Slow convergence**: Many stagewise iterations required due to inefficient pruning schedule and excessive fine-tuning steps.
 3. **Suboptimal regularization**: Fixed `lamb_schedule` doesn't adapt to current sparsity progress.
 
 ### 2.2 Root Causes
+
 - **Threshold selection heuristic**: No feedback from pruning outcomes to inform future thresholds.
 - **Lack of validation**: Pruning decisions based solely on training data, leading to overfitting to prune timing.
 - **One-size-fits-all scheduling**: Same fine-tuning steps regardless of current model sparsity.
@@ -24,11 +26,13 @@ This document outlines the design for optimizing sparse training in symkan, focu
 ## 3. Design Goals
 
 ### 3.1 Primary Objectives
+
 1. **Improve final symbolic accuracy** by 5-15% through more stable pruning
 2. **Reduce training stages** by 20-40% through adaptive scheduling
 3. **Minimize accuracy drops** from pruning by 30-50%
 
 ### 3.2 Constraints
+
 - **Training time limited**: Optimization must not significantly increase total training time
 - **Backward compatibility**: Existing code must continue to work with default parameters
 - **Minimal complexity**: Solution should be understandable and maintainable
@@ -38,21 +42,25 @@ This document outlines the design for optimizing sparse training in symkan, focu
 ### 4.1 Core Components
 
 #### 4.1.1 Validation Split System
+
 - Creates 10-15% validation set from training data
 - Used exclusively for prune impact assessment
 - Optional feature with sensible default (enabled by default)
 
 #### 4.1.2 Adaptive Threshold Controller
+
 - Stateful controller tracking pruning success/failure patterns
 - Dynamic threshold adjustment based on recent outcomes
 - Configurable bounds to prevent extreme values
 
 #### 4.1.3 Early Exit Criteria
+
 - Monitors marginal sparsity gain per pruning attempt
 - Stops pruning when gains fall below configurable threshold
 - Prevents wasted computation on ineffective pruning
 
 #### 4.1.4 Regularization Annealing
+
 - Adjusts `lamb` based on current sparsity progress
 - Higher regularization early, lower near target sparsity
 - Fine-tuning steps scaled with sparsity ratio
@@ -234,6 +242,7 @@ def _create_validation_split(dataset, ratio=0.15, min_val_samples=10):
 ```
 
 **Error Handling and Fallbacks**:
+
 - If validation split fails (e.g., dataset too small), disable validation and continue with original logic
 - If `safe_attribute` fails, fall back to default feature scores (all ones)
 - If controller produces extreme threshold values, clamp to configured bounds
@@ -245,6 +254,7 @@ def _create_validation_split(dataset, ratio=0.15, min_val_samples=10):
 The optimization requires extending two existing functions to support validation data:
 
 #### `model_acc_ds` Extension
+
 The current `model_acc_ds` function in `symkan/core/infer.py` needs to support "val" split:
 
 ```python
@@ -269,6 +279,7 @@ def model_acc_ds_fast(model, dataset, split: str = "test", device: Optional[str]
 ```
 
 #### `build_dataset` Extension
+
 The existing `build_dataset` function can be extended with optional validation split:
 
 ```python
@@ -289,6 +300,7 @@ def build_dataset(Xtr, Ytr, Xte, Yte, device=None, validation_ratio=0.0, seed=No
 ```
 
 **Backward Compatibility**: The extended functions maintain compatibility:
+
 - `model_acc_ds(model, dataset)` defaults to "test" split
 - `build_dataset(Xtr, Ytr, Xte, Yte)` defaults to `validation_ratio=0.0` (no validation)
 
@@ -660,6 +672,7 @@ def stagewise_train(
 ```
 
 **Benefits**:
+
 - Reduces function signature complexity
 - Groups logically related parameters
 - Enables easy configuration reuse across experiments
@@ -670,7 +683,7 @@ def stagewise_train(
 ### 7.1 Quantitative Targets
 
 | Metric | Baseline | Target Improvement | Measurement Method |
-|--------|----------|-------------------|-------------------|
+| -------- | ---------- | ------------------- | ------------------- |
 | Pruning accuracy drops | 0.03-0.05 | 30-50% reduction | Compare `val_drop` distributions |
 | Training stages to target | 8-12 stages | 20-40% reduction | Count stages to reach `target_edges` |
 | Final symbolic accuracy | Variable | 5-15% improvement | Compare `final_acc` after symbolize_pipeline |
@@ -687,16 +700,19 @@ def stagewise_train(
 ## 8. Implementation Plan
 
 ### 8.1 Phase 1: Core Components (Week 1)
+
 1. Implement `AdaptiveThresholdController` class
 2. Add validation split to `build_dataset`
 3. Create `attempt_prune_with_validation` function
 
 ### 8.2 Phase 2: Integration (Week 1)
+
 1. Modify `stagewise_train` to use adaptive controller
 2. Implement early exit logic
 3. Add adaptive regularization and fine-tuning
 
 ### 8.3 Phase 3: Testing & Validation (Week 2)
+
 1. Unit tests for controller logic
 2. Integration tests with MNIST benchmark
 3. Comparison against baseline across multiple seeds
@@ -705,34 +721,40 @@ def stagewise_train(
 #### 8.3.1 Detailed Testing Strategy
 
 **Unit Tests**:
+
 - `AdaptiveThresholdController.adjust_threshold()`: Test with various success/failure patterns
 - Edge cases: `edges_removed=0`, consecutive successes/failures, threshold bounds
 - `should_continue()`: Test with different gain scenarios
 - Validation split functions: Small datasets, edge ratios, seed reproducibility
 
 **Integration Tests**:
+
 - Compare adaptive vs fixed threshold on synthetic dataset
 - Validate backward compatibility: ensure existing code works unchanged
 - Test validation split integration with `safe_attribute` (ensure training data only)
 - Measure accuracy drop reduction across multiple random seeds
 
 **Edge Case Tests**:
+
 - Very small datasets (< 100 samples) with validation split
 - Already sparse models (edges near target)
 - Extreme parameter values (very high/low thresholds)
 - Disabled validation (`use_validation=False`)
 
 **Performance Tests**:
+
 - Wall-clock time comparison: adaptive vs baseline
 - Memory usage with validation split and controller state
 - Convergence speed: stages to reach target sparsity
 
 **Regression Tests**:
+
 - Ensure no degradation in final symbolic accuracy
 - Verify symbolic pipeline still works with adapted models
 - Test across different dataset sizes and complexities
 
 ### 8.4 Phase 4: Documentation & Examples (Week 2)
+
 1. Update `symkan_usage.md` with new parameters
 2. Create example notebook demonstrating benefits
 3. Add configuration guidance for different use cases
@@ -740,14 +762,16 @@ def stagewise_train(
 ## 9. Risk Assessment
 
 ### 9.1 Technical Risks
+
 | Risk | Probability | Impact | Mitigation |
-|------|------------|--------|------------|
+| ------ | ------------ | -------- | ------------ |
 | Validation data reduces training performance | Low | Medium | Small ratio (10-15%), optional feature |
 | Controller instability | Medium | Low | Conservative defaults, bounds checking |
 | Increased code complexity | High | Low | Modular design, clear documentation |
 | Performance overhead | Low | Low | Minimal validation computations |
 
 ### 9.2 Mitigation Strategies
+
 1. **Feature flags**: All new features can be disabled
 2. **Gradual rollout**: Test on subset of benchmarks first
 3. **Fallback mechanisms**: Revert to original logic on error
@@ -765,11 +789,13 @@ The optimization will be considered successful if:
 ## 11. Appendices
 
 ### 11.1 References
+
 - Current `stagewise_train` implementation: `symkan/tuning/stagewise.py`
 - Original KAN pruning: `kan.MultKAN.prune_edge`
 - Symkan documentation: `doc/symkan_usage.md`
 
 ### 11.2 Glossary
+
 - **Sparsity ratio**: (initial_edges - current_edges) / (initial_edges - target_edges)
 - **Validation drop**: Accuracy difference on validation set before/after prune
 - **Marginal gain**: Average edges removed per recent pruning attempt
