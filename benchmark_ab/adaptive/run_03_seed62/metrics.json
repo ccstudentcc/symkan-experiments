@@ -1,0 +1,70 @@
+{
+  "metrics": {
+    "run_index": 3,
+    "total_runs": 3,
+    "stage_seed": 62,
+    "device": "cpu",
+    "batch_size": 64,
+    "lib_preset": "layered",
+    "base_acc": 0.8611,
+    "base_n_edge": 12704,
+    "selected_input_dim": 120,
+    "enhanced_acc": 0.8036999702453613,
+    "enhanced_n_edge": 109,
+    "selected_stage": 7,
+    "selected_score": 0.6312077832878182,
+    "final_acc": 0.7750999927520752,
+    "final_n_edge": 90,
+    "effective_target_edges": 90,
+    "effective_input_dim": 58,
+    "valid_expression_count": 10,
+    "macro_auc": 0.9537031655601819,
+    "validation_mean_r2": -0.44572083561197645,
+    "validation_negative_r2_count": 8,
+    "symbolic_total_seconds": 50.65153889999999,
+    "export_wall_time_s": 111.0627359,
+    "output_dir": "benchmark_ab\\adaptive\\run_03_seed62"
+  },
+  "roc": [
+    {
+      "class": 0,
+      "auc": 0.9934749309923527
+    },
+    {
+      "class": 1,
+      "auc": 0.9823575860124083
+    },
+    {
+      "class": 2,
+      "auc": 0.9557865952326619
+    },
+    {
+      "class": 3,
+      "auc": 0.9559461007279815
+    },
+    {
+      "class": 4,
+      "auc": 0.9216674142098243
+    },
+    {
+      "class": 5,
+      "auc": 0.9275617108893576
+    },
+    {
+      "class": 6,
+      "auc": 0.9649778648376701
+    },
+    {
+      "class": 7,
+      "auc": 0.9676361260540793
+    },
+    {
+      "class": 8,
+      "auc": 0.9353589402460882
+    },
+    {
+      "class": 9,
+      "auc": 0.9322643863993936
+    }
+  ]
+}

@@ -196,3 +196,120 @@ python symkanbenchmark.py --tasks full,parallel-bench
 3. `benchmark_symbolic_parallel_quick.csv` 的 `vs_off_speedup_x`。
 
 否则你最后只是拿一次碰巧不错的结果替自己背书，这种结论没有技术说服力。
+
+---
+
+## 7. Adaptive 与 Baseline A/B 对比实验
+
+`stagewise_train` 新增了一组可选优化参数。这节给出一套可复现的 A/B 实验配置：在固定所有其他参数条件下，仅切换 adaptive 开关，观察对 `final_acc`、`final_n_edge`、`validation_mean_r2` 以及训练阶段日志的影响。
+
+### 7.1 新增参数说明
+
+| 参数 | 默认值 | 含义 |
+|---|---|---|
+| `--use-validation` | 关闭 | 将训练集切出一部分作验证集，用于剪枝接受判断而非 test 集 |
+| `--validation-ratio` | `0.15` | 验证集比例；`--use-validation` 开启时生效 |
+| `--validation-seed` | 跟随 `--global-seed` | 验证集切分随机种子 |
+| `--adaptive-threshold` | 关闭 | 根据最近剪枝成败动态调整阈值，取代固定步长递增 |
+| `--threshold-base-step` | `0.005` | 自适应阈值的基础调整步长 |
+| `--threshold-min` | `0.001` | 阈值下界 |
+| `--threshold-max` | `0.1` | 阈值上界 |
+| `--success-boost` | `0.5` | 连续成功时的阈值加速系数 |
+| `--failure-penalty` | `0.3` | 连续失败时的阈值惩罚系数 |
+| `--stage-min-gain-threshold` | `3` | 最近三次剪枝平均移除边数低于该值时停止当阶段剪枝 |
+| `--stage-max-prune-attempts` | `20` | 单阶段最多剪枝尝试次数 |
+| `--adaptive-lamb` | 关闭 | 按当前稀疏进度动态调整 `lamb` |
+| `--min-lamb-ratio` | `0.3` | lamb 下界倍数 |
+| `--max-lamb-ratio` | `1.5` | lamb 上界倍数 |
+| `--adaptive-ft` | 关闭 | 按当前稀疏进度缩放剪枝后恢复步数，模型越稀疏恢复步数越少 |
+| `--min-ft-ratio` | `0.3` | 恢复步数下界比例 |
+
+所有新参数默认关闭，旧脚本调用一字不改仍等价于 baseline 行为。
+
+### 7.2 Baseline 组命令
+
+```bash
+python symkanbenchmark.py \
+  --tasks full \
+  --stagewise-seeds 42,52,62 \
+  --global-seed 123 \
+  --output-dir benchmark_ab/baseline \
+  --quiet
+```
+
+### 7.3 Adaptive 组命令（全功能开启）
+
+```bash
+python symkanbenchmark.py \
+  --tasks full \
+  --stagewise-seeds 42,52,62 \
+  --global-seed 123 \
+  --output-dir benchmark_ab/adaptive \
+  --use-validation \
+  --validation-ratio 0.15 \
+  --adaptive-threshold \
+  --adaptive-lamb \
+  --adaptive-ft \
+  --quiet
+```
+
+其余所有参数（`--stage-lamb-schedule`、`--steps-per-stage`、`--stage-target-edges` 等）均保持脚本默认值，确保两组唯一变量只有 adaptive 开关。
+
+### 7.4 分步对照（逐项开启）
+
+如果想知道每个开关单独贡献了多少，可以按以下顺序依次新增参数，每次一个前缀目录：
+
+```bash
+# 只开验证集引导
+python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 \
+  --global-seed 123 --output-dir benchmark_ab/val_only \
+  --use-validation --validation-ratio 0.15 --quiet
+
+# 验证集 + 自适应阈值
+python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 \
+  --global-seed 123 --output-dir benchmark_ab/val_thresh \
+  --use-validation --validation-ratio 0.15 \
+  --adaptive-threshold --quiet
+
+# 验证集 + 自适应阈值 + 自适应 lamb
+python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 \
+  --global-seed 123 --output-dir benchmark_ab/val_thresh_lamb \
+  --use-validation --validation-ratio 0.15 \
+  --adaptive-threshold --adaptive-lamb --quiet
+```
+
+### 7.5 对比结果的做法
+
+运行结束后，用以下 Python 片段快速提取核心对比指标：
+
+```python
+import pandas as pd
+
+baseline = pd.read_csv("benchmark_ab/baseline/symkanbenchmark_runs.csv")
+adaptive  = pd.read_csv("benchmark_ab/adaptive/symkanbenchmark_runs.csv")
+
+cols = ["stage_seed", "enhanced_acc", "final_acc", "final_n_edge",
+        "macro_auc", "validation_mean_r2", "symbolic_total_seconds"]
+
+comp = (
+    baseline[cols].set_index("stage_seed")
+    .join(adaptive[cols].set_index("stage_seed"), lsuffix="_base", rsuffix="_adapt")
+)
+
+# 核心差值
+for metric in ["final_acc", "macro_auc", "validation_mean_r2"]:
+    comp[f"Δ{metric}"] = comp[f"{metric}_adapt"] - comp[f"{metric}_base"]
+
+print(comp[[c for c in comp.columns if c.startswith("Δ")]].to_string())
+print("\n--- 均值 ---")
+print(comp[[c for c in comp.columns if c.startswith("Δ")]].mean())
+```
+
+### 7.6 解读要点
+
+- **`Δfinal_acc` > 0**：adaptive 提升了进入符号化之前的模型精度；这通常源于剪枝决策更稳、触发回滚更少。
+- **`Δvalidation_mean_r2` > 0**：符号化后的表达式数值拟合质量更好，说明传递给 symbolize_pipeline 的模型本身精度更高。
+- **`final_n_edge` 变化**：adaptive 模式不保证边数更少，它优化的是稳定性而非极端稀疏度。如果 `final_n_edge` 大幅升高，说明 `prune_acc_drop_tol` 偏严，可以适当放宽。
+- **`symbolic_total_seconds` 升高**：adaptive 在单阶段内允许多次剪枝尝试（`--stage-max-prune-attempts`），带来更多计算；如果时间超出预算，可降低 `--stage-max-prune-attempts` 或仅开 `--use-validation` 而不开 `--adaptive-threshold`。
+
+如果三个 seed 的 `Δfinal_acc` 符号不一致，说明改进效果不稳定，不应在论文中下结论。

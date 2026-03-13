@@ -38,7 +38,7 @@
 
 - `set_device(device)`
 - `get_device()`
-- `build_dataset(Xtr, Ytr, Xte, Yte, device=None)`
+- `build_dataset(Xtr, Ytr, Xte, Yte, device=None, validation_ratio=0.0, seed=None)`
 - `model_logits(model, X)`
 - `model_acc(model, X, y_cls)`
 - `model_acc_ds(model, dataset)`
@@ -49,10 +49,12 @@
 
 - `train_input`
 - `train_label`
+- `val_input`
+- `val_label`
 - `test_input`
 - `test_label`
 
-这意味着 notebook、老脚本和新分层接口都还能共存，不需要为了“优雅”强行一次性改全仓库。
+默认 `validation_ratio=0.0`，所以旧调用行为不变；只有显式开启时才会切分验证集。
 
 ### 3.2 结构化类型
 
@@ -85,6 +87,16 @@
 3. 剪枝失败或精度掉太多时自动回滚。
 4. 对每个 stage 记录 `acc/n_edges/score`。
 5. 用 `sym_readiness_score` 从多个快照中选最终模型。
+
+现在还额外支持一组可选优化参数：
+
+- `use_validation` / `validation_ratio`：启用验证集驱动的剪枝接受判断。
+- `adaptive_threshold`：根据最近剪枝成败自动调整阈值，而不是死板地固定递增。
+- `adaptive_lamb`：按当前稀疏进度调整 `lamb`。
+- `adaptive_ft`：按当前稀疏进度缩放剪枝后的恢复步数。
+- `min_gain_threshold` / `max_prune_attempts`：控制单阶段剪枝早停，避免低收益空转。
+
+这些能力默认是关闭的，原因很简单：公共入口必须保持兼容，不能因为你升级了代码就让旧实验行为悄悄变掉。
 
 返回值是：
 

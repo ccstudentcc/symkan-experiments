@@ -21,6 +21,8 @@ class DatasetBundle:
     train_label: torch.Tensor
     test_input: torch.Tensor
     test_label: torch.Tensor
+    val_input: Optional[torch.Tensor] = None
+    val_label: Optional[torch.Tensor] = None
 
     # ---- 兼容旧 dict 接口 ----
 
@@ -28,6 +30,8 @@ class DatasetBundle:
         _MAP = {
             "train_input": "train_input",
             "train_label": "train_label",
+            "val_input": "val_input",
+            "val_label": "val_label",
             "test_input": "test_input",
             "test_label": "test_label",
         }
@@ -37,13 +41,15 @@ class DatasetBundle:
         return getattr(self, attr)
 
     def __contains__(self, key: str) -> bool:
-        return key in ("train_input", "train_label", "test_input", "test_label")
+        return key in ("train_input", "train_label", "val_input", "val_label", "test_input", "test_label")
 
     @classmethod
     def from_dict(cls, d: dict) -> "DatasetBundle":
         return cls(
             train_input=d["train_input"],
             train_label=d["train_label"],
+            val_input=d.get("val_input"),
+            val_label=d.get("val_label"),
             test_input=d["test_input"],
             test_label=d["test_label"],
         )
@@ -52,6 +58,8 @@ class DatasetBundle:
         return {
             "train_input": self.train_input,
             "train_label": self.train_label,
+            "val_input": self.val_input,
+            "val_label": self.val_label,
             "test_input": self.test_input,
             "test_label": self.test_label,
         }
@@ -101,6 +109,23 @@ class StagewiseConfig:
     keep_full_snapshots: bool = False
     use_disk_clone: bool = False
     clone_ckpt_path: str = "_safe_copy_temp"
+    use_validation: bool = False
+    validation_ratio: float = 0.0
+    validation_seed: Optional[int] = None
+    validation_min_samples: int = 10
+    adaptive_threshold: bool = False
+    threshold_base_step: float = 0.005
+    threshold_min: float = 0.001
+    threshold_max: float = 0.1
+    success_boost: float = 0.5
+    failure_penalty: float = 0.3
+    min_gain_threshold: int = 3
+    max_prune_attempts: int = 20
+    adaptive_lamb: bool = False
+    min_lamb_ratio: float = 0.3
+    max_lamb_ratio: float = 1.5
+    adaptive_ft: bool = False
+    min_ft_ratio: float = 0.3
     verbose: bool = True
 
 

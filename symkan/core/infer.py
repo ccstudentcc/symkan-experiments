@@ -50,13 +50,16 @@ def model_logits_ds(model, dataset, split: str = "test", device: Optional[str] =
 
     @param model KAN/symkan 模型对象。
     @param dataset 由 `build_dataset` 构建的数据字典。
-    @param split 数据划分，支持 `train` 或 `test`。
+    @param split 数据划分，支持 `train`、`val` 或 `test`。
     @param device 可选设备；为空时自动推断模型设备。
     @return torch.Tensor logits 张量。
     """
     model.eval()
     dev = _pick_device(model, device)
-    x = dataset[f"{split}_input"]
+    input_key = f"{split}_input"
+    if input_key not in dataset or dataset[input_key] is None:
+        raise ValueError(f"数据集缺少可用 split: {split}")
+    x = dataset[input_key]
     if not torch.is_tensor(x):
         x = torch.as_tensor(x, dtype=torch.float32, device=dev)
     else:
@@ -84,13 +87,21 @@ def model_acc_ds_fast(model, dataset, split: str = "test", device: Optional[str]
 
     @param model KAN/symkan 模型对象。
     @param dataset 由 `build_dataset` 构建的数据字典。
-    @param split 数据划分，支持 `train` 或 `test`。
+    @param split 数据划分，支持 `train`、`val` 或 `test`。
     @param device 可选设备；为空时自动推断模型设备。
     @return float 分类准确率。
     """
     logits = model_logits_ds(model, dataset, split=split, device=device)
+    label_key = f"{split}_label"
+    if label_key not in dataset or dataset[label_key] is None:
+        raise ValueError(f"数据集缺少可用 split: {split}")
     pred = torch.argmax(logits, dim=1)
-    y = torch.argmax(dataset[f"{split}_label"], dim=1).to(pred.device)
+    y = dataset[label_key]
+    if not torch.is_tensor(y):
+        y = torch.as_tensor(y, dtype=torch.float32, device=pred.device)
+    else:
+        y = y.to(pred.device)
+    y = torch.argmax(y, dim=1)
     return (pred == y).float().mean().item()
 
 
@@ -99,15 +110,31 @@ def model_acc_ds(model, dataset, split: str = "test", device: Optional[str] = No
 
     @param model KAN/symkan 模型对象。
     @param dataset 由 `build_dataset` 构建的数据字典。
-    @param split 数据划分，支持 `train` 或 `test`。
+    @param split 数据划分，支持 `train`、`val` 或 `test`。
     @param device 可选设备；为空时自动推断模型设备。
     @return float 分类准确率。
     """
     try:
         return model_acc_ds_fast(model, dataset, split=split, device=device)
+    except (KeyError, ValueError) as exc:
+        if split == "val":
+            raise ValueError(
+                "验证集 split 不可用；请在 build_dataset 中设置 validation_ratio>0，"
+                "或在 stagewise_train 中关闭 use_validation。"
+            ) from exc
+        raise
     except Exception:
-        x = dataset[f"{split}_input"].detach().cpu().numpy()
-        y = np.argmax(dataset[f"{split}_label"].detach().cpu().numpy(), axis=1)
+        x = dataset[f"{split}_input"]
+        y = dataset[f"{split}_label"]
+        if torch.is_tensor(x):
+            x = x.detach().cpu().numpy()
+        else:
+            x = np.asarray(x)
+        if torch.is_tensor(y):
+            y = y.detach().cpu().numpy()
+        else:
+            y = np.asarray(y)
+        y = np.argmax(y, axis=1)
         return model_acc(model, x, y, device=device)
 
 

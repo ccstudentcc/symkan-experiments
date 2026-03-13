@@ -589,6 +589,22 @@ def run_single_experiment(
             post_prune_ft_steps=args.post_prune_ft_steps,
             sym_target_edges=args.sym_target_edges,
             acc_weight=args.acc_weight,
+            use_validation=args.use_validation,
+            validation_ratio=args.validation_ratio,
+            validation_seed=args.validation_seed if args.validation_seed is not None else args.global_seed,
+            adaptive_threshold=args.adaptive_threshold,
+            threshold_base_step=args.threshold_base_step,
+            threshold_min=args.threshold_min,
+            threshold_max=args.threshold_max,
+            success_boost=args.success_boost,
+            failure_penalty=args.failure_penalty,
+            min_gain_threshold=args.stage_min_gain_threshold,
+            max_prune_attempts=args.stage_max_prune_attempts,
+            adaptive_lamb=args.adaptive_lamb,
+            min_lamb_ratio=args.min_lamb_ratio,
+            max_lamb_ratio=args.max_lamb_ratio,
+            adaptive_ft=args.adaptive_ft,
+            min_ft_ratio=args.min_ft_ratio,
             verbose=(args.verbose and not silent),
         )
     enhanced_acc = float(model_acc_ds(enhanced_model, dataset_enhanced))
@@ -799,6 +815,32 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--parallel-prune-attr-sample-max", type=int, default=1536)
     parser.add_argument("--parallel-heavy-ft-patience", type=int, default=1)
     parser.add_argument("--parallel-heavy-ft-min-delta", type=float, default=5e-4)
+
+    # ---- adaptive pruning (stagewise_train) ----
+    parser.add_argument("--use-validation", action=argparse.BooleanOptionalAction, default=False,
+                        help="启用验证集驱动的剪枝接受判断")
+    parser.add_argument("--validation-ratio", type=float, default=0.15,
+                        help="切出验证集的比例（use-validation 开启时生效）")
+    parser.add_argument("--validation-seed", type=int, default=None,
+                        help="验证集切分随机种子；不传则跟随 global-seed")
+    parser.add_argument("--adaptive-threshold", action=argparse.BooleanOptionalAction, default=False,
+                        help="根据最近剪枝成败自动调整阈值")
+    parser.add_argument("--threshold-base-step", type=float, default=0.005)
+    parser.add_argument("--threshold-min", type=float, default=0.001)
+    parser.add_argument("--threshold-max", type=float, default=0.1)
+    parser.add_argument("--success-boost", type=float, default=0.5)
+    parser.add_argument("--failure-penalty", type=float, default=0.3)
+    parser.add_argument("--stage-min-gain-threshold", type=int, default=3,
+                        help="最近剪枝平均收益低于该值时停止当阶段剪枝")
+    parser.add_argument("--stage-max-prune-attempts", type=int, default=20,
+                        help="单阶段最多剪枝尝试次数（仅 adaptive-threshold 模式有效）")
+    parser.add_argument("--adaptive-lamb", action=argparse.BooleanOptionalAction, default=False,
+                        help="按当前稀疏进度调整 lamb")
+    parser.add_argument("--min-lamb-ratio", type=float, default=0.3)
+    parser.add_argument("--max-lamb-ratio", type=float, default=1.5)
+    parser.add_argument("--adaptive-ft", action=argparse.BooleanOptionalAction, default=False,
+                        help="按当前稀疏进度缩放剪枝后恢复步数")
+    parser.add_argument("--min-ft-ratio", type=float, default=0.3)
     return parser
 
 
