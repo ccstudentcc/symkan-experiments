@@ -1,0 +1,6 @@
+﻿metric_name,time_mean_s,time_std_s,rss_delta_mean_mb,gpu_peak_mean_mb,vs_legacy_time_reduction_pct,vs_first_validate_reduction_pct
+validate_formula_cached,0.122291,0.001771,0.0,,76.562864,50.023791
+validate_formula_first,0.244699,0.03366,-0.950521,,53.103413,0.0
+fast_tensor_path,0.504067,0.001016,0.010417,,3.395553,
+model_acc_ds_current,0.507499,0.009138,0.0,,2.737776,
+legacy_numpy_path,0.521784,0.004003,6.660156,,0.0,

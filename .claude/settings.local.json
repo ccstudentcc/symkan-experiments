@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo HTTP_PROXY=$HTTP_PROXY:*)"
+    ]
+  }
+}

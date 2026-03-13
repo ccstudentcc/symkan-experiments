@@ -1,0 +1,14 @@
+# SymbolNet / symkan requirements
+# Python version: 3.9.25 (recommended)
+# Compatible range: >=3.9,<3.11
+
+numpy==1.24.4
+pandas==2.0.1
+scipy==1.11.4
+scikit-learn==1.3.2
+matplotlib==3.7.1
+sympy==1.12
+torch==2.1.2
+pykan==0.2.8
+PyYAML==6.0.3
+psutil==7.0.0
