@@ -109,6 +109,19 @@ $$
 
 > 使用建议：如果只是在 Notebook 里试一个想法，直接用 `pykan` 就够了。需要批量跑多 seed、追踪符号化轨迹、确保结论可复现，`symkan` 才是必要的。
 
+### 2.4 实验回证后的默认建议（2026-03）
+
+基于 `benchmark_ablation/` 与 `benchmark_ab/comparison/` 的最新结果，建议把参数策略分成“默认”和“按目标切换”：
+
+| 设计项 | 默认建议 | 证据摘要 |
+| --- | --- | --- |
+| Stagewise 训练 | 必开 | 关闭后最终精度约从 0.78 跌到 0.44，符号化入口过密 |
+| 渐进剪枝 | 默认开启 | 精度影响小，但显著压缩表达式复杂度与符号化耗时 |
+| 输入压缩 | 默认开启（追求速度） | 关闭后公式 R² 常变好，但搜索维度和耗时明显上升 |
+| LayerwiseFT（2 层 KAN） | 默认关闭（`--layerwise-finetune-steps 0`） | 旧版收益低且耗时高；改进版更稳但综合性价比仍弱于关闭 |
+
+一句话：默认配置优先“可复现与吞吐”，不是追求单次 seed 的偶然最高分。
+
 ## 3. 环境安装
 
 ### 3.1 Python 与依赖
@@ -193,7 +206,7 @@ sym_res = symbolize_pipeline(
     max_prune_rounds=25,
     lib_hidden=LIB_HIDDEN,
     lib_output=LIB_OUTPUT,
-    layerwise_finetune_steps=120,
+    layerwise_finetune_steps=0,  # 2层KAN默认建议关闭，追求速度与稳定性
     affine_finetune_steps=200,
     prune_adaptive_threshold=True,
     collect_timing=True,
@@ -420,7 +433,7 @@ sym_res = symbolize_pipeline(
 ### 8.2 推荐调参顺序
 
 1. 先控制剪枝节奏：`prune_threshold_start/end`, `prune_max_drop_ratio_per_round`。
-2. 再看恢复能力：`finetune_steps`, `layerwise_finetune_steps`, `affine_finetune_steps`。
+2. 再看恢复能力：`finetune_steps`, `affine_finetune_steps`，并把 `layerwise_finetune_steps` 视为可选项（2层KAN优先设为 0）。
 3. 最后扩展表达能力：从 `LIB_HIDDEN/LIB_OUTPUT` 过渡到 `FAST_LIB/EXPRESSIVE_LIB`。
 
 ### 8.3 结构化返回（dataclass）
@@ -486,11 +499,27 @@ python benchmark_ab_compare.py \
 
 **当前实验结论（3 seeds: 42/52/62）**：
 
-- `adaptive` 和 `adaptive_auto` 相对 baseline 在 `final_acc` 均为 **1胜2负**，提升的是**流程鲁棒性**，而非精度绝对值。
-- `adaptive_auto` 的 `rounds_mean = 4.33`（vs `adaptive` 的 1.0），修复了单轮过剪问题，但仍偏保守。
-- 论文写作建议：同时报告均值 + 标准差 + 中位数差值 + 胜负计数，避免只报均值写结论。
+- `adaptive_auto` 在 `final_acc` 均值与方差上最好（mean≈0.755, std≈0.011），`adaptive` 的导出总耗时最快。
+- 但相对 baseline 的逐 seed 胜负在 `final_acc` 上仍是 **1胜2负**，结论应写成“稳定性改善”，不要写成“绝对精度提升”。
+- `adaptive_auto` 的 `rounds_mean = 4.33`（vs `adaptive` 的 1.0），说明它显著缓解了单轮过剪。
+- 论文写作建议：同时报告均值、标准差、中位数差值、胜负计数，避免只报均值。
 
-### 8.5 关键 CLI 参数速查
+### 8.5 LayerwiseFT 改进版使用建议（esreg）
+
+如果你确实要启用 LayerwiseFT，请直接用“早停 + 轻正则 + 短步数”的改进组合，而不是旧版长步数无约束微调：
+
+- 推荐起点：`--layerwise-finetune-steps 60 --layerwise-use-validation --layerwise-finetune-lamb 1e-5 --layerwise-early-stop-patience 2`
+- 适用场景：你愿意用更多时间换取极小的分类指标提升。
+- 不适用场景：批量跑 seed、追求最低方差、追求最快导出（这时优先 `--layerwise-finetune-steps 0`）。
+
+已有对比结论（3 seeds）可概括为：
+
+- 改进版相对旧 full：符号化耗时约降低 33%，分类指标小幅提升。
+- 改进版相对关闭 LayerwiseFT：收益极小，但耗时增加明显，且公式 R² 更差。
+
+所以默认仍建议关闭 LayerwiseFT，把它作为可选实验开关。
+
+### 8.6 关键 CLI 参数速查
 
 #### stagewise 自适应参数
 
@@ -521,11 +550,26 @@ python benchmark_ab_compare.py \
 | `--symbolic-prune-adaptive-min-edges-gain G` | `prune_adaptive_min_edges_gain=G` | 最小有效边数增益 |
 | `--symbolic-prune-adaptive-low-gain-patience P` | `prune_adaptive_low_gain_patience=P` | 低增益连续轮数耐心值 |
 
+#### layerwise 微调参数
+
+| CLI 参数 | 对应 Python 参数 | 说明 |
+| --- | --- | --- |
+| `--layerwise-finetune-steps N` | `layerwise_finetune_steps=N` | 每层符号化后的局部微调步数（2层KAN建议默认 0） |
+| `--layerwise-finetune-lr LR` | `layerwise_finetune_lr=LR` | layerwise 微调学习率 |
+| `--layerwise-finetune-lamb L` | `layerwise_finetune_lamb=L` | layerwise 微调正则强度 |
+| `--layerwise-use-validation` | `layerwise_use_validation=True` | 启用 layerwise 验证集评估与早停 |
+| `--layerwise-validation-ratio R` | `layerwise_validation_ratio=R` | layerwise 验证集比例 |
+| `--layerwise-validation-seed S` | `layerwise_validation_seed=S` | layerwise 验证集切分种子 |
+| `--layerwise-early-stop-patience P` | `layerwise_early_stop_patience=P` | 连续 P 次评估无提升则停止 |
+| `--layerwise-early-stop-min-delta D` | `layerwise_early_stop_min_delta=D` | 视为“有提升”的最小 R² 增量 |
+| `--layerwise-eval-interval K` | `layerwise_eval_interval=K` | 每 K 步进行一次验证评估 |
+| `--layerwise-validation-n-sample N` | `layerwise_validation_n_sample=N` | layerwise 验证时采样规模 |
+
 ## 9. FAQ
 
 ### Q1: 为什么符号化后精度会下降？
 
-这是稀疏化与函数离散化的自然代价。优先尝试提高 `target_edges`、`layerwise_finetune_steps`、`affine_finetune_steps`。
+这是稀疏化与函数离散化的自然代价。优先尝试提高 `target_edges` 与 `affine_finetune_steps`；对 2 层 KAN，不建议盲目增大 `layerwise_finetune_steps`，先验证是否真的带来收益。
 
 ### Q2: 并行提速不明显正常吗？
 
