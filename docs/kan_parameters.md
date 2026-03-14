@@ -145,11 +145,17 @@ $$
 
 ### 6.4 层间与末端微调
 
-- `layerwise_finetune_steps = 120`
+- `layerwise_finetune_steps = 60`（CLI 技术默认值）
 - `affine_finetune_steps = 200`
 - `affine_finetune_lr_schedule = [0.003, 0.001, 0.0005, 0.0002]`
 
-如果符号化后精度掉得太厉害，优先试着增加这两组步数，而不是先胡乱加函数库。
+对典型 2 层 KAN（`[in, hidden, class]`），最新实验仍建议优先设为 `layerwise_finetune_steps = 0`；改进版 LayerwiseFT（60 步 + 早停 + 轻正则）仅作为按需实验开关。
+
+理论依据（与实验报告统一）：
+
+1. 逐层符号化是有损替换，`fix_symbolic` 确定函数族后不能回退重选。
+2. 2 层网络只有一次层间补偿窗口，LayerwiseFT 的可补偿自由度天然有限。
+3. 改进版主要是降低旧版长步数无约束微调的副作用，不等于稳定创造净收益。
 
 ### 6.5 并行参数
 
@@ -257,7 +263,7 @@ $$
 
 ## 11. 命令行运行建议
 
-如果你使用 [symkanbenchmark.py](symkanbenchmark.py) 做批量实验，建议把参数调试和正式跑表分开：
+如果你使用 [symkanbenchmark.py](../symkanbenchmark.py) 做批量实验，建议把参数调试和正式跑表分开：
 
 - `--verbose`：适合调参时看阶段训练和符号化细节。
 - `--quiet`：适合正式批量跑实验，减少终端噪声。

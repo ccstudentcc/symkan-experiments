@@ -205,3 +205,13 @@ benchmark_ablation/
 2. 渐进剪枝与输入压缩属于“可解释性/速度”权衡开关，不承诺稳定提精度。
 3. 对 2 层 KAN，默认建议关闭 LayerwiseFT（`--layerwise-finetune-steps 0`）；改进版 LayerwiseFT 仅作为可选实验配置。
 4. A/B 结果优先表述“鲁棒性与耗时收益”，避免把 `n=3` 下的均值波动写成确定的精度优势。
+
+## 8. 最新结果快照（2026-03-14 重跑）
+
+基于 `benchmark_ablation/ablation_runs_summary.csv` 与 `benchmark_ablation/layerwiseft_improved_analysis/*.csv`：
+
+1. `full`：`final_acc=0.7807 ± 0.0013`，`macro_auc=0.9548 ± 0.0028`。
+2. `wostagewise`：`final_acc=0.4430 ± 0.0319`（相对 full -43.26%），且 `effective_target_edges` 由 90 升至 1040，验证 stagewise 是必要前提。
+3. `wopruning`：`final_acc` +2.68%，但 `expr_complexity_mean` +53.14%、`symbolic_total_seconds` +29.56%，属于“以复杂度换分类指标”。
+4. `wolayerwiseft`：`final_acc=0.7838 ± 0.0014`（相对 full +0.39%，误差范围内），同时 `symbolic_total_seconds=20.41 ± 0.06`（-39.21%），仍是 2 层 KAN 默认优选。
+5. `layerwiseft_esreg` 相对 `full` 仅有亚秒级时间收益（`symbolic_total_seconds` -0.3046s），且这符合“当前 `full` 已与 `layerwiseft_esreg` 默认参数对齐”的预期；相对 `wolayerwiseft` 则多耗时 12.86s（+63.00%），不构成默认切换依据。

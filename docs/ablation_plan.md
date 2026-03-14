@@ -168,7 +168,7 @@ python symkanbenchmark.py --tasks full \
 
 ```csv
 variant_id,seed,effective_target_edges,effective_input_dim,final_acc,expr_complexity_mean,macro_auc,validation_mean_r2,symbolic_total_seconds,stage_total_seconds,rounds,edges_drop_total
-V0,42,90,59,0.7771,120.0,0.9558,-0.599,51.9,38.2,7,26
+V0,42,90,59,0.7796,126.9,0.9566,-0.6189,33.37,38.33,8,27
 ```
 
 > 注：`validation_mean_r2` 在当前实验中普遍为负值，反映符号化公式对测试集的数值拟合仍有差距，与分类 AUC 指标不构成矛盾。
@@ -177,11 +177,11 @@ V0,42,90,59,0.7771,120.0,0.9558,-0.599,51.9,38.2,7,26
 
 | variant_id | final_acc | expr_complexity_mean | macro_auc | validation_mean_r2 | symbolic_total_seconds | stage_total_seconds |
 | --- | --- | --- | --- | --- | --- | --- |
-| V0 | 0.777 ± 0.021 | 130.8 ± 26.7 | 0.954 ± 0.008 | −0.632 ± 0.087 | 51.2 ± 0.7 | 39.5 ± 1.4 |
-| V1 | 0.442 ± 0.020 | 48.2 ± 16.4 | 0.835 ± 0.011 | −0.813 ± 0.155 | 26.3 ± 3.6 | 13.7 ± 0.1 |
-| V2 | 0.775 ± 0.034 | 217.1 ± 38.4 | 0.959 ± 0.007 | −0.475 ± 0.030 | 67.8 ± 10.2 | 39.9 ± 1.6 |
-| V3 | 0.769 ± 0.023 | 117.0 ± 22.1 | 0.953 ± 0.005 | +0.096 ± 0.141 | 77.2 ± 0.7 | 39.8 ± 1.7 |
-| V4 | 0.784 ± 0.001 | 126.9 ± 31.2 | 0.954 ± 0.005 | −0.594 ± 0.015 | 20.5 ± 0.2 | 40.6 ± 1.5 |
+| V0 | 0.7807 ± 0.0013 | 126.9 ± 31.2 | 0.9548 ± 0.0028 | -0.6135 ± 0.0331 | 33.6 ± 0.3 | 40.3 ± 1.8 |
+| V1 | 0.4430 ± 0.0319 | 48.4 ± 16.4 | 0.8379 ± 0.0095 | -0.7657 ± 0.1535 | 16.6 ± 2.7 | 13.7 ± 0.1 |
+| V2 | 0.8017 ± 0.0088 | 194.3 ± 37.2 | 0.9639 ± 0.0011 | -0.4976 ± 0.1376 | 43.5 ± 0.4 | 39.2 ± 1.6 |
+| V3 | 0.7577 ± 0.0278 | 120.1 ± 2.3 | 0.9491 ± 0.0083 | +0.0275 ± 0.1365 | 41.3 ± 0.6 | 39.5 ± 1.1 |
+| V4 | 0.7838 ± 0.0014 | 126.9 ± 31.2 | 0.9544 ± 0.0047 | -0.5937 ± 0.0151 | 20.4 ± 0.1 | 39.5 ± 1.7 |
 
 ---
 
@@ -221,6 +221,7 @@ V0,42,90,59,0.7771,120.0,0.9558,-0.599,51.9,38.2,7,26
 最终采用单文件实现：`ablation_runner.py`，无需额外子模块。
 
 文件职责：
+
 1. `VARIANT_SPECS` 字典（文件顶部）：定义每个变体的 `extra_args`，无 if-else。
 2. `run_variant()`：调用 `symkanbenchmark.py` 子进程，透传 common_args + variant extra_args。
 3. `collect_variant_results()`：读取 `symkanbenchmark_runs.csv`，合并变体标签。
@@ -230,6 +231,7 @@ V0,42,90,59,0.7771,120.0,0.9558,-0.599,51.9,38.2,7,26
 ### 9.3 实际 CLI 接口
 
 **单次全量运行（5 变体 × 3 seed = 15 runs）：**
+
 ```bash
 python ablation_runner.py \
   --variants full,wostagewise,wopruning,wocompact,wolayerwiseft \
@@ -239,6 +241,7 @@ python ablation_runner.py \
 ```
 
 **分批运行后汇总（各变体独立时间窗口）：**
+
 ```bash
 # 分批运行每个变体
 python ablation_runner.py --variants wostagewise --output-dir benchmark_ablation
@@ -289,6 +292,6 @@ python ablation_runner.py --aggregate-only --output-dir benchmark_ablation
 4. `benchmark_ablation/ablation_runs_raw.csv`
 5. `benchmark_ablation/ablation_runs_summary.csv`
 6. `docs/ablation_report.md`（消融实验分析报告）
-7. `benchmark_ablation/layerwiseft_analysis/`（层间微调专项对毕，由 `analyze_layerwiseft.py` 生成）
+7. `benchmark_ablation/layerwiseft_analysis/`（层间微调专项对比，由 `analyze_layerwiseft.py` 生成）
 
 以上 7 项齐备后，才能认为消融实验可复审、可复现实证结论。

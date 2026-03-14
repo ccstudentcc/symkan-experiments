@@ -114,6 +114,8 @@ benchmark_runs/
 2. 对典型 2 层 KAN（`[in, hidden, class]`），推荐配置是显式传 `--layerwise-finetune-steps 0`，把 LayerwiseFT 作为按需开关。
 3. 如果确实启用 LayerwiseFT，优先使用当前改进版参数（steps=60 + validation early-stop + `lamb=1e-5`），不要回退到旧版长步数无约束微调。
 
+机制说明（简版）：逐层符号化属于有损替换，`fix_symbolic` 选定函数族后无法回退；在 2 层 KAN 中 LayerwiseFT 仅有一次层间补偿窗口，因此改进版更像“降风险开关”而非“默认增益模块”。
+
 ### 4.2 常用控制参数
 
 - `--tasks full`：只跑主实验链路。
@@ -249,31 +251,62 @@ python benchmark_ab_compare.py --root benchmark_ab --baseline baseline --variant
 
 ### 6.4 当前结论（seed: 42/52/62）
 
-基于 [benchmark_ab/comparison/pairwise_delta_summary.csv](../benchmark_ab/comparison/pairwise_delta_summary.csv) 与 [benchmark_ab/comparison/variant_summary.csv](../benchmark_ab/comparison/variant_summary.csv)，建议按“精度-稳定性-代价”三条主线解读：
+基于 [benchmark_ab/comparison/variant_summary.csv](../benchmark_ab/comparison/variant_summary.csv)、[benchmark_ab/comparison/pairwise_delta_summary.csv](../benchmark_ab/comparison/pairwise_delta_summary.csv) 与 [benchmark_ab/comparison/trace_summary.csv](../benchmark_ab/comparison/trace_summary.csv)，建议固定报告以下三张表。
 
-1. 精度主指标（`final_acc` / `macro_auc`）
-  - `adaptive` 与 `adaptive_auto` 对 baseline 都是 `1胜2负`，中位数差值为负。
-  - 虽然均值差值略为正（受单个 seed 拉动），但在当前 `n=3` 的设置下证据强度不足，不能宣称精度提升成立。
-2. 数值拟合与稳定性（`validation_mean_r2`）
-  - 两组 adaptive 均为 `2胜1负`，中位数差值为正。
-  - 这更像“流程稳定性改善”而非“分类精度提升”：即符号化后的数值一致性更稳，但未稳定转化为最终分类收益。
-3. 运行代价与结构复杂度（`export_wall_time_s` / `final_n_edge` / `symbolic_total_seconds`）
-  - `export_wall_time_s` 两组 adaptive 都明显更快（`3胜0负`），是当前最稳健收益。
-  - `final_n_edge` 仅小幅下降且胜负不稳定，说明压缩效果存在但强度有限。
-  - `symbolic_total_seconds` 的中位数在两组 adaptive 上略高，均值受波动影响较大，不宜单点下结论。
+#### 表 1：核心指标汇总（mean ± std）
 
-基于 [benchmark_ab/comparison/trace_summary.csv](../benchmark_ab/comparison/trace_summary.csv)：
+| 变体 | final_acc | macro_auc | validation_mean_r2 | symbolic_total_seconds | export_wall_time_s | final_n_edge |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline | 0.7807 ± 0.0010 | 0.9548 ± 0.0023 | -0.6135 ± 0.0271 | 33.27 ± 0.37 | 73.17 ± 2.06 | 89.67 ± 0.47 |
+| adaptive | 0.7678 ± 0.0117 | 0.9486 ± 0.0021 | -0.5361 ± 0.1061 | 31.05 ± 0.98 | 75.72 ± 12.88 | 85.33 ± 2.49 |
+| adaptive_auto | 0.7491 ± 0.0186 | 0.9430 ± 0.0044 | -0.6137 ± 0.0306 | 30.88 ± 1.76 | 72.58 ± 14.62 | 85.33 ± 5.25 |
 
-1. `adaptive`：`rounds_mean = 1.0`，典型“单轮过剪”，容易把搜索过程压缩得过早。
-2. `adaptive_auto`：`rounds_mean = 4.33`，`effective_rounds_mean = 3.0`，相对修复了过剪问题。
-3. `baseline`：`rounds_mean = 16.67`，探索更充分、上限更高，但时间代价最大、波动也更大。
+解读：
 
-综合判断：
+1. 分类指标上，baseline 仍是当前最优（`final_acc` 与 `macro_auc` 均最高，且 `final_acc` 方差最小）。
+2. adaptive 系列在 `symbolic_total_seconds` 上更快（约快 2.2s~2.4s），但分类指标同步下降。
+3. `final_n_edge` 在 adaptive 系列下降（约 -4.33），说明确实更激进地压缩了结构。
 
-1. baseline 仍是“精度上限候选”，但方差最大、耗时最高。
-2. adaptive 的主要价值已从“提精度”转向“降耗时 + 提流程可控性”。
-3. adaptive_auto 在剪枝节奏上优于 adaptive，但还不足以稳定超越 baseline 的精度中位数。
-4. 当前更稳妥的论文表述应是“效率与稳定性收益明确，精度收益待扩大样本验证”。
+#### 表 2：相对 baseline 的 pairwise 差分
+
+| 比较 | 指标 | mean_delta (variant-baseline) | median_delta | win/lose/tie |
+| --- | --- | ---: | ---: | ---: |
+| adaptive vs baseline | final_acc | -0.0130 | -0.0160 | 1 / 2 / 0 |
+| adaptive_auto vs baseline | final_acc | -0.0316 | -0.0370 | 0 / 3 / 0 |
+| adaptive vs baseline | macro_auc | -0.0063 | -0.0051 | 0 / 3 / 0 |
+| adaptive_auto vs baseline | macro_auc | -0.0118 | -0.0149 | 0 / 3 / 0 |
+| adaptive vs baseline | validation_mean_r2 | +0.0774 | +0.0640 | 2 / 1 / 0 |
+| adaptive_auto vs baseline | validation_mean_r2 | -0.0002 | +0.0279 | 2 / 1 / 0 |
+| adaptive vs baseline | symbolic_total_seconds | -2.2148 | -1.7458 | 3 / 0 / 0 |
+| adaptive_auto vs baseline | symbolic_total_seconds | -2.3840 | -2.4327 | 2 / 1 / 0 |
+| adaptive vs baseline | export_wall_time_s | +2.5513 | +9.5640 | 1 / 2 / 0 |
+| adaptive_auto vs baseline | export_wall_time_s | -0.5918 | -6.9048 | 2 / 1 / 0 |
+
+解读：
+
+1. 精度主指标（`final_acc` / `macro_auc`）上，adaptive 系列未形成对 baseline 的稳定优势。
+2. `validation_mean_r2` 的方向更复杂：adaptive 有改善趋势，但 adaptive_auto 的均值几乎为 0、对 seed 更敏感。
+3. `symbolic_total_seconds` 的加速较稳定；`export_wall_time_s` 则受端到端波动影响较大，不宜只看均值。
+
+#### 表 3：symbolize 节奏（trace）
+
+| 变体 | rounds_mean | effective_rounds_mean | total_edges_removed_mean | mean_drop_ratio_mean | max_drop_ratio_mean |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline | 6.67 | 5.33 | 26.33 | 0.0352 | 0.1281 |
+| adaptive | 1.00 | 1.00 | 16.33 | 0.1588 | 0.1588 |
+| adaptive_auto | 3.67 | 3.33 | 12.67 | 0.0273 | 0.1002 |
+
+解读：
+
+1. adaptive 呈现明显单轮过剪（`rounds_mean=1.00`，且单轮平均 drop ratio 最高）。
+2. adaptive_auto 把节奏从“单轮过剪”拉回到“多轮收缩”，但其分类指标仍未追平 baseline。
+3. baseline 的探索轮次最多，当前样本下对应了更高的分类指标上限。
+
+综合结论：
+
+1. 现阶段应把 adaptive 系列定位为“流程控制/结构压缩策略”，而不是“已证实精度增强策略”。
+2. 如果目标是分类指标，baseline 仍是默认首选；如果目标是符号化时延，可按场景评估 adaptive_auto。
+3. 论文表述建议固定为：流程层收益成立，精度增益尚未被当前 `n=3` 证据验证。
 
 样本量与证据边界（必须写清）：
 
@@ -292,11 +325,11 @@ python benchmark_ab_compare.py --root benchmark_ab --baseline baseline --variant
 
 建议在正文里固定一个“保守结论模板”：
 
-1. “在 `n=3` seeds 下，adaptive 系列在精度指标上未显示稳定优势（`1胜2负`），但在流程耗时与符号化稳定性上表现出更一致收益。”
+1. “在 `n=3` seeds 下，adaptive 系列在精度指标上未显示稳定优势（`final_acc`: adaptive `1胜2负`，adaptive_auto `0胜3负`；`macro_auc` 均 `0胜3负`）。”
 2. “因此将 adaptive 视为工程稳定化策略，而非已证实的精度增强策略。”
 3. “后续通过更大 seed 样本与统计检验确认精度结论。”
 
-如果 `final_acc` 与 `macro_auc` 仍是 `1胜2负`，建议表述为“稳定性改善，但精度优势尚不稳定”，不要写“显著优于 baseline”。
+如果 `final_acc` 与 `macro_auc` 未形成稳定胜负优势，建议表述为“流程改进成立，但精度优势未证实”，不要写“显著优于 baseline”。
 
 ## 8. 与总文档统一口径（2026-03）
 
@@ -304,6 +337,4 @@ python benchmark_ab_compare.py --root benchmark_ab --baseline baseline --variant
 
 1. **CLI 默认值**：指参数解析器内置默认（本文件第 4 节）。
 2. **推荐配置**：指基于实验结论的建议组合（见 [symkan_usage.md](symkan_usage.md) 与 [design.md](design.md)）。
-3. 对 2 层 KAN：
-  - 运行稳定与效率优先：`--layerwise-finetune-steps 0`；
-  - 仅在追求小幅分类增益时启用改进版 LayerwiseFT（steps=60 等）。
+3. 对 2 层 KAN：运行稳定与效率优先时使用 `--layerwise-finetune-steps 0`；改进版 LayerwiseFT（steps=60 等）仅作为按需实验开关，不默认承诺分类增益。

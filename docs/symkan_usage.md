@@ -499,9 +499,9 @@ python benchmark_ab_compare.py \
 
 **当前实验结论（3 seeds: 42/52/62）**：
 
-- `adaptive_auto` 在 `final_acc` 均值与方差上最好（mean≈0.755, std≈0.011），`adaptive` 的导出总耗时最快。
-- 但相对 baseline 的逐 seed 胜负在 `final_acc` 上仍是 **1胜2负**，结论应写成“稳定性改善”，不要写成“绝对精度提升”。
-- `adaptive_auto` 的 `rounds_mean = 4.33`（vs `adaptive` 的 1.0），说明它显著缓解了单轮过剪。
+- `baseline` 在 `final_acc` 与 `macro_auc` 上均高于 `adaptive` 与 `adaptive_auto`。
+- `adaptive` 在 `final_acc` 上对 baseline 为 **1胜2负**；`adaptive_auto` 为 **0胜3负**，不支持“精度增强”表述。
+- `adaptive_auto` 的 `rounds_mean = 3.67`（vs `adaptive` 的 1.0），说明它在剪枝节奏控制上优于 `adaptive`，但未转化为稳定精度收益。
 - 论文写作建议：同时报告均值、标准差、中位数差值、胜负计数，避免只报均值。
 
 ### 8.5 LayerwiseFT 改进版使用建议（esreg）
@@ -514,8 +514,14 @@ python benchmark_ab_compare.py \
 
 已有对比结论（3 seeds）可概括为：
 
-- 改进版相对旧 full：符号化耗时约降低 33%，分类指标小幅提升。
+- 改进版相对当前 full（两者默认参数已对齐）：分类与结构指标几乎不变，仅有轻微时间收益（~0.3s 级别）。
 - 改进版相对关闭 LayerwiseFT：收益极小，但耗时增加明显，且公式 R² 更差。
+
+理论解释（简版）：
+
+- 逐层符号化本质是有损替换，`fix_symbolic` 确定函数族后不能回退重选。
+- 对 2 层 KAN，LayerwiseFT 只有一次层间补偿窗口，优化自由度受限。
+- 改进版（早停 + 轻正则 + 60 步）主要是降低旧版长步数无约束微调的副作用，不等于稳定创造净收益。
 
 所以默认仍建议关闭 LayerwiseFT，把它作为可选实验开关。
 
