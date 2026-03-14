@@ -1,4 +1,4 @@
-# symkanbenchmark.py 使用说明（精简版）
+# symkanbenchmark.py 使用说明
 
 [symkanbenchmark.py](../symkanbenchmark.py) 将 kan.ipynb 的主实验流程与两个 benchmark 流程脚本化，核心目标是：
 
@@ -243,23 +243,37 @@ python benchmark_ab_compare.py --root benchmark_ab --baseline baseline --variant
 
 ### 6.4 当前结论（seed: 42/52/62）
 
-基于 [benchmark_ab/comparison/pairwise_delta_summary.csv](../benchmark_ab/comparison/pairwise_delta_summary.csv)：
+基于 [benchmark_ab/comparison/pairwise_delta_summary.csv](../benchmark_ab/comparison/pairwise_delta_summary.csv) 与 [benchmark_ab/comparison/variant_summary.csv](../benchmark_ab/comparison/variant_summary.csv)，建议按“精度-稳定性-代价”三条主线解读：
 
-1. `adaptive` 与 `adaptive_auto` 相对 baseline 在 `final_acc` 均为 `1胜2负`，中位数差值为负。
-2. `macro_auc` 同样为 `1胜2负`，中位数差值为负。
-3. `validation_mean_r2` 两组均为 `2胜1负`，中位数差值为正。
+1. 精度主指标（`final_acc` / `macro_auc`）
+  - `adaptive` 与 `adaptive_auto` 对 baseline 都是 `1胜2负`，中位数差值为负。
+  - 虽然均值差值略为正（受单个 seed 拉动），但在当前 `n=3` 的设置下证据强度不足，不能宣称精度提升成立。
+2. 数值拟合与稳定性（`validation_mean_r2`）
+  - 两组 adaptive 均为 `2胜1负`，中位数差值为正。
+  - 这更像“流程稳定性改善”而非“分类精度提升”：即符号化后的数值一致性更稳，但未稳定转化为最终分类收益。
+3. 运行代价与结构复杂度（`export_wall_time_s` / `final_n_edge` / `symbolic_total_seconds`）
+  - `export_wall_time_s` 两组 adaptive 都明显更快（`3胜0负`），是当前最稳健收益。
+  - `final_n_edge` 仅小幅下降且胜负不稳定，说明压缩效果存在但强度有限。
+  - `symbolic_total_seconds` 的中位数在两组 adaptive 上略高，均值受波动影响较大，不宜单点下结论。
 
 基于 [benchmark_ab/comparison/trace_summary.csv](../benchmark_ab/comparison/trace_summary.csv)：
 
-1. `adaptive`：`rounds_mean = 1.0`，剪枝过快。
-2. `adaptive_auto`：`rounds_mean = 4.33`，`effective_rounds_mean = 3.0`，剪枝节奏改善。
-3. `baseline`：`rounds_mean = 16.67`，最慢但有效剪枝轮最多。
+1. `adaptive`：`rounds_mean = 1.0`，典型“单轮过剪”，容易把搜索过程压缩得过早。
+2. `adaptive_auto`：`rounds_mean = 4.33`，`effective_rounds_mean = 3.0`，相对修复了过剪问题。
+3. `baseline`：`rounds_mean = 16.67`，探索更充分、上限更高，但时间代价最大、波动也更大。
 
-结论：
+综合判断：
 
-1. baseline 仍是“上限高但波动大”。
-2. adaptive 系列主要提升流程稳定性，不保证每个 seed 精度更高。
-3. adaptive_auto 修复“单轮过剪”，但暂未形成稳定精度优势。
+1. baseline 仍是“精度上限候选”，但方差最大、耗时最高。
+2. adaptive 的主要价值已从“提精度”转向“降耗时 + 提流程可控性”。
+3. adaptive_auto 在剪枝节奏上优于 adaptive，但还不足以稳定超越 baseline 的精度中位数。
+4. 当前更稳妥的论文表述应是“效率与稳定性收益明确，精度收益待扩大样本验证”。
+
+样本量与证据边界（必须写清）：
+
+1. 当前仅 `3` 个 seed，统计功效有限。
+2. 存在“均值与中位数方向不一致”的情况，说明结果对异常 seed 敏感。
+3. 建议至少扩展到 `10` 个 seed 后再判断显著性，并补充非参数检验（如 Wilcoxon 符号秩）与效应量。
 
 ## 7. 论文写作建议
 
@@ -268,5 +282,12 @@ python benchmark_ab_compare.py --root benchmark_ab --baseline baseline --variant
 1. 均值与标准差。
 2. 中位数差值。
 3. 相对 baseline 的胜负计数（win/lose/tie）。
+4. 运行代价指标（`export_wall_time_s`、`symbolic_total_seconds`）与结构指标（`final_n_edge`）。
+
+建议在正文里固定一个“保守结论模板”：
+
+1. “在 `n=3` seeds 下，adaptive 系列在精度指标上未显示稳定优势（`1胜2负`），但在流程耗时与符号化稳定性上表现出更一致收益。”
+2. “因此将 adaptive 视为工程稳定化策略，而非已证实的精度增强策略。”
+3. “后续通过更大 seed 样本与统计检验确认精度结论。”
 
 如果 `final_acc` 与 `macro_auc` 仍是 `1胜2负`，建议表述为“稳定性改善，但精度优势尚不稳定”，不要写“显著优于 baseline”。
