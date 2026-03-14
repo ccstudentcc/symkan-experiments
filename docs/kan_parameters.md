@@ -380,9 +380,11 @@ $$
 ### 4.3 微调参数
 
 - `finetune_steps=50, finetune_lr=0.0005`：剪枝后短微调
-- `layerwise_finetune_steps=120`：逐层符号化后的层间微调
+- `layerwise_finetune_steps=60`：逐层符号化后的层间微调（技术默认）
 - `affine_finetune_steps=200`：末端强化微调
 - `affine_finetune_lr_schedule=[0.003, 0.001, 0.0005, 0.0002]`
+
+口径说明：对典型 2 层 KAN（`[in, hidden, class]`），推荐显式设为 `layerwise_finetune_steps=0`；`60` 主要用于按需开启改进版 LayerwiseFT。
 
 ### 4.4 并行参数
 

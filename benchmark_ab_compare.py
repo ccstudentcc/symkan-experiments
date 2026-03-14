@@ -6,6 +6,7 @@ from typing import Dict, List
 
 import numpy as np
 import pandas as pd
+from pandas.errors import EmptyDataError
 
 
 def _read_runs(root: Path, variant: str) -> pd.DataFrame:
@@ -88,23 +89,34 @@ def _seedwise_delta(
 
 def _trace_effective_rounds(root: Path, variant: str, seeds: List[int]) -> pd.DataFrame:
     rows = []
+
+    def _append_empty_row(stage_seed: int) -> None:
+        rows.append(
+            {
+                "variant": variant,
+                "stage_seed": stage_seed,
+                "rounds": 0,
+                "effective_rounds": 0,
+                "total_edges_removed": 0,
+                "mean_drop_ratio": np.nan,
+                "max_drop_ratio": np.nan,
+            }
+        )
+
     for idx, seed in enumerate(seeds, start=1):
         p = root / variant / f"run_{idx:02d}_seed{seed}" / "symbolize_trace.csv"
         if not p.exists():
             continue
-        t = pd.read_csv(p)
-        if len(t) == 0:
-            rows.append(
-                {
-                    "variant": variant,
-                    "stage_seed": seed,
-                    "rounds": 0,
-                    "effective_rounds": 0,
-                    "total_edges_removed": 0,
-                    "mean_drop_ratio": np.nan,
-                    "max_drop_ratio": np.nan,
-                }
-            )
+
+        # Some runs may leave a whitespace-only trace file; treat it as empty trace.
+        try:
+            t = pd.read_csv(p)
+        except EmptyDataError:
+            _append_empty_row(seed)
+            continue
+
+        if t.empty:
+            _append_empty_row(seed)
             continue
 
         removed = (t["edges_before"] - t["edges_after"]).clip(lower=0)

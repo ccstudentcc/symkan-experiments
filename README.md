@@ -74,17 +74,17 @@ best_model, train_result = stagewise_train(
 )
 
 symbolic_result = symbolize_pipeline(
-	model=best_model,
-	dataset=dataset,
-	target_edges=90,
-	max_prune_rounds=20,
-	lib_hidden=LIB_HIDDEN,
-	lib_output=LIB_OUTPUT,
-	layerwise_finetune_steps=120,
-	affine_finetune_steps=200,
-	prune_adaptive_threshold=True,
-	collect_timing=True,
-	verbose=False,
+    model=best_model,
+    dataset=dataset,
+    target_edges=90,
+    max_prune_rounds=20,
+    lib_hidden=LIB_HIDDEN,
+    lib_output=LIB_OUTPUT,
+    layerwise_finetune_steps=0,
+    affine_finetune_steps=200,
+    prune_adaptive_threshold=True,
+    collect_timing=True,
+    verbose=False,
 )
 
 print(symbolic_result["final_acc"])

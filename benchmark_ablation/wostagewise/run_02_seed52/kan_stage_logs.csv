@@ -1,2 +1,2 @@
 ﻿stage,lamb,effective_lamb,lr,acc_before,acc_after,edges_before,edges_after,prune_accepted,prune_attempts,prune_attempt_count,rollback,prune_th,sym_score,train_seconds,prune_seconds,stage_seconds
-0,0.00015000000000000001,0.00015000000000000001,0.007,,0.8763999938964844,,2080,False,[],0,,,,13.7701323,0.0,13.7701323
+0,0.00015000000000000001,0.00015000000000000001,0.007,,0.8763999938964844,,2080,False,[],0,,,,13.740215800000001,0.0,13.740215800000001

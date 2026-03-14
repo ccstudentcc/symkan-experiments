@@ -267,7 +267,7 @@ def fast_symbolic(
     weight_simple=0.0,
     lib_hidden=None,
     lib_output=None,
-    layerwise_finetune_steps=200,
+    layerwise_finetune_steps=60,
     layerwise_finetune_lr=0.005,
     layerwise_finetune_lamb=1e-5,
     layerwise_use_validation=True,

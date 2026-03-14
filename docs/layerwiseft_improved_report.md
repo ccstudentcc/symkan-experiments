@@ -42,6 +42,8 @@
   - 两处 `symbolize_pipeline(...)` 调用均已透传新参数
   - `metrics.json` 增加 layerwise 配置回写字段
 
+口径说明：`120 -> 60` 是 CLI 技术默认值优化；对于典型 2 层 KAN，生产/批量复现实验仍建议显式使用 `--layerwise-finetune-steps 0`，仅在追求小幅分类增益时按需启用改进版 LayerwiseFT。
+
 ### 2.4 独立测试脚本
 
 - 文件：`compare_layerwiseft_improved.py`

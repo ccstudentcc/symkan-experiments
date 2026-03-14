@@ -13,67 +13,77 @@
     "enhanced_n_edge": 2080,
     "selected_stage": "e2e",
     "selected_score": NaN,
-    "final_acc": 0.41920000314712524,
+    "final_acc": 0.4268999993801117,
     "final_n_edge": 47,
     "effective_target_edges": 1040,
     "effective_input_dim": 23,
     "valid_expression_count": 10,
-    "expr_complexity_mean": 43.1,
-    "macro_auc": 0.8281174648416563,
-    "validation_mean_r2": -0.8052494243417871,
+    "expr_complexity_mean": 44.5,
+    "macro_auc": 0.8352704563050477,
+    "validation_mean_r2": -0.757962626558686,
     "validation_negative_r2_count": 9,
-    "stage_total_seconds": 13.7701323,
-    "stage_train_total_seconds": 13.7701323,
+    "stage_total_seconds": 13.740215800000001,
+    "stage_train_total_seconds": 13.740215800000001,
     "stage_prune_total_seconds": 0.0,
     "stage_final_finetune_seconds": 0.0,
-    "symbolic_total_seconds": 25.99083300000001,
-    "export_wall_time_s": 56.840270399999994,
+    "symbolic_total_seconds": 16.372798900000006,
+    "export_wall_time_s": 46.695595,
     "pre_symbolic_n_edge": 2080,
     "pre_symbolic_too_dense": true,
     "stagewise_enabled": false,
     "input_compaction_enabled": true,
+    "layerwise_finetune_steps": 60,
+    "layerwise_finetune_lr": 0.005,
+    "layerwise_finetune_lamb": 1e-05,
+    "layerwise_use_validation": true,
+    "layerwise_validation_ratio": 0.15,
+    "layerwise_validation_seed": 123,
+    "layerwise_early_stop_patience": 2,
+    "layerwise_early_stop_min_delta": 0.001,
+    "layerwise_eval_interval": 20,
+    "layerwise_validation_n_sample": 300,
     "output_dir": "D:\\chenpeng\\Documents\\学习\\数学\\毕业论文\\symkan-experiments\\benchmark_ablation\\wostagewise\\run_02_seed52"
   },
   "roc": [
     {
       "class": 0,
-      "auc": 0.9141999637992668
+      "auc": 0.9198327413005113
     },
     {
       "class": 1,
-      "auc": 0.7635915631188335
+      "auc": 0.7650023479952592
     },
     {
       "class": 2,
-      "auc": 0.8859221244874108
+      "auc": 0.8997151910496581
     },
     {
       "class": 3,
-      "auc": 0.8889395257657022
+      "auc": 0.8949003292987808
     },
     {
       "class": 4,
-      "auc": 0.7300908479488183
+      "auc": 0.7250604019388243
     },
     {
       "class": 5,
-      "auc": 0.9074270192665591
+      "auc": 0.9111976658769407
     },
     {
       "class": 6,
-      "auc": 0.9283619148681703
+      "auc": 0.9279115115312027
     },
     {
       "class": 7,
-      "auc": 0.7868383977996396
+      "auc": 0.7854217010639238
     },
     {
       "class": 8,
-      "auc": 0.7685914544839889
+      "auc": 0.8167299942534253
     },
     {
       "class": 9,
-      "auc": 0.7072118368781731
+      "auc": 0.7069326787419509
     }
   ]
 }

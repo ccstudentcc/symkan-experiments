@@ -6,61 +6,61 @@
 ## Variant Metrics
 
 | variant | metric | mean | median | std | min | max |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| adaptive | export_wall_time_s | 94.478758 | 92.841081 | 12.924166 | 79.532457 | 111.062736 |
-| adaptive | final_acc | 0.754033 | 0.755300 | 0.017741 | 0.731700 | 0.775100 |
-| adaptive | final_n_edge | 86.666667 | 88.000000 | 3.399346 | 82.000000 | 90.000000 |
-| adaptive | macro_auc | 0.948044 | 0.945523 | 0.004009 | 0.944907 | 0.953703 |
-| adaptive | symbolic_total_seconds | 47.597252 | 48.883779 | 3.153120 | 43.256437 | 50.651539 |
-| adaptive | validation_mean_r2 | -0.500101 | -0.445721 | 0.108979 | -0.652178 | -0.402405 |
-| adaptive_auto | export_wall_time_s | 99.135381 | 100.927199 | 10.636341 | 85.305421 | 111.173523 |
-| adaptive_auto | final_acc | 0.755133 | 0.761300 | 0.011211 | 0.739400 | 0.764700 |
-| adaptive_auto | final_n_edge | 88.000000 | 89.000000 | 2.160247 | 85.000000 | 90.000000 |
-| adaptive_auto | macro_auc | 0.948704 | 0.949400 | 0.001021 | 0.947260 | 0.949451 |
-| adaptive_auto | symbolic_total_seconds | 48.588935 | 49.012122 | 1.581085 | 46.475913 | 50.278769 |
-| adaptive_auto | validation_mean_r2 | -0.480890 | -0.456150 | 0.064658 | -0.569496 | -0.417024 |
-| baseline | export_wall_time_s | 124.242818 | 123.768612 | 2.330939 | 121.654809 | 127.305033 |
-| baseline | final_acc | 0.732233 | 0.768600 | 0.060337 | 0.647200 | 0.780900 |
-| baseline | final_n_edge | 89.000000 | 89.000000 | 0.816497 | 88.000000 | 90.000000 |
-| baseline | macro_auc | 0.946050 | 0.953607 | 0.013748 | 0.926757 | 0.957786 |
-| baseline | symbolic_total_seconds | 48.609857 | 48.354937 | 1.989065 | 46.311244 | 51.163390 |
-| baseline | validation_mean_r2 | -0.587365 | -0.580844 | 0.125301 | -0.743982 | -0.437267 |
+|---|---|---:|---:|---:|---:|---:|
+| adaptive | export_wall_time_s | 75.719917 | 84.373186 | 12.882869 | 57.508284 | 85.278281 |
+| adaptive | final_acc | 0.767767 | 0.764500 | 0.011742 | 0.755300 | 0.783500 |
+| adaptive | final_n_edge | 85.333333 | 86.000000 | 2.494438 | 82.000000 | 88.000000 |
+| adaptive | macro_auc | 0.948570 | 0.947740 | 0.002104 | 0.946510 | 0.951460 |
+| adaptive | symbolic_total_seconds | 31.052998 | 31.112219 | 0.979082 | 29.825359 | 32.221415 |
+| adaptive | validation_mean_r2 | -0.536085 | -0.514063 | 0.106147 | -0.675693 | -0.418499 |
+| adaptive_auto | export_wall_time_s | 72.576891 | 67.904416 | 14.624108 | 57.465413 | 92.360845 |
+| adaptive_auto | final_acc | 0.749100 | 0.745100 | 0.018588 | 0.728600 | 0.773600 |
+| adaptive_auto | final_n_edge | 85.333333 | 88.000000 | 5.249339 | 78.000000 | 90.000000 |
+| adaptive_auto | macro_auc | 0.943012 | 0.941397 | 0.004377 | 0.938644 | 0.948995 |
+| adaptive_auto | symbolic_total_seconds | 30.883783 | 30.766319 | 1.755247 | 28.795194 | 33.089837 |
+| adaptive_auto | validation_mean_r2 | -0.613704 | -0.593238 | 0.030555 | -0.656897 | -0.590979 |
+| baseline | export_wall_time_s | 73.168666 | 74.430487 | 2.058069 | 70.266340 | 74.809172 |
+| baseline | final_acc | 0.780733 | 0.780500 | 0.001034 | 0.779600 | 0.782100 |
+| baseline | final_n_edge | 89.666667 | 90.000000 | 0.471405 | 89.000000 | 90.000000 |
+| baseline | macro_auc | 0.954847 | 0.956314 | 0.002288 | 0.951616 | 0.956611 |
+| baseline | symbolic_total_seconds | 33.267782 | 33.199039 | 0.365845 | 32.858059 | 33.746248 |
+| baseline | validation_mean_r2 | -0.613534 | -0.618877 | 0.027055 | -0.643673 | -0.578052 |
 
 ## Baseline Pairwise Delta
 
 | baseline | variant | metric | mean_delta | median_delta | std_delta | win | lose | tie |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| baseline | adaptive | export_wall_time_s | -29.764060 | -28.813728 | 11.448184 | 0 | 3 | 0 |
-| baseline | adaptive | final_acc | 0.021800 | -0.013300 | 0.076442 | 1 | 2 | 0 |
-| baseline | adaptive | final_n_edge | -2.333333 | -2.000000 | 3.681787 | 1 | 2 | 0 |
-| baseline | adaptive | macro_auc | 0.001994 | -0.008084 | 0.017752 | 1 | 2 | 0 |
-| baseline | adaptive | symbolic_total_seconds | -1.012605 | 0.528843 | 5.117344 | 2 | 1 | 0 |
-| baseline | adaptive | validation_mean_r2 | 0.087263 | 0.178439 | 0.219197 | 2 | 1 | 0 |
-| baseline | adaptive_auto | export_wall_time_s | -25.107437 | -20.727610 | 9.628539 | 0 | 3 | 0 |
-| baseline | adaptive_auto | final_acc | 0.022900 | -0.019600 | 0.067007 | 1 | 2 | 0 |
-| baseline | adaptive_auto | final_n_edge | -1.000000 | 0.000000 | 2.943920 | 1 | 1 | 1 |
-| baseline | adaptive_auto | macro_auc | 0.002654 | -0.006347 | 0.014158 | 1 | 2 | 0 |
-| baseline | adaptive_auto | symbolic_total_seconds | -0.020922 | 0.657185 | 3.565776 | 2 | 1 | 0 |
-| baseline | adaptive_auto | validation_mean_r2 | 0.106475 | 0.163820 | 0.176218 | 2 | 1 | 0 |
+|---|---|---|---:|---:|---:|---:|---:|---:|
+| baseline | adaptive | export_wall_time_s | 2.551251 | 9.564014 | 13.948274 | 2 | 1 | 0 |
+| baseline | adaptive | final_acc | -0.012967 | -0.016000 | 0.010709 | 1 | 2 | 0 |
+| baseline | adaptive | final_n_edge | -4.333333 | -3.000000 | 2.624669 | 0 | 3 | 0 |
+| baseline | adaptive | macro_auc | -0.006277 | -0.005106 | 0.001837 | 0 | 3 | 0 |
+| baseline | adaptive | symbolic_total_seconds | -2.214784 | -1.745840 | 1.246497 | 0 | 3 | 0 |
+| baseline | adaptive | validation_mean_r2 | 0.077448 | 0.063988 | 0.095353 | 2 | 1 | 0 |
+| baseline | adaptive_auto | export_wall_time_s | -0.591775 | -6.904756 | 13.316488 | 1 | 2 | 0 |
+| baseline | adaptive_auto | final_acc | -0.031633 | -0.037000 | 0.018399 | 0 | 3 | 0 |
+| baseline | adaptive_auto | final_n_edge | -4.333333 | -1.000000 | 5.436502 | 0 | 2 | 1 |
+| baseline | adaptive_auto | macro_auc | -0.011835 | -0.014917 | 0.006633 | 0 | 3 | 0 |
+| baseline | adaptive_auto | symbolic_total_seconds | -2.383999 | -2.432720 | 2.116163 | 1 | 2 | 0 |
+| baseline | adaptive_auto | validation_mean_r2 | -0.000171 | 0.027898 | 0.056387 | 2 | 1 | 0 |
 
 ## Symbolize Trace Rhythm
 
 | variant | rounds_mean | effective_rounds_mean | total_edges_removed_mean | mean_drop_ratio_mean | max_drop_ratio_mean |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| adaptive | 1.0000 | 1.0000 | 15.6667 |  |  |
-| adaptive_auto | 4.3333 | 3.0000 | 9.3333 | 0.023743 | 0.058969 |
-| baseline | 16.6667 | 9.3333 | 30.6667 |  |  |
+|---|---:|---:|---:|---:|---:|
+| adaptive | 1.0000 | 1.0000 | 16.3333 | 0.158815 | 0.158815 |
+| adaptive_auto | 3.6667 | 3.3333 | 12.6667 | 0.027287 | 0.100226 |
+| baseline | 6.6667 | 5.3333 | 26.3333 | 0.035203 | 0.128140 |
 
 ## Auto Conclusion
 
-- Highest mean final_acc: adaptive_auto
-- Most stable final_acc (lowest std): adaptive_auto
-- Highest mean macro_auc: adaptive_auto
-- Fastest symbolic_total_seconds: adaptive
-- Fastest export_wall_time_s: adaptive
+- Highest mean final_acc: baseline
+- Most stable final_acc (lowest std): baseline
+- Highest mean macro_auc: baseline
+- Fastest symbolic_total_seconds: adaptive_auto
+- Fastest export_wall_time_s: adaptive_auto
 
 - Pairwise note vs baseline:
-  - adaptive on final_acc: win=1, lose=2, median_delta=-0.013300, mean_delta=0.021800
-  - adaptive on macro_auc: win=1, lose=2, median_delta=-0.008084, mean_delta=0.001994
-  - adaptive_auto on final_acc: win=1, lose=2, median_delta=-0.019600, mean_delta=0.022900
-  - adaptive_auto on macro_auc: win=1, lose=2, median_delta=-0.006347, mean_delta=0.002654
+  - adaptive on final_acc: win=1, lose=2, median_delta=-0.016000, mean_delta=-0.012967
+  - adaptive on macro_auc: win=0, lose=3, median_delta=-0.005106, mean_delta=-0.006277
+  - adaptive_auto on final_acc: win=0, lose=3, median_delta=-0.037000, mean_delta=-0.031633
+  - adaptive_auto on macro_auc: win=0, lose=3, median_delta=-0.014917, mean_delta=-0.011835

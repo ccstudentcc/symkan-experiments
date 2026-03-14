@@ -147,7 +147,7 @@ class SymbolizeConfig:
     finetune_lr: float = 0.005
     affine_finetune_steps: int = 600
     affine_finetune_lr_schedule: Optional[list] = None
-    layerwise_finetune_steps: int = 200
+    layerwise_finetune_steps: int = 60
     batch_size: Optional[int] = None
     parallel_mode: str = "auto"
     parallel_workers: Optional[int] = None

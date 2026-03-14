@@ -196,3 +196,12 @@ benchmark_ablation/
 相关总流程文档：
 
 1. [symkanbenchmark 使用说明](symkanbenchmark_usage.md)
+
+## 7. 统一口径说明（2026-03）
+
+与 [design.md](design.md) 和 [symkan_usage.md](symkan_usage.md) 保持一致，本文档默认采用以下结论口径：
+
+1. `stagewise_train` 是必要前提，不作为可选优化项。
+2. 渐进剪枝与输入压缩属于“可解释性/速度”权衡开关，不承诺稳定提精度。
+3. 对 2 层 KAN，默认建议关闭 LayerwiseFT（`--layerwise-finetune-steps 0`）；改进版 LayerwiseFT 仅作为可选实验配置。
+4. A/B 结果优先表述“鲁棒性与耗时收益”，避免把 `n=3` 下的均值波动写成确定的精度优势。

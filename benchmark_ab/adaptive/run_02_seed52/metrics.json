@@ -13,58 +13,77 @@
     "enhanced_n_edge": 105,
     "selected_stage": 7,
     "selected_score": 0.6347452246007466,
-    "final_acc": 0.755299985408783,
+    "final_acc": 0.7645000219345093,
     "final_n_edge": 88,
     "effective_target_edges": 90,
     "effective_input_dim": 53,
     "valid_expression_count": 10,
-    "macro_auc": 0.9455233007361136,
-    "validation_mean_r2": -0.652177923858402,
+    "expr_complexity_mean": 155.7,
+    "macro_auc": 0.946510219184062,
+    "validation_mean_r2": -0.6756934879976682,
     "validation_negative_r2_count": 10,
-    "symbolic_total_seconds": 48.88377939999998,
-    "export_wall_time_s": 79.53245720000001,
+    "stage_total_seconds": 42.53173530000001,
+    "stage_train_total_seconds": 12.515714500000001,
+    "stage_prune_total_seconds": 17.573701599999993,
+    "stage_final_finetune_seconds": 0.8906127999999853,
+    "symbolic_total_seconds": 31.112218799999994,
+    "export_wall_time_s": 84.3731855,
+    "pre_symbolic_n_edge": 105,
+    "pre_symbolic_too_dense": false,
+    "stagewise_enabled": true,
+    "input_compaction_enabled": true,
+    "layerwise_finetune_steps": 60,
+    "layerwise_finetune_lr": 0.005,
+    "layerwise_finetune_lamb": 1e-05,
+    "layerwise_use_validation": true,
+    "layerwise_validation_ratio": 0.15,
+    "layerwise_validation_seed": 123,
+    "layerwise_early_stop_patience": 2,
+    "layerwise_early_stop_min_delta": 0.001,
+    "layerwise_eval_interval": 20,
+    "layerwise_validation_n_sample": 300,
     "output_dir": "benchmark_ab\\adaptive\\run_02_seed52"
   },
   "roc": [
     {
       "class": 0,
-      "auc": 0.9928594054029595
+      "auc": 0.9924162858047875
     },
     {
       "class": 1,
-      "auc": 0.9836587480837129
+      "auc": 0.9830328147866556
     },
     {
       "class": 2,
-      "auc": 0.9364577498634248
+      "auc": 0.934776492127046
     },
     {
       "class": 3,
-      "auc": 0.9305353583189242
+      "auc": 0.9355345873853236
     },
     {
       "class": 4,
-      "auc": 0.893870778470215
+      "auc": 0.9007647750437121
     },
     {
       "class": 5,
-      "auc": 0.9245927297935488
+      "auc": 0.9293309631704058
     },
     {
       "class": 6,
-      "auc": 0.9595483198564436
+      "auc": 0.9567048277142299
     },
     {
       "class": 7,
-      "auc": 0.9506274709385534
+      "auc": 0.9487119243439599
     },
     {
       "class": 8,
-      "auc": 0.9412976930437327
+      "auc": 0.9412064667392535
     },
     {
       "class": 9,
-      "auc": 0.9417847535896208
+      "auc": 0.9426230547252462
     }
   ]
 }

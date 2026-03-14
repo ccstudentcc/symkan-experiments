@@ -97,7 +97,7 @@ benchmark_runs/
 
 ## 4. 参数速查
 
-### 4.1 主实验默认值（与 notebook 对齐）
+### 4.1 主实验参数默认值（CLI 实际默认）
 
 - `--inner-dim 16`：隐藏层宽度（主干表达能力与训练成本的平衡点）。
 - `--top-k 120`：归因后保留的输入特征数（越大保留信息越多，搜索也更慢）。
@@ -105,8 +105,14 @@ benchmark_runs/
 - `--symbolic-target-edges 90`：symbolize 后期望收敛到的边数目标（控制最终复杂度）。
 - `--steps-per-stage 60`：每个 stage 的训练步数。
 - `--finetune-steps 50`：阶段内常规微调步数。
-- `--layerwise-finetune-steps 120`：逐层微调步数（用于稳定结构变更后的收敛）。
+- `--layerwise-finetune-steps 60`：逐层微调步数（改进版默认，含早停与轻正则参数）。
 - `--affine-finetune-steps 200`：仿射参数微调步数（提高最后拟合质量）。
+
+口径说明（与其他文档统一）：
+
+1. 上述是 CLI 技术默认值，用于“不开任何额外开关即可运行”。
+2. 对典型 2 层 KAN（`[in, hidden, class]`），推荐配置是显式传 `--layerwise-finetune-steps 0`，把 LayerwiseFT 作为按需开关。
+3. 如果确实启用 LayerwiseFT，优先使用当前改进版参数（steps=60 + validation early-stop + `lamb=1e-5`），不要回退到旧版长步数无约束微调。
 
 ### 4.2 常用控制参数
 
@@ -142,7 +148,7 @@ benchmark_runs/
 - `--parallel-target-max 80`：并行实验中的最大目标边数。
 - `--parallel-max-prune-rounds 8`：并行实验允许的最大剪枝轮数。
 - `--parallel-finetune-steps 20`：并行实验常规微调步数。
-- `--parallel-layerwise-finetune-steps 40`：并行实验逐层微调步数。
+- `--parallel-layerwise-finetune-steps 20`：并行实验逐层微调步数。
 - `--parallel-affine-finetune-steps 0`：并行实验仿射微调步数（0 代表跳过）。
 
 ## 5. 结果解读最小集合
@@ -291,3 +297,13 @@ python benchmark_ab_compare.py --root benchmark_ab --baseline baseline --variant
 3. “后续通过更大 seed 样本与统计检验确认精度结论。”
 
 如果 `final_acc` 与 `macro_auc` 仍是 `1胜2负`，建议表述为“稳定性改善，但精度优势尚不稳定”，不要写“显著优于 baseline”。
+
+## 8. 与总文档统一口径（2026-03）
+
+为避免跨文档“默认值”和“推荐值”混用，统一采用以下写法：
+
+1. **CLI 默认值**：指参数解析器内置默认（本文件第 4 节）。
+2. **推荐配置**：指基于实验结论的建议组合（见 [symkan_usage.md](symkan_usage.md) 与 [design.md](design.md)）。
+3. 对 2 层 KAN：
+  - 运行稳定与效率优先：`--layerwise-finetune-steps 0`；
+  - 仅在追求小幅分类增益时启用改进版 LayerwiseFT（steps=60 等）。

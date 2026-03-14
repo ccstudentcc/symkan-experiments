@@ -169,7 +169,7 @@ def symbolize_pipeline(
     finetune_lr=0.005,
     affine_finetune_steps=600,
     affine_finetune_lr_schedule=None,
-    layerwise_finetune_steps=200,
+    layerwise_finetune_steps=60,
     layerwise_finetune_lr=0.005,
     layerwise_finetune_lamb=1e-5,
     layerwise_use_validation=True,
