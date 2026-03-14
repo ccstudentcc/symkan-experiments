@@ -170,6 +170,15 @@ def symbolize_pipeline(
     affine_finetune_steps=600,
     affine_finetune_lr_schedule=None,
     layerwise_finetune_steps=200,
+    layerwise_finetune_lr=0.005,
+    layerwise_finetune_lamb=1e-5,
+    layerwise_use_validation=True,
+    layerwise_validation_ratio=0.15,
+    layerwise_validation_seed=None,
+    layerwise_early_stop_patience=2,
+    layerwise_early_stop_min_delta=1e-3,
+    layerwise_eval_interval=20,
+    layerwise_validation_n_sample=300,
     batch_size=None,
     parallel_mode="auto",
     parallel_workers=None,
@@ -212,6 +221,15 @@ def symbolize_pipeline(
         affine_finetune_steps: 末端强化微调总步数。
         affine_finetune_lr_schedule: 强化微调学习率序列。
         layerwise_finetune_steps: 每层符号化后微调步数。
+        layerwise_finetune_lr: 层间微调学习率。
+        layerwise_finetune_lamb: 层间微调稀疏正则权重。
+        layerwise_use_validation: 是否启用验证集驱动的层间微调早停。
+        layerwise_validation_ratio: 当无显式 val split 时，从 train 切分验证集的比例。
+        layerwise_validation_seed: 层间微调验证集切分随机种子。
+        layerwise_early_stop_patience: 层间微调早停耐心轮数。
+        layerwise_early_stop_min_delta: 层间微调 R² 最小改进阈值。
+        layerwise_eval_interval: 层间微调每隔多少步评估一次验证 R²。
+        layerwise_validation_n_sample: 层间微调验证 R² 评估样本数上限。
         batch_size: 批大小；为空时自动使用默认值。
         parallel_mode: 并行模式配置，当前实现会强制回退到串行。
         parallel_workers: 期望 worker 数。
@@ -476,6 +494,15 @@ def symbolize_pipeline(
             lib_hidden=lib_hidden or LIB_HIDDEN,
             lib_output=lib_output or LIB_OUTPUT,
             layerwise_finetune_steps=layerwise_finetune_steps,
+            layerwise_finetune_lr=layerwise_finetune_lr,
+            layerwise_finetune_lamb=layerwise_finetune_lamb,
+            layerwise_use_validation=layerwise_use_validation,
+            layerwise_validation_ratio=layerwise_validation_ratio,
+            layerwise_validation_seed=layerwise_validation_seed,
+            layerwise_early_stop_patience=layerwise_early_stop_patience,
+            layerwise_early_stop_min_delta=layerwise_early_stop_min_delta,
+            layerwise_eval_interval=layerwise_eval_interval,
+            layerwise_validation_n_sample=layerwise_validation_n_sample,
             batch_size=batch_size,
             parallel_mode=parallel_mode,
             parallel_workers=parallel_workers,

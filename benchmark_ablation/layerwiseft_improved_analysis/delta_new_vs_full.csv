@@ -1,0 +1,10 @@
+﻿metric,left,right,left_value,right_value,delta_left_minus_right
+final_acc_mean,layerwiseft_esreg,full,0.785100003083547,0.7768333355585734,0.008266667524973625
+macro_auc_mean,layerwiseft_esreg,full,0.9563373791079282,0.9540474185816604,0.0022899605262677314
+expr_complexity_mean_mean,layerwiseft_esreg,full,130.5,130.76666666666665,-0.2666666666666515
+validation_mean_r2_mean,layerwiseft_esreg,full,-0.6686050426190598,-0.6317512219379036,-0.03685382068115628
+validation_negative_r2_count_mean,layerwiseft_esreg,full,9.333333333333334,9.333333333333334,0.0
+symbolic_total_seconds_mean,layerwiseft_esreg,full,34.328692799999985,51.16175383333333,-16.833061033333344
+stage_total_seconds_mean,layerwiseft_esreg,full,40.396215733333335,39.52059683333335,0.875618899999985
+final_n_edge_mean,layerwiseft_esreg,full,88.66666666666667,88.66666666666667,0.0
+effective_input_dim_mean,layerwiseft_esreg,full,57.0,57.0,0.0

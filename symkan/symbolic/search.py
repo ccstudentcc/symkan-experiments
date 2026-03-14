@@ -5,7 +5,9 @@
 """
 
 from collections import Counter
+from typing import Optional
 
+import numpy as np
 import torch
 
 from symkan.core.train import safe_fit
@@ -90,6 +92,174 @@ def layerwise_symbolic(work, dataset, layer_idx, lib, weight_simple=0.0, verbose
     }
 
 
+def _has_split(dataset, split: str) -> bool:
+    input_key = f"{split}_input"
+    label_key = f"{split}_label"
+    return (
+        input_key in dataset
+        and label_key in dataset
+        and dataset[input_key] is not None
+        and dataset[label_key] is not None
+    )
+
+
+def _build_layerwise_ft_datasets(dataset, use_validation: bool, validation_ratio: float, validation_seed: Optional[int]):
+    if not bool(use_validation):
+        return dataset, None
+
+    if _has_split(dataset, "val"):
+        val_ds = dict(dataset)
+        val_ds["test_input"] = dataset["val_input"]
+        val_ds["test_label"] = dataset["val_label"]
+        return dataset, val_ds
+
+    ratio = float(validation_ratio)
+    if ratio <= 0:
+        return dataset, None
+
+    train_input = dataset["train_input"]
+    train_label = dataset["train_label"]
+    n_total = int(train_input.shape[0])
+    n_val = int(n_total * ratio)
+    if n_total <= 20 or n_val < 10 or n_val >= n_total:
+        return dataset, None
+
+    rng = np.random.default_rng(validation_seed)
+    perm = rng.permutation(n_total)
+    device = train_input.device if torch.is_tensor(train_input) else None
+    val_idx = torch.as_tensor(perm[:n_val], dtype=torch.long, device=device)
+    fit_idx = torch.as_tensor(perm[n_val:], dtype=torch.long, device=device)
+
+    fit_ds = dict(dataset)
+    fit_ds["train_input"] = train_input[fit_idx]
+    fit_ds["train_label"] = train_label[fit_idx]
+
+    val_ds = dict(dataset)
+    val_ds["test_input"] = train_input[val_idx]
+    val_ds["test_label"] = train_label[val_idx]
+    return fit_ds, val_ds
+
+
+def _formula_mean_r2(work, eval_dataset, n_sample: int):
+    from symkan.eval.metrics import validate_formula_numerically
+
+    if eval_dataset is None or not hasattr(work, "symbolic_formula"):
+        return float("nan")
+    try:
+        formulas = work.symbolic_formula()
+    except Exception:
+        return float("nan")
+
+    val_df = validate_formula_numerically(work, formulas, eval_dataset, n_sample=int(n_sample))
+    if val_df is None or len(val_df) == 0 or "r2" not in val_df.columns:
+        return float("nan")
+
+    r2_values = val_df["r2"].to_numpy(dtype=float)
+    if r2_values.size == 0:
+        return float("nan")
+    return float(np.nanmean(r2_values))
+
+
+def _layerwise_finetune_with_early_stop(
+    work,
+    fit_dataset,
+    val_dataset,
+    total_steps: int,
+    lr: float,
+    lamb: float,
+    batch_size: int,
+    use_validation: bool,
+    eval_interval: int,
+    early_stop_patience: int,
+    early_stop_min_delta: float,
+    validation_n_sample: int,
+    verbose: bool,
+):
+    steps = int(total_steps)
+    if steps <= 0:
+        return {
+            "steps_requested": 0,
+            "steps_used": 0,
+            "early_stopped": False,
+            "best_val_r2": float("nan"),
+            "last_val_r2": float("nan"),
+        }
+
+    if (not use_validation) or (val_dataset is None):
+        safe_fit(
+            work,
+            fit_dataset,
+            opt="Adam",
+            steps=steps,
+            lr=float(lr),
+            lamb=float(lamb),
+            batch=batch_size,
+            update_grid=False,
+            singularity_avoiding=True,
+            log=max(1, steps // 5),
+        )
+        return {
+            "steps_requested": steps,
+            "steps_used": steps,
+            "early_stopped": False,
+            "best_val_r2": float("nan"),
+            "last_val_r2": float("nan"),
+        }
+
+    step_chunk = max(1, int(eval_interval))
+    patience_limit = max(1, int(early_stop_patience))
+    min_delta = float(early_stop_min_delta)
+
+    best_state = {k: v.detach().cpu().clone() for k, v in work.state_dict().items()}
+    best_r2 = _formula_mean_r2(work, val_dataset, n_sample=validation_n_sample)
+    last_r2 = float(best_r2)
+    no_improve = 0
+    used_steps = 0
+    early_stopped = False
+
+    while used_steps < steps:
+        chunk = min(step_chunk, steps - used_steps)
+        safe_fit(
+            work,
+            fit_dataset,
+            opt="Adam",
+            steps=int(chunk),
+            lr=float(lr),
+            lamb=float(lamb),
+            batch=batch_size,
+            update_grid=False,
+            singularity_avoiding=True,
+            log=max(1, int(chunk) // 5),
+        )
+        used_steps += int(chunk)
+
+        last_r2 = _formula_mean_r2(work, val_dataset, n_sample=validation_n_sample)
+        improved = np.isfinite(last_r2) and ((not np.isfinite(best_r2)) or (last_r2 > best_r2 + min_delta))
+        if improved:
+            best_r2 = float(last_r2)
+            no_improve = 0
+            best_state = {k: v.detach().cpu().clone() for k, v in work.state_dict().items()}
+        else:
+            no_improve += 1
+            if no_improve >= patience_limit:
+                early_stopped = True
+                if verbose:
+                    print(
+                        f"  LayerwiseFT early-stop: used={used_steps}/{steps}, "
+                        f"best_val_r2={best_r2:.4f}, last_val_r2={last_r2:.4f}"
+                    )
+                break
+
+    work.load_state_dict(best_state)
+    return {
+        "steps_requested": steps,
+        "steps_used": int(used_steps),
+        "early_stopped": bool(early_stopped),
+        "best_val_r2": float(best_r2),
+        "last_val_r2": float(last_r2),
+    }
+
+
 def fast_symbolic(
     work,
     dataset,
@@ -98,6 +268,15 @@ def fast_symbolic(
     lib_hidden=None,
     lib_output=None,
     layerwise_finetune_steps=200,
+    layerwise_finetune_lr=0.005,
+    layerwise_finetune_lamb=1e-5,
+    layerwise_use_validation=True,
+    layerwise_validation_ratio=0.15,
+    layerwise_validation_seed=None,
+    layerwise_early_stop_patience=2,
+    layerwise_early_stop_min_delta=1e-3,
+    layerwise_eval_interval=20,
+    layerwise_validation_n_sample=300,
     batch_size=None,
     parallel_mode="auto",
     parallel_workers=None,
@@ -139,6 +318,12 @@ def fast_symbolic(
     total_active = 0
     total_low_r2 = 0
     layer_times = []
+    fit_dataset, val_dataset = _build_layerwise_ft_datasets(
+        dataset,
+        use_validation=bool(layerwise_use_validation),
+        validation_ratio=float(layerwise_validation_ratio),
+        validation_seed=layerwise_validation_seed,
+    )
     suggest_workers = _resolve_parallel_workers(
         parallel_mode=parallel_mode, parallel_workers=parallel_workers
     )
@@ -166,19 +351,36 @@ def fast_symbolic(
         total_active += result["active"]
         total_low_r2 += result["low_r2"]
 
+        ft_info = {
+            "steps_requested": int(layerwise_finetune_steps),
+            "steps_used": 0,
+            "early_stopped": False,
+            "best_val_r2": float("nan"),
+            "last_val_r2": float("nan"),
+        }
         if result["fixed"] > 0 and l < depth - 1 and layerwise_finetune_steps > 0:
-            safe_fit(
+            ft_info = _layerwise_finetune_with_early_stop(
                 work,
-                dataset,
-                opt="Adam",
-                steps=layerwise_finetune_steps,
-                lr=0.005,
-                lamb=0.0,
-                batch=batch_size,
-                update_grid=False,
-                singularity_avoiding=True,
-                log=max(1, layerwise_finetune_steps // 5),
+                fit_dataset=fit_dataset,
+                val_dataset=val_dataset,
+                total_steps=layerwise_finetune_steps,
+                lr=float(layerwise_finetune_lr),
+                lamb=float(layerwise_finetune_lamb),
+                batch_size=batch_size,
+                use_validation=bool(layerwise_use_validation),
+                eval_interval=int(layerwise_eval_interval),
+                early_stop_patience=int(layerwise_early_stop_patience),
+                early_stop_min_delta=float(layerwise_early_stop_min_delta),
+                validation_n_sample=int(layerwise_validation_n_sample),
+                verbose=bool(verbose),
             )
+        layer_times[-1].update({
+            "layerwise_ft_steps_requested": int(ft_info["steps_requested"]),
+            "layerwise_ft_steps_used": int(ft_info["steps_used"]),
+            "layerwise_ft_early_stopped": bool(ft_info["early_stopped"]),
+            "layerwise_ft_best_val_r2": float(ft_info["best_val_r2"]),
+            "layerwise_ft_last_val_r2": float(ft_info["last_val_r2"]),
+        })
 
     if verbose and all_records:
         name_counts = Counter(r["name"] for r in all_records)

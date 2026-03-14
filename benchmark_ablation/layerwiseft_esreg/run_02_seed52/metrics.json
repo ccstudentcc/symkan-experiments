@@ -1,0 +1,89 @@
+{
+  "metrics": {
+    "run_index": 2,
+    "total_runs": 3,
+    "stage_seed": 52,
+    "device": "cpu",
+    "batch_size": 64,
+    "lib_preset": "layered",
+    "base_acc": 0.8526,
+    "base_n_edge": 12704,
+    "selected_input_dim": 120,
+    "enhanced_acc": 0.8424999713897705,
+    "enhanced_n_edge": 130,
+    "selected_stage": "final",
+    "selected_score": 0.6135576780025775,
+    "final_acc": 0.7804999947547913,
+    "final_n_edge": 90,
+    "effective_target_edges": 90,
+    "effective_input_dim": 55,
+    "valid_expression_count": 10,
+    "expr_complexity_mean": 161.2,
+    "macro_auc": 0.9516162427867029,
+    "validation_mean_r2": -0.6436726164360985,
+    "validation_negative_r2_count": 10,
+    "stage_total_seconds": 42.35810989999999,
+    "stage_train_total_seconds": 13.556848999999971,
+    "stage_prune_total_seconds": 15.711994599999969,
+    "stage_final_finetune_seconds": 0.9786062999999956,
+    "symbolic_total_seconds": 34.17064769999999,
+    "export_wall_time_s": 78.28033480000002,
+    "pre_symbolic_n_edge": 130,
+    "pre_symbolic_too_dense": false,
+    "stagewise_enabled": true,
+    "input_compaction_enabled": true,
+    "layerwise_finetune_steps": 60,
+    "layerwise_finetune_lr": 0.005,
+    "layerwise_finetune_lamb": 1e-05,
+    "layerwise_use_validation": true,
+    "layerwise_validation_ratio": 0.15,
+    "layerwise_validation_seed": 123,
+    "layerwise_early_stop_patience": 2,
+    "layerwise_early_stop_min_delta": 0.001,
+    "layerwise_eval_interval": 20,
+    "layerwise_validation_n_sample": 300,
+    "output_dir": "D:\\chenpeng\\Documents\\学习\\数学\\毕业论文\\symkan-experiments\\benchmark_ablation\\layerwiseft_esreg\\run_02_seed52"
+  },
+  "roc": [
+    {
+      "class": 0,
+      "auc": 0.9913790216751889
+    },
+    {
+      "class": 1,
+      "auc": 0.9917709350487365
+    },
+    {
+      "class": 2,
+      "auc": 0.9567635831794702
+    },
+    {
+      "class": 3,
+      "auc": 0.9531503650921266
+    },
+    {
+      "class": 4,
+      "auc": 0.9032474200727307
+    },
+    {
+      "class": 5,
+      "auc": 0.9228313550793567
+    },
+    {
+      "class": 6,
+      "auc": 0.9703225587481107
+    },
+    {
+      "class": 7,
+      "auc": 0.942526879995004
+    },
+    {
+      "class": 8,
+      "auc": 0.9473811908194943
+    },
+    {
+      "class": 9,
+      "auc": 0.936789118156809
+    }
+  ]
+}

@@ -559,6 +559,15 @@ def run_parallel_benchmark(context: Dict[str, Any], args: argparse.Namespace, ou
                 finetune_steps=args.parallel_finetune_steps,
                 finetune_lr=args.finetune_lr,
                 layerwise_finetune_steps=args.parallel_layerwise_finetune_steps,
+                layerwise_finetune_lr=args.layerwise_finetune_lr,
+                layerwise_finetune_lamb=args.layerwise_finetune_lamb,
+                layerwise_use_validation=args.layerwise_use_validation,
+                layerwise_validation_ratio=args.layerwise_validation_ratio,
+                layerwise_validation_seed=(args.layerwise_validation_seed if args.layerwise_validation_seed is not None else args.global_seed),
+                layerwise_early_stop_patience=args.layerwise_early_stop_patience,
+                layerwise_early_stop_min_delta=args.layerwise_early_stop_min_delta,
+                layerwise_eval_interval=args.layerwise_eval_interval,
+                layerwise_validation_n_sample=args.layerwise_validation_n_sample,
                 affine_finetune_steps=args.parallel_affine_finetune_steps,
                 batch_size=batch_size,
                 prune_eval_interval=args.parallel_prune_eval_interval,
@@ -796,6 +805,15 @@ def run_single_experiment(
             finetune_steps=args.finetune_steps,
             finetune_lr=args.finetune_lr,
             layerwise_finetune_steps=args.layerwise_finetune_steps,
+            layerwise_finetune_lr=args.layerwise_finetune_lr,
+            layerwise_finetune_lamb=args.layerwise_finetune_lamb,
+            layerwise_use_validation=args.layerwise_use_validation,
+            layerwise_validation_ratio=args.layerwise_validation_ratio,
+            layerwise_validation_seed=(args.layerwise_validation_seed if args.layerwise_validation_seed is not None else args.global_seed),
+            layerwise_early_stop_patience=args.layerwise_early_stop_patience,
+            layerwise_early_stop_min_delta=args.layerwise_early_stop_min_delta,
+            layerwise_eval_interval=args.layerwise_eval_interval,
+            layerwise_validation_n_sample=args.layerwise_validation_n_sample,
             affine_finetune_steps=args.affine_finetune_steps,
             affine_finetune_lr_schedule=list(args.affine_lr_schedule),
             parallel_mode=args.parallel_mode,
@@ -910,6 +928,16 @@ def run_single_experiment(
         "pre_symbolic_too_dense": int(export_result.get("input_n_edge", get_n_edge(enhanced_model))) > int(args.stage_target_edges) * 2,
         "stagewise_enabled": bool(not args.disable_stagewise_train),
         "input_compaction_enabled": bool(args.input_compaction),
+        "layerwise_finetune_steps": int(args.layerwise_finetune_steps),
+        "layerwise_finetune_lr": float(args.layerwise_finetune_lr),
+        "layerwise_finetune_lamb": float(args.layerwise_finetune_lamb),
+        "layerwise_use_validation": bool(args.layerwise_use_validation),
+        "layerwise_validation_ratio": float(args.layerwise_validation_ratio),
+        "layerwise_validation_seed": (args.layerwise_validation_seed if args.layerwise_validation_seed is not None else args.global_seed),
+        "layerwise_early_stop_patience": int(args.layerwise_early_stop_patience),
+        "layerwise_early_stop_min_delta": float(args.layerwise_early_stop_min_delta),
+        "layerwise_eval_interval": int(args.layerwise_eval_interval),
+        "layerwise_validation_n_sample": int(args.layerwise_validation_n_sample),
         "output_dir": str(run_dir),
     }
     write_json(run_dir / "metrics.json", {"metrics": metrics, "roc": roc_rows})
@@ -984,7 +1012,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--weight-simple", type=float, default=0.10)
     parser.add_argument("--finetune-steps", type=int, default=50)
     parser.add_argument("--finetune-lr", type=float, default=0.0005)
-    parser.add_argument("--layerwise-finetune-steps", type=int, default=120)
+    parser.add_argument("--layerwise-finetune-steps", type=int, default=60,
+                        help="每层符号化后的层间微调总步数（默认缩短以减少过拟合与耗时）")
+    parser.add_argument("--layerwise-finetune-lr", type=float, default=0.005,
+                        help="层间微调学习率")
+    parser.add_argument("--layerwise-finetune-lamb", type=float, default=1e-5,
+                        help="层间微调稀疏正则权重，建议小值抑制 B-spline 过拟合")
+    parser.add_argument("--layerwise-use-validation", action=argparse.BooleanOptionalAction, default=True,
+                        help="层间微调启用验证集 R² 早停")
+    parser.add_argument("--layerwise-validation-ratio", type=float, default=0.15,
+                        help="无显式验证集时从 train 切分验证集比例")
+    parser.add_argument("--layerwise-validation-seed", type=int, default=None,
+                        help="层间微调验证集切分随机种子；不传则使用随机划分")
+    parser.add_argument("--layerwise-early-stop-patience", type=int, default=2,
+                        help="层间微调验证 R² 早停耐心轮数")
+    parser.add_argument("--layerwise-early-stop-min-delta", type=float, default=1e-3,
+                        help="层间微调验证 R² 最小改进阈值")
+    parser.add_argument("--layerwise-eval-interval", type=int, default=20,
+                        help="层间微调每隔多少步评估一次验证 R²")
+    parser.add_argument("--layerwise-validation-n-sample", type=int, default=300,
+                        help="层间微调验证 R² 计算使用的测试样本上限")
     parser.add_argument("--affine-finetune-steps", type=int, default=200)
     parser.add_argument("--affine-lr-schedule", type=parse_csv_floats, default=[0.003, 0.001, 0.0005, 0.0002])
     parser.add_argument("--parallel-mode", default="auto")
@@ -1007,7 +1054,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--parallel-target-max", type=int, default=80)
     parser.add_argument("--parallel-max-prune-rounds", type=int, default=8)
     parser.add_argument("--parallel-finetune-steps", type=int, default=20)
-    parser.add_argument("--parallel-layerwise-finetune-steps", type=int, default=40)
+    parser.add_argument("--parallel-layerwise-finetune-steps", type=int, default=20)
     parser.add_argument("--parallel-affine-finetune-steps", type=int, default=0)
     parser.add_argument("--parallel-prune-eval-interval", type=int, default=2)
     parser.add_argument("--parallel-prune-attr-sample-adaptive", action=argparse.BooleanOptionalAction, default=True)
