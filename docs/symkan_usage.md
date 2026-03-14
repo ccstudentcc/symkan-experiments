@@ -1,5 +1,28 @@
 # symkan 使用文档（2026 版）
 
+## 文档导航
+
+- 返回总览：[README](../README.md)
+- docs 总入口：[index](index.md)
+- 设计原理：[design](design.md)
+- benchmark 脚本说明：[symkanbenchmark_usage](symkanbenchmark_usage.md)
+- notebook 参数细节：[kan_parameters](kan_parameters.md)
+- 消融实验说明：[ablation_usage](ablation_usage.md)
+
+## 目录
+
+- [1. 项目简介](#1-项目简介)
+- [2. 核心特性（Why symkan）](#2-核心特性why-symkan)
+- [3. 环境安装](#3-环境安装)
+- [4. 快速上手（可直接运行）](#4-快速上手可直接运行)
+- [5. 架构深度解析（Architecture）](#5-架构深度解析architecture)
+- [6. 核心 API 参考](#6-核心-api-参考)
+- [7. 可视化示例](#7-可视化示例)
+- [8. 进阶用法（Advanced Usage）](#8-进阶用法advanced-usage)
+- [9. FAQ](#9-faq)
+- [10. Roadmap（建议）](#10-roadmap建议)
+- [11. 最佳实践总结](#11-最佳实践总结)
+
 > Slogan: 把 KAN 的可表达性，变成可复现、可评估、可落地的符号化流水线。
 
 `symkan` 是基于 `pykan` 的工程化增强层。它不替代 KAN 的核心机制，而是把“训练、剪枝、符号化、评估、导出”串成稳定流程，适用于论文实验与批量复现。

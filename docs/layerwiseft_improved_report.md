@@ -1,5 +1,23 @@
 # LayerwiseFT 改进实验报告（2026-03 最新重跑）
 
+## 文档导航
+
+- 返回总览：[README](../README.md)
+- docs 总入口：[index](index.md)
+- 消融说明：[ablation_usage](ablation_usage.md)
+- 消融计划：[ablation_plan](ablation_plan.md)
+- 消融总报告：[ablation_report](ablation_report.md)
+- benchmark 文档：[symkanbenchmark_usage](symkanbenchmark_usage.md)
+
+## 目录
+
+- [1. 实验目标](#1-实验目标)
+- [2. 实验配置](#2-实验配置)
+- [3. 结果汇总（mean ± std，n=3）](#3-结果汇总mean--stdn3)
+- [4. 关键对比](#4-关键对比)
+- [5. 核心判断](#5-核心判断)
+- [6. 产出文件](#6-产出文件)
+
 ## 1. 实验目标
 
 评估改进版 LayerwiseFT（`layerwiseft_esreg`）相对：

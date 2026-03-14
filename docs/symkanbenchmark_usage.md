@@ -1,5 +1,25 @@
 # symkanbenchmark.py 使用说明
 
+## 文档导航
+
+- 返回总览：[README](../README.md)
+- docs 总入口：[index](index.md)
+- 总体使用文档：[symkan_usage](symkan_usage.md)
+- 设计与兼容策略：[design](design.md)
+- 参数解释（notebook 侧）：[kan_parameters](kan_parameters.md)
+- 消融实验说明：[ablation_usage](ablation_usage.md)
+
+## 目录
+
+- [1. 快速开始](#1-快速开始)
+- [2. 任务与命令速查](#2-任务与命令速查)
+- [3. 输出目录与文件含义](#3-输出目录与文件含义)
+- [4. 参数速查](#4-参数速查)
+- [5. 结果解读最小集合](#5-结果解读最小集合)
+- [6. Adaptive A/B 实验（baseline / adaptive / adaptive_auto）](#6-adaptive-ab-实验baseline--adaptive--adaptive_auto)
+- [7. 论文写作建议](#7-论文写作建议)
+- [8. 与总文档统一口径（2026-03）](#8-与总文档统一口径2026-03)
+
 [symkanbenchmark.py](../symkanbenchmark.py) 将 kan.ipynb 的主实验流程与两个 benchmark 流程脚本化，核心目标是：
 
 1. 支持同一参数集的批量多 seed 运行。

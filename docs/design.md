@@ -1,5 +1,27 @@
 # symkan 设计文档
 
+## 文档导航
+
+- 返回总览：[README](../README.md)
+- docs 总入口：[index](index.md)
+- 使用说明：[symkan_usage](symkan_usage.md)
+- benchmark 参数与产物：[symkanbenchmark_usage](symkanbenchmark_usage.md)
+- 参数细节：[kan_parameters](kan_parameters.md)
+- 消融说明：[ablation_usage](ablation_usage.md)
+
+## 目录
+
+- [目标](#目标)
+- [非目标](#非目标)
+- [核心数据结构](#核心数据结构)
+- [为什么分成 stagewise_train 和 symbolize_pipeline](#为什么分成-stagewise_train-和-symbolize_pipeline)
+- [关键算法选型](#关键算法选型)
+- [行内注释策略](#行内注释策略)
+- [风险与边界](#风险与边界)
+- [实验回证后的设计收敛（2026-03）](#实验回证后的设计收敛2026-03)
+- [默认策略与兼容约束](#默认策略与兼容约束)
+- [后续演进方向](#后续演进方向)
+
 ## 目标
 
 symkan 要解决的不是“如何重新实现 KAN”，而是“如何把 KAN 的训练结果稳定地推进到可验证、可复现、可导出的符号表达式”。核心目标有三点：

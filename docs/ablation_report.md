@@ -1,5 +1,22 @@
 # symkan 单点消融实验报告
 
+## 文档导航
+
+- 返回总览：[README](../README.md)
+- docs 总入口：[index](index.md)
+- 消融说明：[ablation_usage](ablation_usage.md)
+- 消融计划：[ablation_plan](ablation_plan.md)
+- LayerwiseFT 改进报告：[layerwiseft_improved_report](layerwiseft_improved_report.md)
+- benchmark 文档：[symkanbenchmark_usage](symkanbenchmark_usage.md)
+
+## 目录
+
+- [1. 实验设计回顾](#1-实验设计回顾)
+- [2. 主要指标汇总（mean ± std，n=3）](#2-主要指标汇总mean--stdn3)
+- [3. 各模块单点消融分析](#3-各模块单点消融分析)
+- [4. 综合分析](#4-综合分析)
+- [5. 结论（统一口径）](#5-结论统一口径)
+
 **实验日期**：2026-03-14  
 **数据集**：内部 MNIST 特征集（10 类，784 维输入）  
 **数据来源**：`benchmark_ablation/ablation_runs_summary.csv`（最新重跑）  

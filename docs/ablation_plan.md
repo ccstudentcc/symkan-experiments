@@ -1,5 +1,23 @@
 # symkan 单点消融实验计划（Ablation Plan）
 
+## 文档导航
+
+- 返回总览：[README](../README.md)
+- docs 总入口：[index](index.md)
+- 消融说明：[ablation_usage](ablation_usage.md)
+- 消融报告：[ablation_report](ablation_report.md)
+- LayerwiseFT 改进报告：[layerwiseft_improved_report](layerwiseft_improved_report.md)
+- benchmark 文档：[symkanbenchmark_usage](symkanbenchmark_usage.md)
+
+## 目录
+
+- [1. 实验目标与核心问题](#1-实验目标与核心问题)
+- [2. 实验约定（必须固定）](#2-实验约定必须固定)
+- [3. 基线定义（Full Pipeline）](#3-基线定义full-pipeline)
+- [4. 单点消融设计](#4-单点消融设计)
+- [5. 实验矩阵总览](#5-实验矩阵总览)
+- [6. 结果记录字段（必须包含）](#6-结果记录字段必须包含)
+
 ## 1. 实验目标与核心问题
 
 目标：围绕 symkan 的两段式架构（训练与准备、符号化流水线）做单点消融，回答每个设计是否真的带来可观测收益，而不是“看起来合理”。

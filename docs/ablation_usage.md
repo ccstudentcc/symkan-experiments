@@ -1,5 +1,26 @@
 # ablation 使用说明
 
+## 文档导航
+
+- 返回总览：[README](../README.md)
+- docs 总入口：[index](index.md)
+- 总体使用文档：[symkan_usage](symkan_usage.md)
+- benchmark 文档：[symkanbenchmark_usage](symkanbenchmark_usage.md)
+- 消融计划：[ablation_plan](ablation_plan.md)
+- 消融报告：[ablation_report](ablation_report.md)
+- LayerwiseFT 改进报告：[layerwiseft_improved_report](layerwiseft_improved_report.md)
+
+## 目录
+
+- [1. 快速开始](#1-快速开始)
+- [2. ablation_runner.py 参数速查](#2-ablation_runnerpy-参数速查)
+- [3. analyze_layerwiseft.py 参数速查](#3-analyze_layerwiseftpy-参数速查)
+- [4. compare_layerwiseft_improved.py 参数速查](#4-compare_layerwiseft_improvedpy-参数速查)
+- [5. 输出目录与文件含义](#5-输出目录与文件含义)
+- [6. 实验报告与文档链接](#6-实验报告与文档链接)
+- [7. 统一口径说明（2026-03）](#7-统一口径说明2026-03)
+- [8. 最新结果快照（2026-03-14 重跑）](#8-最新结果快照2026-03-14-重跑)
+
 本文档覆盖以下 3 个脚本：
 
 1. [ablation_runner.py](../ablation_runner.py)：运行单因素消融矩阵（full / wostagewise / wopruning / wocompact / wolayerwiseft）。
