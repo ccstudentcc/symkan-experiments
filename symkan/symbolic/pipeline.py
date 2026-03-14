@@ -174,6 +174,8 @@ def symbolize_pipeline(
     parallel_mode="auto",
     parallel_workers=None,
     parallel_min_tasks=16,
+    enable_input_compaction=True,
+    prune_collapse_floor=0.6,
     prune_eval_interval=1,
     prune_attr_sample_adaptive=False,
     prune_attr_sample_min=512,
@@ -214,6 +216,9 @@ def symbolize_pipeline(
         parallel_mode: 并行模式配置，当前实现会强制回退到串行。
         parallel_workers: 期望 worker 数。
         parallel_min_tasks: 启用并行的最小任务阈值。
+        enable_input_compaction: 是否在符号化前执行输入压缩。
+        prune_collapse_floor: 精度崩塌保护底线，当模型精度低于初始精度乘以该系数时回滚并中止剪枝；
+            设为 0.0 可完全关闭该保护，适用于消融实验中预期模型从稠密状态起步的情形。
         prune_eval_interval: 剪枝评估间隔。
         prune_attr_sample_adaptive: 是否启用归因采样分级。
         prune_attr_sample_min: 归因最小采样数。
@@ -421,7 +426,7 @@ def symbolize_pipeline(
             if near_ceiling and low_gain_rounds >= max(1, int(prune_adaptive_low_gain_patience)):
                 break
 
-        if acc_now < baseline_acc * 0.6:
+        if float(prune_collapse_floor) > 0.0 and acc_now < baseline_acc * float(prune_collapse_floor):
             work.load_state_dict(snap_prune_state)
             break
 
@@ -432,13 +437,16 @@ def symbolize_pipeline(
 
     if np.isfinite(n_edge_now) and n_edge_now > 0:
         try:
-            compact_state = compact_inputs_for_symbolic(work, dataset)
+            compact_state = compact_inputs_for_symbolic(work, dataset) if enable_input_compaction else None
             if compact_state is not None:
                 work = compact_state["model"]
                 finetune_dataset = compact_state["dataset"]
                 effective_inputs = compact_state["active_inputs"]
                 if verbose:
                     print(f"[symbolize_pipeline] 输入压缩: {int(dataset['train_input'].shape[1])} -> {len(effective_inputs)}")
+            elif not enable_input_compaction:
+                if verbose:
+                    print("[symbolize_pipeline] 跳过输入压缩")
         except Exception:
             compact_state = None
             finetune_dataset = dataset

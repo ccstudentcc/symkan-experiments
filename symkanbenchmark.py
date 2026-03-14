@@ -581,6 +581,8 @@ def run_parallel_benchmark(context: Dict[str, Any], args: argparse.Namespace, ou
                 parallel_mode=cfg["parallel_mode"],
                 parallel_workers=cfg["parallel_workers"],
                 parallel_min_tasks=args.parallel_min_tasks,
+                enable_input_compaction=args.input_compaction,
+                prune_collapse_floor=args.prune_collapse_floor,
             )
         wall_time = time.perf_counter() - t0
         timing = out.get("timing", {})
@@ -661,47 +663,121 @@ def run_single_experiment(
     x_test_sel = data["X_test"][:, keep_idx]
     dataset_enhanced = build_dataset(x_train_sel, data["Y_train"], x_test_sel, data["Y_test"])
 
-    with maybe_silent(silent):
-        enhanced_model, enhanced_res = stagewise_train(
-            dataset_enhanced,
+    stage_fallback_t0 = time.perf_counter()
+    if args.disable_stagewise_train:
+        enhanced_model = KAN(
             width=[int(x_train_sel.shape[1]), inner_dim, data["n_classes"]],
             grid=args.grid,
             k=args.k,
             seed=stage_seed,
-            lamb_schedule=tuple(args.stage_lamb_schedule),
-            lr_schedule=tuple(args.stage_lr_schedule),
-            steps_per_stage=args.steps_per_stage,
-            batch_size=batch_size,
-            prune_start_stage=args.prune_start_stage,
-            target_edges=args.stage_target_edges,
-            prune_edge_threshold_init=args.prune_edge_threshold_init,
-            prune_edge_threshold_step=args.prune_edge_threshold_step,
-            prune_acc_drop_tol=args.prune_acc_drop_tol,
-            post_prune_ft_steps=args.post_prune_ft_steps,
-            sym_target_edges=args.sym_target_edges,
-            acc_weight=args.acc_weight,
-            use_validation=args.use_validation,
-            validation_ratio=args.validation_ratio,
-            validation_seed=args.validation_seed if args.validation_seed is not None else args.global_seed,
-            adaptive_threshold=args.adaptive_threshold,
-            threshold_base_step=args.threshold_base_step,
-            threshold_min=args.threshold_min,
-            threshold_max=args.threshold_max,
-            success_boost=args.success_boost,
-            failure_penalty=args.failure_penalty,
-            min_gain_threshold=args.stage_min_gain_threshold,
-            max_prune_attempts=args.stage_max_prune_attempts,
-            adaptive_lamb=args.adaptive_lamb,
-            min_lamb_ratio=args.min_lamb_ratio,
-            max_lamb_ratio=args.max_lamb_ratio,
-            adaptive_ft=args.adaptive_ft,
-            min_ft_ratio=args.min_ft_ratio,
-            stage_early_stop=args.stage_early_stop,
-            stage_early_stop_patience=args.stage_early_stop_patience,
-            stage_early_stop_min_acc_gain=args.stage_early_stop_min_acc_gain,
-            stage_early_stop_edge_buffer=args.stage_early_stop_edge_buffer,
-            verbose=(args.verbose and not silent),
+            auto_save=False,
+            symbolic_enabled=True,
+            save_act=True,
+            device=get_device(),
         )
+        e2e_steps = int(args.e2e_steps) if int(args.e2e_steps) > 0 else int(len(args.stage_lr_schedule) * args.steps_per_stage)
+        e2e_lr = float(args.e2e_lr) if float(args.e2e_lr) > 0 else float(np.median(args.stage_lr_schedule))
+        e2e_lamb = float(args.e2e_lamb) if float(args.e2e_lamb) >= 0 else float(np.median(args.stage_lamb_schedule))
+        with maybe_silent(silent):
+            e2e_res = safe_fit(
+                enhanced_model,
+                dataset_enhanced,
+                opt="Adam",
+                steps=e2e_steps,
+                lr=e2e_lr,
+                lamb=e2e_lamb,
+                batch=batch_size,
+                update_grid=True,
+                singularity_avoiding=True,
+                log=max(1, e2e_steps // 10),
+            )
+        stage_total_seconds = float(time.perf_counter() - stage_fallback_t0)
+        enhanced_res = {
+            "train_loss": list(e2e_res.get("train_loss", [])),
+            "test_loss": list(e2e_res.get("test_loss", [])),
+            "stage_logs": [
+                {
+                    "stage": 0,
+                    "lamb": float(e2e_lamb),
+                    "effective_lamb": float(e2e_lamb),
+                    "lr": float(e2e_lr),
+                    "acc_before": float("nan"),
+                    "acc_after": float(model_acc_ds(enhanced_model, dataset_enhanced)),
+                    "edges_before": float("nan"),
+                    "edges_after": int(get_n_edge(enhanced_model)),
+                    "prune_accepted": False,
+                    "prune_attempts": [],
+                    "prune_attempt_count": 0,
+                    "rollback": "",
+                    "prune_th": float("nan"),
+                    "sym_score": float("nan"),
+                    "train_seconds": float(stage_total_seconds),
+                    "prune_seconds": 0.0,
+                    "stage_seconds": float(stage_total_seconds),
+                }
+            ],
+            "best_acc": float(model_acc_ds(enhanced_model, dataset_enhanced)),
+            "selected_stage": "e2e",
+            "selected_edges": int(get_n_edge(enhanced_model)),
+            "selected_score": float("nan"),
+            "stage_snapshots": [],
+            "stage_early_stopped": False,
+            "stage_early_stop_reason": "",
+            "stage_timings": [
+                {
+                    "stage": 0,
+                    "train_seconds": float(stage_total_seconds),
+                    "prune_seconds": 0.0,
+                    "stage_seconds": float(stage_total_seconds),
+                }
+            ],
+            "stage_train_total_seconds": float(stage_total_seconds),
+            "stage_prune_total_seconds": 0.0,
+            "final_finetune_seconds": 0.0,
+            "stage_total_seconds": float(stage_total_seconds),
+        }
+    else:
+        with maybe_silent(silent):
+            enhanced_model, enhanced_res = stagewise_train(
+                dataset_enhanced,
+                width=[int(x_train_sel.shape[1]), inner_dim, data["n_classes"]],
+                grid=args.grid,
+                k=args.k,
+                seed=stage_seed,
+                lamb_schedule=tuple(args.stage_lamb_schedule),
+                lr_schedule=tuple(args.stage_lr_schedule),
+                steps_per_stage=args.steps_per_stage,
+                batch_size=batch_size,
+                prune_start_stage=args.prune_start_stage,
+                target_edges=args.stage_target_edges,
+                prune_edge_threshold_init=args.prune_edge_threshold_init,
+                prune_edge_threshold_step=args.prune_edge_threshold_step,
+                prune_acc_drop_tol=args.prune_acc_drop_tol,
+                post_prune_ft_steps=args.post_prune_ft_steps,
+                sym_target_edges=args.sym_target_edges,
+                acc_weight=args.acc_weight,
+                use_validation=args.use_validation,
+                validation_ratio=args.validation_ratio,
+                validation_seed=args.validation_seed if args.validation_seed is not None else args.global_seed,
+                adaptive_threshold=args.adaptive_threshold,
+                threshold_base_step=args.threshold_base_step,
+                threshold_min=args.threshold_min,
+                threshold_max=args.threshold_max,
+                success_boost=args.success_boost,
+                failure_penalty=args.failure_penalty,
+                min_gain_threshold=args.stage_min_gain_threshold,
+                max_prune_attempts=args.stage_max_prune_attempts,
+                adaptive_lamb=args.adaptive_lamb,
+                min_lamb_ratio=args.min_lamb_ratio,
+                max_lamb_ratio=args.max_lamb_ratio,
+                adaptive_ft=args.adaptive_ft,
+                min_ft_ratio=args.min_ft_ratio,
+                stage_early_stop=args.stage_early_stop,
+                stage_early_stop_patience=args.stage_early_stop_patience,
+                stage_early_stop_min_acc_gain=args.stage_early_stop_min_acc_gain,
+                stage_early_stop_edge_buffer=args.stage_early_stop_edge_buffer,
+                verbose=(args.verbose and not silent),
+            )
     enhanced_acc = float(model_acc_ds(enhanced_model, dataset_enhanced))
     stage_df = pd.DataFrame(enhanced_res.get("stage_logs", []))
     save_stage_logs(stage_df, csv_path=str(run_dir / "kan_stage_logs.csv"))
@@ -742,6 +818,8 @@ def run_single_experiment(
             heavy_ft_early_stop_min_delta=args.heavy_ft_early_stop_min_delta,
             collect_timing=True,
             batch_size=batch_size,
+            enable_input_compaction=args.input_compaction,
+            prune_collapse_floor=args.prune_collapse_floor,
             verbose=(args.verbose and not silent),
         )
     export_wall_time = float(time.perf_counter() - export_t0)
@@ -768,6 +846,13 @@ def run_single_experiment(
 
     summary_df = build_formula_summary(export_formulas, valid_exprs, roc_data, data["n_classes"])
     save_symbolic_summary(summary_df, csv_path=str(run_dir / "kan_symbolic_summary.csv"))
+    valid_complexity = summary_df.loc[summary_df["expr_full"] != "N/A (零或常数)", "复杂度"]
+    expr_complexity_mean = float(valid_complexity.mean()) if len(valid_complexity) > 0 else float("nan")
+
+    stage_total_seconds = float(enhanced_res.get("stage_total_seconds", time.perf_counter() - stage_fallback_t0))
+    stage_train_total_seconds = float(enhanced_res.get("stage_train_total_seconds", float("nan")))
+    stage_prune_total_seconds = float(enhanced_res.get("stage_prune_total_seconds", float("nan")))
+    stage_final_finetune_seconds = float(enhanced_res.get("final_finetune_seconds", float("nan")))
 
     roc_rows = [
         {"class": class_idx, "auc": float(roc_data[class_idx]["auc"])} for class_idx in range(data["n_classes"])
@@ -811,11 +896,20 @@ def run_single_experiment(
         "effective_target_edges": int(export_result.get("effective_target_edges", -1)),
         "effective_input_dim": int(export_result.get("effective_input_dim", -1)),
         "valid_expression_count": int(len(valid_exprs)),
+        "expr_complexity_mean": expr_complexity_mean,
         "macro_auc": auc_macro,
         "validation_mean_r2": float(val_df["r2"].mean()) if val_df is not None and len(val_df) > 0 else float("nan"),
         "validation_negative_r2_count": int((val_df["r2"] < 0).sum()) if val_df is not None and len(val_df) > 0 else 0,
+        "stage_total_seconds": stage_total_seconds,
+        "stage_train_total_seconds": stage_train_total_seconds,
+        "stage_prune_total_seconds": stage_prune_total_seconds,
+        "stage_final_finetune_seconds": stage_final_finetune_seconds,
         "symbolic_total_seconds": float(export_result.get("timing", {}).get("symbolic_total_seconds", float("nan"))),
         "export_wall_time_s": export_wall_time,
+        "pre_symbolic_n_edge": int(export_result.get("input_n_edge", get_n_edge(enhanced_model))),
+        "pre_symbolic_too_dense": int(export_result.get("input_n_edge", get_n_edge(enhanced_model))) > int(args.stage_target_edges) * 2,
+        "stagewise_enabled": bool(not args.disable_stagewise_train),
+        "input_compaction_enabled": bool(args.input_compaction),
         "output_dir": str(run_dir),
     }
     write_json(run_dir / "metrics.json", {"metrics": metrics, "roc": roc_rows})
@@ -921,6 +1015,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--parallel-prune-attr-sample-max", type=int, default=1536)
     parser.add_argument("--parallel-heavy-ft-patience", type=int, default=1)
     parser.add_argument("--parallel-heavy-ft-min-delta", type=float, default=5e-4)
+    parser.add_argument("--input-compaction", action=argparse.BooleanOptionalAction, default=True,
+                        help="是否在符号化阶段执行输入压缩")
+
+    parser.add_argument("--disable-stagewise-train", action=argparse.BooleanOptionalAction, default=False,
+                        help="关闭 stagewise_train，改为一次性端到端训练")
+    parser.add_argument("--e2e-steps", type=int, default=0,
+                        help="一次性训练步数，<=0 自动使用 len(stage_lr_schedule)*steps_per_stage")
+    parser.add_argument("--e2e-lr", type=float, default=0.0,
+                        help="一次性训练学习率，<=0 自动取 stage_lr_schedule 中位数")
+    parser.add_argument("--e2e-lamb", type=float, default=-1.0,
+                        help="一次性训练稀疏正则，<0 自动取 stage_lamb_schedule 中位数")
+    parser.add_argument("--prune-collapse-floor", type=float, default=0.6,
+                        help="精度崩塌保护底线，当模型精度低于初始精度乘以该系数时回滚并中止剪枝；设为 0.0 可完全关闭（消融实验稠密入口时使用）")
 
     # ---- adaptive pruning (stagewise_train) ----
     parser.add_argument("--use-validation", action=argparse.BooleanOptionalAction, default=False,

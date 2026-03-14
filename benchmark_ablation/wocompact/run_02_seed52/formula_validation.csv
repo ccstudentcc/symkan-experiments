@@ -1,0 +1,11 @@
+﻿index,r2,complexity,numerically_unstable,error
+0,0.4338287532299848,83,False,
+1,0.35562405358173965,60,False,
+2,0.46311869281430307,50,False,
+3,-0.37224519551550905,75,False,
+4,0.6161739633148935,77,False,
+5,0.0027530715386765436,215,False,
+6,,56,True,loop of ufunc does not support argument 0 of type Add which has no callable tanh method
+7,0.645146470854338,111,False,
+8,,430,True,loop of ufunc does not support argument 0 of type Add which has no callable tanh method
+9,-0.24426290160541075,232,False,

@@ -1,0 +1,79 @@
+{
+  "metrics": {
+    "run_index": 2,
+    "total_runs": 3,
+    "stage_seed": 52,
+    "device": "cpu",
+    "batch_size": 64,
+    "lib_preset": "layered",
+    "base_acc": 0.8615,
+    "base_n_edge": 12704,
+    "selected_input_dim": 120,
+    "enhanced_acc": 0.8278999924659729,
+    "enhanced_n_edge": 120,
+    "selected_stage": 9,
+    "selected_score": 0.6222833295663197,
+    "final_acc": 0.7452999949455261,
+    "final_n_edge": 120,
+    "effective_target_edges": 90,
+    "effective_input_dim": 68,
+    "valid_expression_count": 10,
+    "expr_complexity_mean": 236.7,
+    "macro_auc": 0.9520121374296654,
+    "validation_mean_r2": -0.5013969762495967,
+    "validation_negative_r2_count": 10,
+    "stage_total_seconds": 41.1848219,
+    "stage_train_total_seconds": 13.04972620000001,
+    "stage_prune_total_seconds": 15.29061740000003,
+    "stage_final_finetune_seconds": 0.9630903000000046,
+    "symbolic_total_seconds": 62.32592100000002,
+    "export_wall_time_s": 96.48755569999997,
+    "pre_symbolic_n_edge": 120,
+    "pre_symbolic_too_dense": false,
+    "stagewise_enabled": true,
+    "input_compaction_enabled": true,
+    "output_dir": "D:\\chenpeng\\Documents\\学习\\数学\\毕业论文\\symkan-experiments\\benchmark_ablation\\wopruning\\run_02_seed52"
+  },
+  "roc": [
+    {
+      "class": 0,
+      "auc": 0.9935122629983256
+    },
+    {
+      "class": 1,
+      "auc": 0.9931193054903336
+    },
+    {
+      "class": 2,
+      "auc": 0.9568794127613078
+    },
+    {
+      "class": 3,
+      "auc": 0.8846268681373143
+    },
+    {
+      "class": 4,
+      "auc": 0.9381587018314581
+    },
+    {
+      "class": 5,
+      "auc": 0.9291633802442439
+    },
+    {
+      "class": 6,
+      "auc": 0.9742113929936795
+    },
+    {
+      "class": 7,
+      "auc": 0.9599057964163475
+    },
+    {
+      "class": 8,
+      "auc": 0.9409089006388572
+    },
+    {
+      "class": 9,
+      "auc": 0.9496353527847856
+    }
+  ]
+}

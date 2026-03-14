@@ -5,6 +5,7 @@
 """
 
 import copy
+import time
 import warnings
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -493,6 +494,10 @@ def stagewise_train(
     stage_snapshots = []
     stage_state_dicts = []
     topk_models = []
+    stage_timings = []
+    stage_train_total_seconds = 0.0
+    stage_prune_total_seconds = 0.0
+    stagewise_t0 = time.perf_counter()
 
     cur_prune_th = prune_edge_threshold_init
     max_acc_seen = 0.0
@@ -512,10 +517,13 @@ def stagewise_train(
         )
 
     for si, lamb in enumerate(lamb_schedule):
+        stage_t0 = time.perf_counter()
         lr = float(lr_schedule[min(si, len(lr_schedule) - 1)])
         acc_before = model_acc_ds(model, dataset)
         edge_before = get_n_edge(model)
         rollback = ""
+        train_seconds = 0.0
+        prune_seconds = 0.0
         stage_lamb = float(lamb)
         if adaptive_lamb:
             stage_lamb = _compute_adaptive_lamb(
@@ -529,6 +537,7 @@ def stagewise_train(
         prune_attempts = []
 
         try:
+            fit_t0 = time.perf_counter()
             res = safe_fit(
                 model,
                 dataset,
@@ -541,6 +550,8 @@ def stagewise_train(
                 singularity_avoiding=True,
                 log=max(1, steps_per_stage // 10),
             )
+            train_seconds = float(time.perf_counter() - fit_t0)
+            stage_train_total_seconds += train_seconds
             all_train_loss.extend(list(res.get("train_loss", [])))
             all_test_loss.extend(list(res.get("test_loss", [])))
         except Exception as e:
@@ -550,6 +561,7 @@ def stagewise_train(
 
         prune_accepted = False
         if si >= prune_start_stage and get_n_edge(model) > target_edges and not rollback:
+            prune_t0 = time.perf_counter()
             if adaptive_threshold and controller is not None:
                 attempt_idx = 0
                 while attempt_idx < max_prune_attempts and get_n_edge(model) > target_edges:
@@ -657,6 +669,8 @@ def stagewise_train(
                 except Exception as e:
                     rollback = f"prune_error: {e}"
                     model = snap
+            prune_seconds = float(time.perf_counter() - prune_t0)
+            stage_prune_total_seconds += prune_seconds
 
         acc_after = model_acc_ds(model, dataset)
         edge_after = get_n_edge(model)
@@ -708,6 +722,17 @@ def stagewise_train(
                 "rollback": rollback,
                 "prune_th": float(cur_prune_th),
                 "sym_score": float(score),
+                "train_seconds": float(train_seconds),
+                "prune_seconds": float(prune_seconds),
+                "stage_seconds": float(time.perf_counter() - stage_t0),
+            }
+        )
+        stage_timings.append(
+            {
+                "stage": int(si),
+                "train_seconds": float(train_seconds),
+                "prune_seconds": float(prune_seconds),
+                "stage_seconds": float(time.perf_counter() - stage_t0),
             }
         )
         if verbose:
@@ -743,7 +768,9 @@ def stagewise_train(
                     print(f"[stage {si}] {stage_early_stop_reason}")
                 break
 
+    final_finetune_seconds = 0.0
     try:
+        final_fit_t0 = time.perf_counter()
         final_res = safe_fit(
             model,
             dataset,
@@ -756,6 +783,7 @@ def stagewise_train(
             singularity_avoiding=True,
             log=10,
         )
+        final_finetune_seconds = float(time.perf_counter() - final_fit_t0)
         all_train_loss.extend(list(final_res.get("train_loss", [])))
         all_test_loss.extend(list(final_res.get("test_loss", [])))
     except Exception:
@@ -839,6 +867,11 @@ def stagewise_train(
         "stage_snapshots": stage_snapshots,
         "stage_early_stopped": bool(stage_early_stopped),
         "stage_early_stop_reason": stage_early_stop_reason,
+        "stage_timings": stage_timings,
+        "stage_train_total_seconds": float(stage_train_total_seconds),
+        "stage_prune_total_seconds": float(stage_prune_total_seconds),
+        "final_finetune_seconds": float(final_finetune_seconds),
+        "stage_total_seconds": float(time.perf_counter() - stagewise_t0),
     }
     if keep_topk_models and keep_topk_models > 0:
         result["topk_models"] = topk_models

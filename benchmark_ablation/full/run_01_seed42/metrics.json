@@ -1,0 +1,77 @@
+{
+  "metrics": {
+    "run_index": 1,
+    "total_runs": 3,
+    "stage_seed": 42,
+    "device": "cpu",
+    "batch_size": 64,
+    "lib_preset": "layered",
+    "base_acc": 0.8526,
+    "base_n_edge": 12704,
+    "selected_input_dim": 120,
+    "enhanced_acc": 0.8159999847412109,
+    "enhanced_n_edge": 116,
+    "selected_stage": 8,
+    "selected_score": 0.6235172337499157,
+    "final_acc": 0.7771000266075134,
+    "final_n_edge": 90,
+    "effective_target_edges": 90,
+    "effective_input_dim": 59,
+    "valid_expression_count": 10,
+    "expr_complexity_mean": 120.0,
+    "macro_auc": 0.9557746625487364,
+    "validation_mean_r2": -0.5986446336259124,
+    "validation_negative_r2_count": 9,
+    "stage_total_seconds": 38.207269100000005,
+    "stage_train_total_seconds": 12.9210608,
+    "stage_prune_total_seconds": 12.958628799999993,
+    "stage_final_finetune_seconds": 0.9556954000000033,
+    "symbolic_total_seconds": 51.9183735,
+    "export_wall_time_s": 120.4549103,
+    "stagewise_enabled": true,
+    "input_compaction_enabled": true,
+    "output_dir": "D:\\chenpeng\\Documents\\学习\\数学\\毕业论文\\symkan-experiments\\benchmark_ablation\\full\\run_01_seed42"
+  },
+  "roc": [
+    {
+      "class": 0,
+      "auc": 0.994692859405403
+    },
+    {
+      "class": 1,
+      "auc": 0.9927184815800393
+    },
+    {
+      "class": 2,
+      "auc": 0.954973519110152
+    },
+    {
+      "class": 3,
+      "auc": 0.9311207171885154
+    },
+    {
+      "class": 4,
+      "auc": 0.9366637848990862
+    },
+    {
+      "class": 5,
+      "auc": 0.9282805388649608
+    },
+    {
+      "class": 6,
+      "auc": 0.9787649516822214
+    },
+    {
+      "class": 7,
+      "auc": 0.9607571805756255
+    },
+    {
+      "class": 8,
+      "auc": 0.9307056024780795
+    },
+    {
+      "class": 9,
+      "auc": 0.9490689897032811
+    }
+  ]
+}
