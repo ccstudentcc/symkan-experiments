@@ -135,7 +135,7 @@ $$
 
 ### 2.4 项目层设定（2026-03）
 
-基于 `benchmark_ablation/` 与 `benchmark_ab/comparison/` 的结果，可将参数策略区分为项目层默认设定与按目标调整的设定：
+基于 `outputs/benchmark_ablation/` 与 `outputs/benchmark_ab/comparison/` 的结果，可将参数策略区分为项目层默认设定与按目标调整的设定：
 
 | 设计项 | 项目层设定 | 证据摘要 |
 | --- | --- | --- |
@@ -485,19 +485,19 @@ sym_res = symbolize_pipeline(
 # baseline
 python symkanbenchmark.py \
     --tasks full --stagewise-seeds 42,52,62 \
-    --global-seed 123 --output-dir benchmark_ab/baseline --quiet
+    --global-seed 123 --output-dir outputs/benchmark_ab/baseline --quiet
 
 # adaptive
 python symkanbenchmark.py \
     --tasks full --stagewise-seeds 42,52,62 \
-    --global-seed 123 --output-dir benchmark_ab/adaptive \
+    --global-seed 123 --output-dir outputs/benchmark_ab/adaptive \
     --use-validation --validation-ratio 0.15 \
     --adaptive-threshold --adaptive-lamb --adaptive-ft --quiet
 
 # adaptive_auto
 python symkanbenchmark.py \
     --tasks full --stagewise-seeds 42,52,62 \
-    --global-seed 123 --output-dir benchmark_ab/adaptive_auto \
+    --global-seed 123 --output-dir outputs/benchmark_ab/adaptive_auto \
     --use-validation --validation-ratio 0.15 \
     --adaptive-threshold --adaptive-lamb --adaptive-ft \
     --stage-early-stop --stage-early-stop-patience 2 \
@@ -513,10 +513,10 @@ python symkanbenchmark.py \
 
 ```bash
 python benchmark_ab_compare.py \
-    --root benchmark_ab \
+    --root outputs/benchmark_ab \
     --baseline baseline \
     --variants adaptive,adaptive_auto \
-    --output benchmark_ab/comparison
+    --output outputs/benchmark_ab/comparison
 ```
 
 输出文件说明：`variant_summary.csv`（均值统计）、`pairwise_delta_summary.csv`（胜负计数与中位数差值）、`seedwise_delta.csv`（逐 seed 差值）、`trace_summary.csv`（剪枝轨迹统计）。

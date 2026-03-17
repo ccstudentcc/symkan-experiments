@@ -21,7 +21,7 @@
 - [7. 报告口径](#7-报告口径)
 - [8. 与总文档统一口径（2026-03）](#8-与总文档统一口径2026-03)
 
-[symkanbenchmark.py](../symkanbenchmark.py) 将 `kan.ipynb` 中的主实验流程及两个 benchmark 流程脚本化，其主要目的包括：
+[symkanbenchmark.py](../symkanbenchmark.py) 将 [../notebooks/kan.ipynb](../notebooks/kan.ipynb) 中的主实验流程及两个 benchmark 流程脚本化，其主要目的包括：
 
 1. 支持同一参数集的批量多 seed 运行。
 2. 稳定导出结构化 CSV 结果。
@@ -37,7 +37,7 @@ python symkanbenchmark.py --tasks all --verbose
 
 其中，`all = full + eval-bench + parallel-bench`。
 
-脚本默认优先读取 `X_train.npy/X_test.npy/Y_train_cat.npy/Y_test_cat.npy`。若文件缺失，脚本会自动获取 MNIST 并生成对应文件，优先使用 `tensorflow.keras.datasets.mnist`，失败时回退至 `sklearn.fetch_openml`。
+脚本默认优先读取 `data/X_train.npy`、`data/X_test.npy`、`data/Y_train_cat.npy`、`data/Y_test_cat.npy`（兼容旧版根目录 `X_train.npy`、`X_test.npy`、`Y_train_cat.npy`、`Y_test_cat.npy`）。若文件缺失，脚本会自动获取 MNIST 并生成对应文件，优先使用 `tensorflow.keras.datasets.mnist`，失败时回退至 `sklearn.fetch_openml`。
 
 ### 1.2 主实验
 
@@ -87,10 +87,10 @@ python symkanbenchmark.py --tasks full,parallel-bench
 
 ## 3. 输出目录与文件含义
 
-默认输出目录为 `benchmark_runs/`。每个 seed 对应一个独立的 run 子目录，以避免结果覆盖：
+默认输出目录为 `outputs/benchmark_runs/`。每个 seed 对应一个独立的 run 子目录，以避免结果覆盖：
 
 ```text
-benchmark_runs/
+outputs/benchmark_runs/
   symkanbenchmark_runs.csv
   symkanbenchmark_eval_runs.csv
   symkanbenchmark_parallel_runs.csv
@@ -144,7 +144,7 @@ benchmark_runs/
 - `--tasks parallel-bench`：只跑并行策略对照。
 - `--tasks all`：一次跑完 full + eval-bench + parallel-bench。
 - `--stagewise-seeds 42,52,62`：指定一组 stagewise 随机种子并逐个运行。
-- `--output-dir benchmark_runs_alt`：指定输出根目录，避免和已有实验互相覆盖。
+- `--output-dir outputs/benchmark_runs_alt`：指定输出根目录，避免和已有实验互相覆盖。
 - `--verbose`：打印过程日志，便于观察训练与剪枝过程。
 - `--quiet`：静默运行，只保留必要结果输出。
 - `--auto-fetch-mnist/--no-auto-fetch-mnist`：是否在 `*.npy` 缺失时自动获取并生成 MNIST 数据文件（默认开启）。
@@ -222,13 +222,13 @@ python symkanbenchmark.py \
 
 ```bash
 # baseline
-python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 --global-seed 123 --output-dir benchmark_ab/baseline --quiet
+python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 --global-seed 123 --output-dir outputs/benchmark_ab/baseline --quiet
 
 # adaptive
-python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 --global-seed 123 --output-dir benchmark_ab/adaptive --use-validation --validation-ratio 0.15 --adaptive-threshold --adaptive-lamb --adaptive-ft --quiet
+python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 --global-seed 123 --output-dir outputs/benchmark_ab/adaptive --use-validation --validation-ratio 0.15 --adaptive-threshold --adaptive-lamb --adaptive-ft --quiet
 
 # adaptive_auto
-python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 --global-seed 123 --output-dir benchmark_ab/adaptive_auto --use-validation --validation-ratio 0.15 --adaptive-threshold --adaptive-lamb --adaptive-ft --stage-early-stop --stage-early-stop-patience 2 --stage-early-stop-min-acc-gain 0.002 --stage-early-stop-edge-buffer 5 --symbolic-prune-threshold-start 0.010 --symbolic-prune-threshold-end 0.030 --symbolic-prune-max-drop-ratio 0.25 --symbolic-prune-threshold-backoff 0.65 --symbolic-prune-adaptive-threshold --symbolic-prune-adaptive-acc-drop-tol 0.025 --symbolic-prune-adaptive-min-edges-gain 2 --symbolic-prune-adaptive-low-gain-patience 6 --quiet
+python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 --global-seed 123 --output-dir outputs/benchmark_ab/adaptive_auto --use-validation --validation-ratio 0.15 --adaptive-threshold --adaptive-lamb --adaptive-ft --stage-early-stop --stage-early-stop-patience 2 --stage-early-stop-min-acc-gain 0.002 --stage-early-stop-edge-buffer 5 --symbolic-prune-threshold-start 0.010 --symbolic-prune-threshold-end 0.030 --symbolic-prune-max-drop-ratio 0.25 --symbolic-prune-threshold-backoff 0.65 --symbolic-prune-adaptive-threshold --symbolic-prune-adaptive-acc-drop-tol 0.025 --symbolic-prune-adaptive-min-edges-gain 2 --symbolic-prune-adaptive-low-gain-patience 6 --quiet
 ```
 
 ### 6.2 新增参数分组
@@ -259,20 +259,20 @@ symbolize 相关：
 结果汇总可使用 [benchmark_ab_compare.py](../benchmark_ab_compare.py)：
 
 ```bash
-python benchmark_ab_compare.py --root benchmark_ab --baseline baseline --variants adaptive,adaptive_auto --output benchmark_ab/comparison
+python benchmark_ab_compare.py --root outputs/benchmark_ab --baseline baseline --variants adaptive,adaptive_auto --output outputs/benchmark_ab/comparison
 ```
 
 输出：
 
-- [benchmark_ab/comparison/variant_summary.csv](../benchmark_ab/comparison/variant_summary.csv)
-- [benchmark_ab/comparison/pairwise_delta_summary.csv](../benchmark_ab/comparison/pairwise_delta_summary.csv)
-- [benchmark_ab/comparison/seedwise_delta.csv](../benchmark_ab/comparison/seedwise_delta.csv)
-- [benchmark_ab/comparison/trace_seedwise.csv](../benchmark_ab/comparison/trace_seedwise.csv)
-- [benchmark_ab/comparison/trace_summary.csv](../benchmark_ab/comparison/trace_summary.csv)
+- [outputs/benchmark_ab/comparison/variant_summary.csv](../outputs/benchmark_ab/comparison/variant_summary.csv)
+- [outputs/benchmark_ab/comparison/pairwise_delta_summary.csv](../outputs/benchmark_ab/comparison/pairwise_delta_summary.csv)
+- [outputs/benchmark_ab/comparison/seedwise_delta.csv](../outputs/benchmark_ab/comparison/seedwise_delta.csv)
+- [outputs/benchmark_ab/comparison/trace_seedwise.csv](../outputs/benchmark_ab/comparison/trace_seedwise.csv)
+- [outputs/benchmark_ab/comparison/trace_summary.csv](../outputs/benchmark_ab/comparison/trace_summary.csv)
 
 ### 6.4 当前统计结果（seed: 42/52/62）
 
-基于 [benchmark_ab/comparison/variant_summary.csv](../benchmark_ab/comparison/variant_summary.csv)、[benchmark_ab/comparison/pairwise_delta_summary.csv](../benchmark_ab/comparison/pairwise_delta_summary.csv) 与 [benchmark_ab/comparison/trace_summary.csv](../benchmark_ab/comparison/trace_summary.csv)，可优先报告以下三张表。
+基于 [outputs/benchmark_ab/comparison/variant_summary.csv](../outputs/benchmark_ab/comparison/variant_summary.csv)、[outputs/benchmark_ab/comparison/pairwise_delta_summary.csv](../outputs/benchmark_ab/comparison/pairwise_delta_summary.csv) 与 [outputs/benchmark_ab/comparison/trace_summary.csv](../outputs/benchmark_ab/comparison/trace_summary.csv)，可优先报告以下三张表。
 
 #### 表 1：核心指标汇总（mean ± std）
 

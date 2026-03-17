@@ -23,7 +23,7 @@
 ### 2. 核心库与参数
 
 - [symkan_usage.md](symkan_usage.md)：核心 API、最小示例与结果字段说明。
-- [kan_parameters.md](kan_parameters.md)：`kan.ipynb` 的参数含义与调节顺序。
+- [kan_parameters.md](kan_parameters.md)：`notebooks/kan.ipynb` 的参数含义与调节顺序。
 
 ### 3. 实验运行与结果读取
 

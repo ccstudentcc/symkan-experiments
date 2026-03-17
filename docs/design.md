@@ -136,7 +136,7 @@ $$
 
 ## 实验结果支持下的设计收敛（2026-03）
 
-基于 `benchmark_ablation/` 与 `benchmark_ab/comparison/` 的结果，当前若干设计决策具备成为项目层默认设定的经验依据：
+基于 `outputs/benchmark_ablation/` 与 `outputs/benchmark_ab/comparison/` 的结果，当前若干设计决策具备成为项目层默认设定的经验依据：
 
 1. `stagewise_train` 必须保留。
     - 去掉分阶段训练会让符号化入口过密（pre-symbolic too dense），最终精度从约 0.78 掉到约 0.44，流水线失去可用性。

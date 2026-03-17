@@ -2,10 +2,20 @@ X_test.npy
 X_train.npy
 Y_test_cat.npy
 Y_train_cat.npy
+data/
 __pycache__/
 *.py[cod]
 
 MNIST/raw/
+benchmark_runs/
+outputs/benchmark_runs/
+model/
+notebooks/model/
+notebooks/kan_symbolic_summary.csv
+notebooks/benchmark_multi_round_raw.csv
+notebooks/benchmark_multi_round_summary_cn.csv
+notebooks/benchmark_multi_round_summary_en.csv
+notebooks/benchmark_symbolic_parallel_quick.csv
 
 _safe_copy_temp*
 

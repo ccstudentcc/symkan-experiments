@@ -43,32 +43,36 @@ python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 --quiet
 
 运行结果通常写入以下位置：
 
-- `benchmark_runs/symkanbenchmark_runs.csv`：多 seed 主表。
-- `benchmark_runs/run_01_seed42/kan_stage_logs.csv`：阶段训练日志。
-- `benchmark_runs/run_01_seed42/symbolize_trace.csv`：剪枝与符号化轨迹。
-- `benchmark_runs/run_01_seed42/formula_validation.csv`：导出公式的数值验证结果。
+- `outputs/benchmark_runs/symkanbenchmark_runs.csv`：多 seed 主表。
+- `outputs/benchmark_runs/run_01_seed42/kan_stage_logs.csv`：阶段训练日志。
+- `outputs/benchmark_runs/run_01_seed42/symbolize_trace.csv`：剪枝与符号化轨迹。
+- `outputs/benchmark_runs/run_01_seed42/formula_validation.csv`：导出公式的数值验证结果。
 
-最小可运行示例见 [docs/symkan_usage.md](docs/symkan_usage.md)。
+最小可运行示例见 [docs/symkan_usage.md](docs/symkan_usage.md)；交互式实验入口位于 [notebooks/kan.ipynb](notebooks/kan.ipynb)。
 
 ## 仓库结构
 
 ```text
 symkan-experiments/
+├─ data/                        # 数据集与本地缓存
 ├─ symkan/                      # 工程化核心库：训练、符号化、评估、导出
 ├─ kan/                         # 本地 pykan 相关实现与兼容层
 ├─ docs/                        # 面向读者的说明文档与实验报告
-├─ symkanbenchmark.py           # 批量主实验入口
-├─ ablation_runner.py           # 单因素消融矩阵
-├─ benchmark_ab_compare.py      # A/B 对比汇总
-├─ analyze_layerwiseft.py       # LayerwiseFT 专项分析
-├─ compare_layerwiseft_improved.py
-│                               # 改进版 LayerwiseFT 对比运行与汇总
-├─ benchmark_ab/                # A/B 实验结果
-├─ benchmark_ablation/          # 单因素消融结果
-└─ kan.ipynb                    # 交互式实验入口
+├─ outputs/                     # 脚本运行产物与实验归档
+├─ scripts/                     # 脚本实现（推荐阅读入口）
+├─ symkanbenchmark.py           # 批量主实验入口（兼容 shim，实际实现见 scripts/）
+├─ ablation_runner.py           # 单因素消融矩阵（兼容 shim）
+├─ benchmark_ab_compare.py      # A/B 对比汇总（兼容 shim）
+├─ analyze_layerwiseft.py       # LayerwiseFT 专项分析（兼容 shim）
+├─ compare_layerwiseft_improved.py  # 改进版 LayerwiseFT 对比（兼容 shim）
+├─ examples/                    # 示例输出与参考产物
+├─ notebooks/                   # 交互式研究 notebook
+└─ outputs/README.md            # 运行产物目录说明
 ```
 
 目录和脚本职责的详细说明见 [docs/project_map.md](docs/project_map.md)。
+
+补充说明：运行 `notebooks/kan.ipynb` 时，会在 `notebooks/` 下自动生成 `model/` 目录，用于存放运行期模型产物；该目录不属于仓库整理后的固定结构。
 
 ## 工作流概览
 
@@ -111,7 +115,7 @@ symkan-experiments/
 - [docs/symkan_usage.md](docs/symkan_usage.md)：核心库使用说明。
 - [docs/symkanbenchmark_usage.md](docs/symkanbenchmark_usage.md)：批量实验脚本说明。
 - [docs/design.md](docs/design.md)：架构设计、边界和项目层默认设定。
-- [docs/kan_parameters.md](docs/kan_parameters.md)：`kan.ipynb` 参数解释。
+- [docs/kan_parameters.md](docs/kan_parameters.md)：`notebooks/kan.ipynb` 参数解释。
 - [docs/ablation_usage.md](docs/ablation_usage.md)：消融脚本使用说明。
 - [docs/ablation_report.md](docs/ablation_report.md)：当前单因素消融结论。
 - [docs/layerwiseft_improved_report.md](docs/layerwiseft_improved_report.md)：LayerwiseFT 改进版对比。

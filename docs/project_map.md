@@ -33,7 +33,7 @@
 
 ### 3. 根目录脚本
 
-这些脚本分别对应不同的实验任务。
+这些脚本分别对应不同的实验任务。为保持命令与文档示例稳定，根目录保留同名入口文件（shim）；脚本的可读实现统一放在 `scripts/` 下。
 
 - `symkanbenchmark.py`
   主实验入口。负责批量运行完整流程，导出主表、阶段日志、符号化轨迹和验证结果。
@@ -56,10 +56,12 @@
 
 ### 5. 结果目录
 
-- `benchmark_ab/`：A/B 对比结果。
-- `benchmark_ablation/`：单因素消融与 LayerwiseFT 分析结果。
+- `outputs/benchmark_ab/`：A/B 对比结果。
+- `outputs/benchmark_ablation/`：单因素消融与 LayerwiseFT 分析结果。
 
 这些目录既保存实验产物，也构成当前文档结论的主要证据来源。
+
+补充说明：运行 `notebooks/kan.ipynb` 时，会在 `notebooks/` 下自动生成 `model/` 目录，用于存放运行期模型文件；该目录不属于仓库整理后的固定结构。
 
 ## 阅读入口
 

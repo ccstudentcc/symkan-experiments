@@ -57,15 +57,15 @@
 python ablation_runner.py --quiet
 ```
 
-该命令默认在 `benchmark_ablation/` 下生成各变体结果目录，并输出：
+该命令默认在 `outputs/benchmark_ablation/` 下生成各变体结果目录，并输出：
 
-- `benchmark_ablation/ablation_runs_raw.csv`
-- `benchmark_ablation/ablation_runs_summary.csv`
+- `outputs/benchmark_ablation/ablation_runs_raw.csv`
+- `outputs/benchmark_ablation/ablation_runs_summary.csv`
 
 ### 3.2 仅聚合已有结果
 
 ```bash
-python ablation_runner.py --aggregate-only --output-dir benchmark_ablation
+python ablation_runner.py --aggregate-only --output-dir outputs/benchmark_ablation
 ```
 
 该模式适用于各变体结果已存在，仅需重新汇总总表的情形。
@@ -73,31 +73,31 @@ python ablation_runner.py --aggregate-only --output-dir benchmark_ablation
 ### 3.3 LayerwiseFT 专项分析
 
 ```bash
-python analyze_layerwiseft.py --ablation-dir benchmark_ablation --seeds 42,52,62
+python analyze_layerwiseft.py --ablation-dir outputs/benchmark_ablation --seeds 42,52,62
 ```
 
 默认输出目录为：
 
-- `benchmark_ablation/layerwiseft_analysis/`
+- `outputs/benchmark_ablation/layerwiseft_analysis/`
 
 ### 3.4 改进版 LayerwiseFT 比较
 
 ```bash
-python compare_layerwiseft_improved.py --ablation-dir benchmark_ablation --seeds 42,52,62 --quiet
+python compare_layerwiseft_improved.py --ablation-dir outputs/benchmark_ablation --seeds 42,52,62 --quiet
 ```
 
 默认输出包括：
 
-- `benchmark_ablation/layerwiseft_esreg/`
-- `benchmark_ablation/layerwiseft_improved_analysis/comparison_raw.csv`
-- `benchmark_ablation/layerwiseft_improved_analysis/comparison_summary.csv`
-- `benchmark_ablation/layerwiseft_improved_analysis/delta_new_vs_full.csv`
-- `benchmark_ablation/layerwiseft_improved_analysis/delta_new_vs_wolayerwiseft.csv`
+- `outputs/benchmark_ablation/layerwiseft_esreg/`
+- `outputs/benchmark_ablation/layerwiseft_improved_analysis/comparison_raw.csv`
+- `outputs/benchmark_ablation/layerwiseft_improved_analysis/comparison_summary.csv`
+- `outputs/benchmark_ablation/layerwiseft_improved_analysis/delta_new_vs_full.csv`
+- `outputs/benchmark_ablation/layerwiseft_improved_analysis/delta_new_vs_wolayerwiseft.csv`
 
 若 `layerwiseft_esreg` 已存在，可跳过重新训练：
 
 ```bash
-python compare_layerwiseft_improved.py --ablation-dir benchmark_ablation --seeds 42,52,62 --skip-run
+python compare_layerwiseft_improved.py --ablation-dir outputs/benchmark_ablation --seeds 42,52,62 --skip-run
 ```
 
 ## 4. 参数说明
@@ -109,7 +109,7 @@ python compare_layerwiseft_improved.py --ablation-dir benchmark_ablation --seeds
 - `--variants full,wostagewise,wopruning,wocompact,wolayerwiseft`
 - `--stagewise-seeds 42,52,62`
 - `--global-seed 123`
-- `--output-dir benchmark_ablation`
+- `--output-dir outputs/benchmark_ablation`
 - `--python <path>`
 - `--quiet`
 - `--verbose`
@@ -125,7 +125,7 @@ python ablation_runner.py --stagewise-seeds 42,52,62 --global-seed 123 --quiet
 
 常用参数如下：
 
-- `--ablation-dir benchmark_ablation`
+- `--ablation-dir outputs/benchmark_ablation`
 - `--seeds 42,52,62`
 - `--out-dir <path>`
 
@@ -139,7 +139,7 @@ python ablation_runner.py --stagewise-seeds 42,52,62 --global-seed 123 --quiet
 
 常用参数如下：
 
-- `--ablation-dir benchmark_ablation`
+- `--ablation-dir outputs/benchmark_ablation`
 - `--new-variant layerwiseft_esreg`
 - `--seeds 42,52,62`
 - `--global-seed 123`
@@ -163,7 +163,7 @@ python ablation_runner.py --stagewise-seeds 42,52,62 --global-seed 123 --quiet
 典型目录结构如下：
 
 ```text
-benchmark_ablation/
+outputs/benchmark_ablation/
   ablation_runs_raw.csv
   ablation_runs_summary.csv
   full/
@@ -201,7 +201,7 @@ benchmark_ablation/
 
 ## 7. 当前结果摘要
 
-根据 `benchmark_ablation/ablation_runs_summary.csv` 与 `benchmark_ablation/layerwiseft_improved_analysis/*.csv`，当前结果可概括如下：
+根据 `outputs/benchmark_ablation/ablation_runs_summary.csv` 与 `outputs/benchmark_ablation/layerwiseft_improved_analysis/*.csv`，当前结果可概括如下：
 
 1. `full` 的统计结果为 `final_acc=0.7807 ± 0.0013`，`macro_auc=0.9548 ± 0.0028`。
 2. `wostagewise` 中，`final_acc=0.4430 ± 0.0319`，且 `effective_target_edges` 由 90 增至 1040，说明 `stagewise_train` 对当前流程具有基础性作用。

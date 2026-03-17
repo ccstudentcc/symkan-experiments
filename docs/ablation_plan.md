@@ -36,7 +36,7 @@
 
 ### 2.1 数据与随机性
 
-1. 数据输入沿用 `symkanbenchmark.py` 的默认逻辑：`X_train.npy/X_test.npy/Y_train_cat.npy/Y_test_cat.npy`。
+1. 数据输入沿用 `symkanbenchmark.py` 的默认逻辑：`data/X_train.npy`、`data/X_test.npy`、`data/Y_train_cat.npy`、`data/Y_test_cat.npy`（兼容旧版根目录 `X_train.npy`、`X_test.npy`、`Y_train_cat.npy`、`Y_test_cat.npy`）。
 2. 全局随机数固定为 `--global-seed 123`。
 3. 变体比较采用 `--stagewise-seeds 42,52,62`。
 4. 核心指标统一报告为 `mean ± std`（n=3）。
@@ -66,7 +66,7 @@ python symkanbenchmark.py \
   --tasks full \
   --stagewise-seeds 42,52,62 \
   --global-seed 123 \
-  --output-dir benchmark_ablation/full \
+  --output-dir outputs/benchmark_ablation/full \
   --quiet
 ```
 
@@ -192,12 +192,12 @@ python symkanbenchmark.py \
 
 实验完成后，至少应包含以下产物：
 
-1. `benchmark_ablation/<variant>/run_xx_seedyy/metrics.json`
-2. `benchmark_ablation/<variant>/run_xx_seedyy/kan_stage_logs.csv`
-3. `benchmark_ablation/<variant>/run_xx_seedyy/symbolize_trace.csv`
-4. `benchmark_ablation/ablation_runs_raw.csv`
-5. `benchmark_ablation/ablation_runs_summary.csv`
+1. `outputs/benchmark_ablation/<variant>/run_xx_seedyy/metrics.json`
+2. `outputs/benchmark_ablation/<variant>/run_xx_seedyy/kan_stage_logs.csv`
+3. `outputs/benchmark_ablation/<variant>/run_xx_seedyy/symbolize_trace.csv`
+4. `outputs/benchmark_ablation/ablation_runs_raw.csv`
+5. `outputs/benchmark_ablation/ablation_runs_summary.csv`
 6. `docs/ablation_report.md`
-7. `benchmark_ablation/layerwiseft_analysis/`
+7. `outputs/benchmark_ablation/layerwiseft_analysis/`
 
 上述产物齐备后，实验结果方可视为可复审、可复现。
