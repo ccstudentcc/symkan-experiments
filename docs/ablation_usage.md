@@ -1,9 +1,10 @@
-# ablation 使用说明
+# 消融实验使用说明
 
 ## 文档导航
 
 - 返回总览：[README](../README.md)
 - docs 总入口：[index](index.md)
+- 项目地图：[project_map](project_map.md)
 - 总体使用文档：[symkan_usage](symkan_usage.md)
 - benchmark 文档：[symkanbenchmark_usage](symkanbenchmark_usage.md)
 - 消融计划：[ablation_plan](ablation_plan.md)
@@ -12,30 +13,27 @@
 
 ## 目录
 
-- [1. 快速开始](#1-快速开始)
-- [2. ablation_runner.py 参数速查](#2-ablation_runnerpy-参数速查)
-- [3. analyze_layerwiseft.py 参数速查](#3-analyze_layerwiseftpy-参数速查)
-- [4. compare_layerwiseft_improved.py 参数速查](#4-compare_layerwiseft_improvedpy-参数速查)
-- [5. 输出目录与文件含义](#5-输出目录与文件含义)
-- [6. 实验报告与文档链接](#6-实验报告与文档链接)
-- [7. 统一口径说明（2026-03）](#7-统一口径说明2026-03)
-- [8. 最新结果快照（2026-03-14 重跑）](#8-最新结果快照2026-03-14-重跑)
+- [1. 说明范围](#1-说明范围)
+- [2. 脚本与功能](#2-脚本与功能)
+- [3. 运行方式](#3-运行方式)
+- [4. 参数说明](#4-参数说明)
+- [5. 输出目录与结果文件](#5-输出目录与结果文件)
+- [6. 统一口径](#6-统一口径)
+- [7. 当前结果摘要](#7-当前结果摘要)
 
-本文档覆盖以下 3 个脚本：
+## 1. 说明范围
 
-1. [ablation_runner.py](../ablation_runner.py)：运行单因素消融矩阵（full / wostagewise / wopruning / wocompact / wolayerwiseft）。
-2. [analyze_layerwiseft.py](../analyze_layerwiseft.py)：基于已有结果对比 full vs wolayerwiseft。
-3. [compare_layerwiseft_improved.py](../compare_layerwiseft_improved.py)：训练并评估改进版 layerwiseft（默认 `layerwiseft_esreg`）相对 full / wolayerwiseft 的差异。
+本文说明以下三个脚本的用途、参数与输出结果：
 
-## 1. 快速开始
+1. [ablation_runner.py](../ablation_runner.py)：运行单因素消融矩阵。
+2. [analyze_layerwiseft.py](../analyze_layerwiseft.py)：基于已有结果分析 `full` 与 `wolayerwiseft` 的差异。
+3. [compare_layerwiseft_improved.py](../compare_layerwiseft_improved.py)：运行并比较改进版 LayerwiseFT（默认 `layerwiseft_esreg`）与 `full`、`wolayerwiseft` 的差异。
 
-### 1.1 运行完整单因素消融
+## 2. 脚本与功能
 
-```bash
-python ablation_runner.py --quiet
-```
+### 2.1 `ablation_runner.py`
 
-默认会在 `benchmark_ablation/` 下依次运行：
+该脚本用于运行单因素消融矩阵，默认覆盖以下变体：
 
 - `full`
 - `wostagewise`
@@ -43,111 +41,113 @@ python ablation_runner.py --quiet
 - `wocompact`
 - `wolayerwiseft`
 
-并输出总表：
+### 2.2 `analyze_layerwiseft.py`
+
+该脚本读取已有消融结果，对 `full` 与 `wolayerwiseft` 进行运行级与类别级比较。
+
+### 2.3 `compare_layerwiseft_improved.py`
+
+该脚本可运行改进版 LayerwiseFT，并生成其相对于 `full` 与 `wolayerwiseft` 的比较结果。
+
+## 3. 运行方式
+
+### 3.1 完整单因素消融
+
+```bash
+python ablation_runner.py --quiet
+```
+
+该命令默认在 `benchmark_ablation/` 下生成各变体结果目录，并输出：
 
 - `benchmark_ablation/ablation_runs_raw.csv`
 - `benchmark_ablation/ablation_runs_summary.csv`
 
-### 1.2 只做聚合（不重复训练）
+### 3.2 仅聚合已有结果
 
 ```bash
 python ablation_runner.py --aggregate-only --output-dir benchmark_ablation
 ```
 
-适用于已有各 variant 结果目录，仅重新生成总表。
+该模式适用于各变体结果已存在，仅需重新汇总总表的情形。
 
-### 1.3 分析层间微调是否有效
+### 3.3 LayerwiseFT 专项分析
 
 ```bash
 python analyze_layerwiseft.py --ablation-dir benchmark_ablation --seeds 42,52,62
 ```
 
-输出目录默认是：
+默认输出目录为：
 
 - `benchmark_ablation/layerwiseft_analysis/`
 
-关键文件：
-
-- `run_level_comparison.csv`
-- `class_level_comparison.csv`
-
-### 1.4 运行改进版 LayerwiseFT 并对比
+### 3.4 改进版 LayerwiseFT 比较
 
 ```bash
 python compare_layerwiseft_improved.py --ablation-dir benchmark_ablation --seeds 42,52,62 --quiet
 ```
 
-默认会新增 variant：`benchmark_ablation/layerwiseft_esreg/`，然后输出对比分析到：
+默认输出包括：
 
+- `benchmark_ablation/layerwiseft_esreg/`
 - `benchmark_ablation/layerwiseft_improved_analysis/comparison_raw.csv`
 - `benchmark_ablation/layerwiseft_improved_analysis/comparison_summary.csv`
 - `benchmark_ablation/layerwiseft_improved_analysis/delta_new_vs_full.csv`
 - `benchmark_ablation/layerwiseft_improved_analysis/delta_new_vs_wolayerwiseft.csv`
 
-如果你已经跑过 `layerwiseft_esreg`，可跳过训练：
+若 `layerwiseft_esreg` 已存在，可跳过重新训练：
 
 ```bash
 python compare_layerwiseft_improved.py --ablation-dir benchmark_ablation --seeds 42,52,62 --skip-run
 ```
 
----
+## 4. 参数说明
 
-## 2. ablation_runner.py 参数速查
+### 4.1 `ablation_runner.py`
 
-常用参数：
+常用参数如下：
 
-- `--variants full,wostagewise,wopruning,wocompact,wolayerwiseft`：指定要跑的变体集合。
-- `--stagewise-seeds 42,52,62`：多 seed 批量运行。
-- `--global-seed 123`：全局随机种子。
-- `--output-dir benchmark_ablation`：结果根目录。
-- `--python <path>`：指定 Python 可执行文件。
-- `--quiet`：静默运行。
-- `--verbose`：详细日志（与 `--quiet` 二选一，`--quiet` 优先）。
-- `--aggregate-only`：不训练，只读取已存在结果目录并聚合。
+- `--variants full,wostagewise,wopruning,wocompact,wolayerwiseft`
+- `--stagewise-seeds 42,52,62`
+- `--global-seed 123`
+- `--output-dir benchmark_ablation`
+- `--python <path>`
+- `--quiet`
+- `--verbose`
+- `--aggregate-only`
 
-推荐（论文统计）：
+若用于论文统计，常见设置为：
 
 ```bash
 python ablation_runner.py --stagewise-seeds 42,52,62 --global-seed 123 --quiet
 ```
 
----
+### 4.2 `analyze_layerwiseft.py`
 
-## 3. analyze_layerwiseft.py 参数速查
+常用参数如下：
 
-常用参数：
+- `--ablation-dir benchmark_ablation`
+- `--seeds 42,52,62`
+- `--out-dir <path>`
 
-- `--ablation-dir benchmark_ablation`：消融结果根目录，需包含 `full/` 与 `wolayerwiseft/`。
-- `--seeds 42,52,62`：分析的 seed 列表。
-- `--out-dir <path>`：输出目录；为空时默认写入 `benchmark_ablation/layerwiseft_analysis/`。
+输出内容主要包括：
 
-建议命令：
+1. 运行级对比。
+2. 类别级对比。
+3. 终端中的假设验证报告。
 
-```bash
-python analyze_layerwiseft.py --ablation-dir benchmark_ablation --seeds 42,52,62
-```
+### 4.3 `compare_layerwiseft_improved.py`
 
-脚本会输出：
+常用参数如下：
 
-1. 运行级对比（精度、AUC、R2、耗时、边数等）。
-2. 类级对比（每类 R2 / 复杂度 / AUC 及差分）。
-3. 终端中的假设验证报告（H1~H4）。
+- `--ablation-dir benchmark_ablation`
+- `--new-variant layerwiseft_esreg`
+- `--seeds 42,52,62`
+- `--global-seed 123`
+- `--python <path>`
+- `--skip-run`
+- `--quiet / --verbose`
 
----
-
-## 4. compare_layerwiseft_improved.py 参数速查
-
-训练与对比参数：
-
-- `--ablation-dir benchmark_ablation`：实验根目录。
-- `--new-variant layerwiseft_esreg`：新变体目录名。
-- `--seeds 42,52,62`：seed 列表。
-- `--global-seed 123`：全局随机种子。
-- `--python <path>`：Python 可执行文件。
-- `--skip-run`：跳过训练，仅做汇总。
-- `--quiet / --verbose`：日志级别。
-
-改进版 layerwise 参数（默认值）：
+改进版 LayerwiseFT 的默认参数包括：
 
 - `--layerwise-finetune-steps 60`
 - `--layerwise-finetune-lamb 1e-5`
@@ -158,23 +158,9 @@ python analyze_layerwiseft.py --ablation-dir benchmark_ablation --seeds 42,52,62
 - `--layerwise-eval-interval 20`
 - `--layerwise-validation-n-sample 300`
 
-建议命令：
+## 5. 输出目录与结果文件
 
-```bash
-python compare_layerwiseft_improved.py \
-  --ablation-dir benchmark_ablation \
-  --new-variant layerwiseft_esreg \
-  --seeds 42,52,62 \
-  --layerwise-finetune-steps 60 \
-  --layerwise-finetune-lamb 1e-5 \
-  --quiet
-```
-
----
-
-## 5. 输出目录与文件含义
-
-典型目录结构：
+典型目录结构如下：
 
 ```text
 benchmark_ablation/
@@ -196,43 +182,29 @@ benchmark_ablation/
     delta_new_vs_wolayerwiseft.csv
 ```
 
-重点文件建议：
+主要文件包括：
 
-1. `ablation_runs_summary.csv`：总览各消融变体均值/方差。
-2. `layerwiseft_analysis/run_level_comparison.csv`：full vs wolayerwiseft 的运行级对比。
-3. `layerwiseft_analysis/class_level_comparison.csv`：full vs wolayerwiseft 的类级差异。
-4. `layerwiseft_improved_analysis/comparison_summary.csv`：改进版对 full / wolayerwiseft 的总体表现。
-5. `layerwiseft_improved_analysis/delta_new_vs_full.csv`：改进版相对 full 的逐指标差分。
+1. `ablation_runs_summary.csv`：各变体的总体统计结果。
+2. `layerwiseft_analysis/run_level_comparison.csv`：`full` 与 `wolayerwiseft` 的运行级比较。
+3. `layerwiseft_analysis/class_level_comparison.csv`：`full` 与 `wolayerwiseft` 的类别级比较。
+4. `layerwiseft_improved_analysis/comparison_summary.csv`：改进版与对照项的总体比较。
+5. `layerwiseft_improved_analysis/delta_new_vs_full.csv`：改进版相对 `full` 的逐指标差值。
 
----
+## 6. 统一口径
 
-## 6. 实验报告与文档链接
+与 [design.md](design.md) 和 [symkan_usage.md](symkan_usage.md) 保持一致，本文采用以下口径：
 
-与本页面流程直接相关的报告与计划：
+1. `stagewise_train` 视为当前流程的必要组成部分，而非可选优化项。
+2. 渐进剪枝与输入压缩主要体现为复杂度与成本控制，不预设其带来稳定精度提升。
+3. 对 2 层 KAN，`LayerwiseFT` 更适合作为可选实验配置；默认设置通常为 `--layerwise-finetune-steps 0`。
+4. 对 `n=3` 的结果，应优先描述趋势与边界，而不宜作过度确定性表述。
 
-1. [消融实验计划](ablation_plan.md)
-2. [消融实验报告](ablation_report.md)
-3. [LayerwiseFT 改进实验报告](layerwiseft_improved_report.md)
+## 7. 当前结果摘要
 
-相关总流程文档：
+根据 `benchmark_ablation/ablation_runs_summary.csv` 与 `benchmark_ablation/layerwiseft_improved_analysis/*.csv`，当前结果可概括如下：
 
-1. [symkanbenchmark 使用说明](symkanbenchmark_usage.md)
-
-## 7. 统一口径说明（2026-03）
-
-与 [design.md](design.md) 和 [symkan_usage.md](symkan_usage.md) 保持一致，本文档默认采用以下结论口径：
-
-1. `stagewise_train` 是必要前提，不作为可选优化项。
-2. 渐进剪枝与输入压缩属于“可解释性/速度”权衡开关，不承诺稳定提精度。
-3. 对 2 层 KAN，默认建议关闭 LayerwiseFT（`--layerwise-finetune-steps 0`）；改进版 LayerwiseFT 仅作为可选实验配置。
-4. A/B 结果优先表述“鲁棒性与耗时收益”，避免把 `n=3` 下的均值波动写成确定的精度优势。
-
-## 8. 最新结果快照（2026-03-14 重跑）
-
-基于 `benchmark_ablation/ablation_runs_summary.csv` 与 `benchmark_ablation/layerwiseft_improved_analysis/*.csv`：
-
-1. `full`：`final_acc=0.7807 ± 0.0013`，`macro_auc=0.9548 ± 0.0028`。
-2. `wostagewise`：`final_acc=0.4430 ± 0.0319`（相对 full -43.26%），且 `effective_target_edges` 由 90 升至 1040，验证 stagewise 是必要前提。
-3. `wopruning`：`final_acc` +2.68%，但 `expr_complexity_mean` +53.14%、`symbolic_total_seconds` +29.56%，属于“以复杂度换分类指标”。
-4. `wolayerwiseft`：`final_acc=0.7838 ± 0.0014`（相对 full +0.39%，误差范围内），同时 `symbolic_total_seconds=20.41 ± 0.06`（-39.21%），仍是 2 层 KAN 默认优选。
-5. `layerwiseft_esreg` 相对 `full` 仅有亚秒级时间收益（`symbolic_total_seconds` -0.3046s），且这符合“当前 `full` 已与 `layerwiseft_esreg` 默认参数对齐”的预期；相对 `wolayerwiseft` 则多耗时 12.86s（+63.00%），不构成默认切换依据。
+1. `full` 的统计结果为 `final_acc=0.7807 ± 0.0013`，`macro_auc=0.9548 ± 0.0028`。
+2. `wostagewise` 中，`final_acc=0.4430 ± 0.0319`，且 `effective_target_edges` 由 90 增至 1040，说明 `stagewise_train` 对当前流程具有基础性作用。
+3. `wopruning` 中，`final_acc` 有所提高，但 `expr_complexity_mean` 与 `symbolic_total_seconds` 明显增加，说明其代价主要体现在复杂度与耗时上。
+4. `wolayerwiseft` 中，`final_acc=0.7838 ± 0.0014`，同时 `symbolic_total_seconds=20.41 ± 0.06`，在 2 层 KAN 设定下具有较高的成本收益比。
+5. `layerwiseft_esreg` 相对 `full` 仅表现出亚秒级时间差；相对 `wolayerwiseft` 则增加约 12.86 秒符号化时间，因此尚不足以支持默认切换。

@@ -4,6 +4,7 @@
 
 - 返回总览：[README](../README.md)
 - docs 总入口：[index](index.md)
+- 项目地图：[project_map](project_map.md)
 - 总体使用文档：[symkan_usage](symkan_usage.md)
 - 设计与兼容策略：[design](design.md)
 - 参数解释（notebook 侧）：[kan_parameters](kan_parameters.md)
@@ -11,34 +12,34 @@
 
 ## 目录
 
-- [1. 快速开始](#1-快速开始)
+- [1. 运行入口](#1-运行入口)
 - [2. 任务与命令速查](#2-任务与命令速查)
 - [3. 输出目录与文件含义](#3-输出目录与文件含义)
 - [4. 参数速查](#4-参数速查)
 - [5. 结果解读最小集合](#5-结果解读最小集合)
 - [6. Adaptive A/B 实验（baseline / adaptive / adaptive_auto）](#6-adaptive-ab-实验baseline--adaptive--adaptive_auto)
-- [7. 论文写作建议](#7-论文写作建议)
+- [7. 报告口径](#7-报告口径)
 - [8. 与总文档统一口径（2026-03）](#8-与总文档统一口径2026-03)
 
-[symkanbenchmark.py](../symkanbenchmark.py) 将 kan.ipynb 的主实验流程与两个 benchmark 流程脚本化，核心目标是：
+[symkanbenchmark.py](../symkanbenchmark.py) 将 `kan.ipynb` 中的主实验流程及两个 benchmark 流程脚本化，其主要目的包括：
 
 1. 支持同一参数集的批量多 seed 运行。
 2. 稳定导出结构化 CSV 结果。
 3. 避免 notebook 手工执行带来的覆盖和漏记。
 
-## 1. 快速开始
+## 1. 运行入口
 
-### 1.1 一条命令跑完整流程
+### 1.1 完整流程
 
 ```bash
 python symkanbenchmark.py --tasks all --verbose
 ```
 
-说明：`all = full + eval-bench + parallel-bench`。
+其中，`all = full + eval-bench + parallel-bench`。
 
-数据说明：默认优先读取 `X_train.npy/X_test.npy/Y_train_cat.npy/Y_test_cat.npy`。若缺失，脚本会自动按 SymbolNet 风格拉取 MNIST 并生成上述文件（优先 `tensorflow.keras.datasets.mnist`，回退 `sklearn.fetch_openml`）。
+脚本默认优先读取 `X_train.npy/X_test.npy/Y_train_cat.npy/Y_test_cat.npy`。若文件缺失，脚本会自动获取 MNIST 并生成对应文件，优先使用 `tensorflow.keras.datasets.mnist`，失败时回退至 `sklearn.fetch_openml`。
 
-### 1.2 只跑主实验（最常用）
+### 1.2 主实验
 
 ```bash
 python symkanbenchmark.py --tasks full
@@ -50,9 +51,9 @@ python symkanbenchmark.py --tasks full
 python symkanbenchmark.py --tasks full --quiet
 ```
 
-说明：`--quiet` 会压制训练和符号化的过程输出；若与 `--verbose` 同时设置，`--quiet` 优先。
+`--quiet` 用于抑制训练与符号化过程输出；若与 `--verbose` 同时设置，则 `--quiet` 优先。
 
-### 1.3 批量 seed（论文统计建议）
+### 1.3 多 seed 运行
 
 ```bash
 python symkanbenchmark.py --tasks all --stagewise-seeds 42,52,62
@@ -86,7 +87,7 @@ python symkanbenchmark.py --tasks full,parallel-bench
 
 ## 3. 输出目录与文件含义
 
-默认输出目录为 `benchmark_runs/`，每个 seed 对应一个独立 run 子目录（即使只有一个 seed 也会建子目录，避免覆盖）：
+默认输出目录为 `benchmark_runs/`。每个 seed 对应一个独立的 run 子目录，以避免结果覆盖：
 
 ```text
 benchmark_runs/
@@ -107,7 +108,7 @@ benchmark_runs/
     benchmark_symbolic_parallel_quick.csv
 ```
 
-重点文件：
+主要结果文件包括：
 
 1. `symkanbenchmark_runs.csv`：多 seed/多配置横向对比主表。
 2. `kan_stage_logs.csv`：阶段训练是否频繁回滚。
@@ -128,13 +129,13 @@ benchmark_runs/
 - `--layerwise-finetune-steps 60`：逐层微调步数（改进版默认，含早停与轻正则参数）。
 - `--affine-finetune-steps 200`：仿射参数微调步数（提高最后拟合质量）。
 
-口径说明（与其他文档统一）：
+口径说明如下：
 
 1. 上述是 CLI 技术默认值，用于“不开任何额外开关即可运行”。
-2. 对典型 2 层 KAN（`[in, hidden, class]`），推荐配置是显式传 `--layerwise-finetune-steps 0`，把 LayerwiseFT 作为按需开关。
+2. 对典型 2 层 KAN（`[in, hidden, class]`），项目层设定通常显式传入 `--layerwise-finetune-steps 0`，并将 LayerwiseFT 视为按需开关。
 3. 如果确实启用 LayerwiseFT，优先使用当前改进版参数（steps=60 + validation early-stop + `lamb=1e-5`），不要回退到旧版长步数无约束微调。
 
-机制说明（简版）：逐层符号化属于有损替换，`fix_symbolic` 选定函数族后无法回退；在 2 层 KAN 中 LayerwiseFT 仅有一次层间补偿窗口，因此改进版更像“降风险开关”而非“默认增益模块”。
+逐层符号化属于有损替换；`fix_symbolic` 选定函数族后无法回退。在 2 层 KAN 中，LayerwiseFT 仅有一次层间补偿窗口，因此其改进版更接近风险控制选项，而非默认增益模块。
 
 ### 4.2 常用控制参数
 
@@ -151,9 +152,9 @@ benchmark_runs/
 
 ### 4.3 函数库预设
 
-- `--lib-preset layered`：分层函数库，精度与复杂度较均衡（默认推荐）。
+- `--lib-preset layered`：分层函数库，精度与复杂度较均衡。
 - `--lib-preset fast`：精简函数库，优先降低搜索成本与运行时间。
-- `--lib-preset expressive`：增强表达能力，适合分层库不足时尝试。
+- `--lib-preset expressive`：增强表达能力，可在分层库不足时试验。
 - `--lib-preset full`：完整函数库，搜索空间最大，通常最慢但最灵活。
 
 ### 4.4 评估 benchmark 参数
@@ -175,7 +176,7 @@ benchmark_runs/
 
 ## 5. 结果解读最小集合
 
-建议重点关注 `symkanbenchmark_runs.csv` 这些列：
+结果解读时可优先关注 `symkanbenchmark_runs.csv` 中以下字段：
 
 - `base_acc`
 - `enhanced_acc`
@@ -187,7 +188,7 @@ benchmark_runs/
 - `validation_mean_r2`
 - `symbolic_total_seconds`
 
-论文用途建议：不要用单次结果下结论，至少跑 3 个 seed，再统计：
+若用于论文写作，不宜依据单次运行结果下结论，至少应在 3 个 seeds 上统计：
 
 1. `symkanbenchmark_runs.csv` 的均值与方差。
 2. `benchmark_multi_round_summary_cn.csv` 的速度均值与标准差。
@@ -203,7 +204,7 @@ benchmark_runs/
 2. `adaptive`：启用验证反馈 + 自适应阈值 + 自适应 lamb/ft。
 3. `adaptive_auto`：在 adaptive 上增加阶段早停与 symbolize 自适应剪枝节奏。
 
-### 6.1 命令模板（减少重复）
+### 6.1 命令模板
 
 公共参数：
 
@@ -251,11 +252,11 @@ symbolize 相关：
 - `--symbolic-prune-adaptive-min-edges-gain`：每轮至少要减少的边数下限。
 - `--symbolic-prune-adaptive-low-gain-patience`：连续低收益轮数容忍度，超过后调整策略。
 
-说明：当前默认启用 `symbolic-prune-adaptive-threshold`。禁用时显式传 `--no-symbolic-prune-adaptive-threshold`。
+当前默认启用 `symbolic-prune-adaptive-threshold`；如需禁用，应显式传入 `--no-symbolic-prune-adaptive-threshold`。
 
 ### 6.3 结果自动汇总
 
-推荐使用 [benchmark_ab_compare.py](../benchmark_ab_compare.py)：
+结果汇总可使用 [benchmark_ab_compare.py](../benchmark_ab_compare.py)：
 
 ```bash
 python benchmark_ab_compare.py --root benchmark_ab --baseline baseline --variants adaptive,adaptive_auto --output benchmark_ab/comparison
@@ -269,9 +270,9 @@ python benchmark_ab_compare.py --root benchmark_ab --baseline baseline --variant
 - [benchmark_ab/comparison/trace_seedwise.csv](../benchmark_ab/comparison/trace_seedwise.csv)
 - [benchmark_ab/comparison/trace_summary.csv](../benchmark_ab/comparison/trace_summary.csv)
 
-### 6.4 当前结论（seed: 42/52/62）
+### 6.4 当前统计结果（seed: 42/52/62）
 
-基于 [benchmark_ab/comparison/variant_summary.csv](../benchmark_ab/comparison/variant_summary.csv)、[benchmark_ab/comparison/pairwise_delta_summary.csv](../benchmark_ab/comparison/pairwise_delta_summary.csv) 与 [benchmark_ab/comparison/trace_summary.csv](../benchmark_ab/comparison/trace_summary.csv)，建议固定报告以下三张表。
+基于 [benchmark_ab/comparison/variant_summary.csv](../benchmark_ab/comparison/variant_summary.csv)、[benchmark_ab/comparison/pairwise_delta_summary.csv](../benchmark_ab/comparison/pairwise_delta_summary.csv) 与 [benchmark_ab/comparison/trace_summary.csv](../benchmark_ab/comparison/trace_summary.csv)，可优先报告以下三张表。
 
 #### 表 1：核心指标汇总（mean ± std）
 
@@ -281,7 +282,7 @@ python benchmark_ab_compare.py --root benchmark_ab --baseline baseline --variant
 | adaptive | 0.7678 ± 0.0117 | 0.9486 ± 0.0021 | -0.5361 ± 0.1061 | 31.05 ± 0.98 | 75.72 ± 12.88 | 85.33 ± 2.49 |
 | adaptive_auto | 0.7491 ± 0.0186 | 0.9430 ± 0.0044 | -0.6137 ± 0.0306 | 30.88 ± 1.76 | 72.58 ± 14.62 | 85.33 ± 5.25 |
 
-解读：
+结果解释：
 
 1. 分类指标上，baseline 仍是当前最优（`final_acc` 与 `macro_auc` 均最高，且 `final_acc` 方差最小）。
 2. adaptive 系列在 `symbolic_total_seconds` 上更快（约快 2.2s~2.4s），但分类指标同步下降。
@@ -302,7 +303,7 @@ python benchmark_ab_compare.py --root benchmark_ab --baseline baseline --variant
 | adaptive vs baseline | export_wall_time_s | +2.5513 | +9.5640 | 1 / 2 / 0 |
 | adaptive_auto vs baseline | export_wall_time_s | -0.5918 | -6.9048 | 2 / 1 / 0 |
 
-解读：
+结果解释：
 
 1. 精度主指标（`final_acc` / `macro_auc`）上，adaptive 系列未形成对 baseline 的稳定优势。
 2. `validation_mean_r2` 的方向更复杂：adaptive 有改善趋势，但 adaptive_auto 的均值几乎为 0、对 seed 更敏感。
@@ -316,25 +317,25 @@ python benchmark_ab_compare.py --root benchmark_ab --baseline baseline --variant
 | adaptive | 1.00 | 1.00 | 16.33 | 0.1588 | 0.1588 |
 | adaptive_auto | 3.67 | 3.33 | 12.67 | 0.0273 | 0.1002 |
 
-解读：
+结果解释：
 
 1. adaptive 呈现明显单轮过剪（`rounds_mean=1.00`，且单轮平均 drop ratio 最高）。
 2. adaptive_auto 把节奏从“单轮过剪”拉回到“多轮收缩”，但其分类指标仍未追平 baseline。
 3. baseline 的探索轮次最多，当前样本下对应了更高的分类指标上限。
 
-综合结论：
+综合而言：
 
 1. 现阶段应把 adaptive 系列定位为“流程控制/结构压缩策略”，而不是“已证实精度增强策略”。
 2. 如果目标是分类指标，baseline 仍是默认首选；如果目标是符号化时延，可按场景评估 adaptive_auto。
-3. 论文表述建议固定为：流程层收益成立，精度增益尚未被当前 `n=3` 证据验证。
+3. 在当前 `n=3` 证据下，更适宜将结果表述为“流程层收益成立，精度增益尚未得到验证”。
 
-样本量与证据边界（必须写清）：
+样本量与证据边界如下：
 
 1. 当前仅 `3` 个 seed，统计功效有限。
 2. 存在“均值与中位数方向不一致”的情况，说明结果对异常 seed 敏感。
-3. 建议至少扩展到 `10` 个 seed 后再判断显著性，并补充非参数检验（如 Wilcoxon 符号秩）与效应量。
+3. 若需进一步判断显著性，宜扩展到至少 `10` 个 seed，并补充非参数检验（如 Wilcoxon 符号秩）与效应量。
 
-## 7. 论文写作建议
+## 7. 报告口径
 
 避免只报告均值，至少同时给出：
 
@@ -343,18 +344,18 @@ python benchmark_ab_compare.py --root benchmark_ab --baseline baseline --variant
 3. 相对 baseline 的胜负计数（win/lose/tie）。
 4. 运行代价指标（`export_wall_time_s`、`symbolic_total_seconds`）与结构指标（`final_n_edge`）。
 
-建议在正文里固定一个“保守结论模板”：
+正文可采用以下较为保守的表述方式：
 
 1. “在 `n=3` seeds 下，adaptive 系列在精度指标上未显示稳定优势（`final_acc`: adaptive `1胜2负`，adaptive_auto `0胜3负`；`macro_auc` 均 `0胜3负`）。”
-2. “因此将 adaptive 视为工程稳定化策略，而非已证实的精度增强策略。”
+2. “因此更适宜将 adaptive 视为工程稳定化策略，而非已证实的精度增强策略。”
 3. “后续通过更大 seed 样本与统计检验确认精度结论。”
 
-如果 `final_acc` 与 `macro_auc` 未形成稳定胜负优势，建议表述为“流程改进成立，但精度优势未证实”，不要写“显著优于 baseline”。
+若 `final_acc` 与 `macro_auc` 未形成稳定优势，宜表述为“流程改进成立，但精度优势尚未得到验证”，不宜直接写为“显著优于 baseline”。
 
 ## 8. 与总文档统一口径（2026-03）
 
-为避免跨文档“默认值”和“推荐值”混用，统一采用以下写法：
+为避免跨文档“默认值”和“项目层设定”混用，统一采用以下写法：
 
 1. **CLI 默认值**：指参数解析器内置默认（本文件第 4 节）。
-2. **推荐配置**：指基于实验结论的建议组合（见 [symkan_usage.md](symkan_usage.md) 与 [design.md](design.md)）。
+2. **项目配置**：指基于实验结论所采用的配置组合（见 [symkan_usage.md](symkan_usage.md) 与 [design.md](design.md)）。
 3. 对 2 层 KAN：运行稳定与效率优先时使用 `--layerwise-finetune-steps 0`；改进版 LayerwiseFT（steps=60 等）仅作为按需实验开关，不默认承诺分类增益。

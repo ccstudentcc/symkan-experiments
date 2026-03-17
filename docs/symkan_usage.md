@@ -1,9 +1,10 @@
-# symkan 使用文档（2026 版）
+# symkan 使用文档（2026）
 
 ## 文档导航
 
 - 返回总览：[README](../README.md)
 - docs 总入口：[index](index.md)
+- 项目地图：[project_map](project_map.md)
 - 设计原理：[design](design.md)
 - benchmark 脚本说明：[symkanbenchmark_usage](symkanbenchmark_usage.md)
 - notebook 参数细节：[kan_parameters](kan_parameters.md)
@@ -12,20 +13,20 @@
 ## 目录
 
 - [1. 项目简介](#1-项目简介)
-- [2. 核心特性（Why symkan）](#2-核心特性why-symkan)
+- [2. 方法特征](#2-方法特征)
 - [3. 环境安装](#3-环境安装)
-- [4. 快速上手（可直接运行）](#4-快速上手可直接运行)
-- [5. 架构深度解析（Architecture）](#5-架构深度解析architecture)
-- [6. 核心 API 参考](#6-核心-api-参考)
+- [4. 最小示例](#4-最小示例)
+- [5. 架构说明](#5-架构说明)
+- [6. API 参考](#6-api-参考)
 - [7. 可视化示例](#7-可视化示例)
-- [8. 进阶用法（Advanced Usage）](#8-进阶用法advanced-usage)
-- [9. FAQ](#9-faq)
-- [10. Roadmap（建议）](#10-roadmap建议)
-- [11. 最佳实践总结](#11-最佳实践总结)
+- [8. 扩展用法](#8-扩展用法)
+- [9. 补充说明](#9-补充说明)
+- [10. 后续工作](#10-后续工作)
+- [11. 使用要点](#11-使用要点)
 
-> Slogan: 把 KAN 的可表达性，变成可复现、可评估、可落地的符号化流水线。
+如需先了解仓库结构，可参考 [project_map.md](project_map.md)。本文聚焦核心库 `symkan/` 的方法背景、接口与使用方式。
 
-`symkan` 是基于 `pykan` 的工程化增强层。它不替代 KAN 的核心机制，而是把“训练、剪枝、符号化、评估、导出”串成稳定流程，适用于论文实验与批量复现。
+`symkan` 是构建在 `pykan` 之上的工程化封装，用于组织训练、剪枝、符号化、评估与结果导出流程，适用于批量实验与论文复现。
 
 ---
 
@@ -43,9 +44,9 @@ KAN（Kolmogorov-Arnold Networks，2024，Liu et al., MIT）的理论根基是 *
 
 这一定理说明：**任意连续多变量函数均可分解为若干单变量函数的组合**——精确到每个节点只做求和，不做非线性变换。
 
-### 1.2 KAN vs MLP：激活函数放在哪里？
+### 1.2 KAN 与 MLP 的结构差异
 
-这与传统 MLP 的设计截然不同。两者的本质差异只在一点：**非线性放哪里**。
+KAN 与传统 MLP 的主要差异在于非线性函数的放置位置。
 
 **MLP**：权重矩阵 $W$ 可学习，激活函数 $\sigma$（如 ReLU、sigmoid）**固定在节点上**：
 
@@ -67,7 +68,7 @@ $$
 
 其中 $B_k(x)$ 为 B 样条基函数，$c_k$（样条系数）、$w_b$、$w_s$ 均通过反向传播学习。实践中网格点数（grid size）和样条阶数（spline order）决定了每条边的表达能力与参数量。
 
-### 1.3 为什么 KAN 天然适合符号回归
+### 1.3 KAN 与符号回归的关系
 
 KAN 每条边学到的是**单变量光滑函数**。训练收敛后，可以直接对每条边的激活曲线做**符号拟合**：从预定义候选库（`sin`、`x^2`、`exp`、`log`、`tanh` 等）中找出最近似的解析表达式，替换原样条参数。这种"先训练连续近似，再离散为符号"的路径，是 MLP 结构上无法原生支持的。
 
@@ -77,9 +78,9 @@ KAN 每条边学到的是**单变量光滑函数**。训练收敛后，可以直
 
 `symkan` 不重写 KAN 核心（`pykan.MultKAN`），而是在其上提供**工程化管控层**：
 
-- 训练不稳定、收敛后结果难保留？→ `stagewise_train`：分阶段训练 + 验证集驱动 + 精度守护 + 模型快照回滚。
-- 符号搜索失控、单次过剪丢失精度？→ `symbolize_pipeline`：自适应渐进剪枝 + 逐层符号化 + 强化微调。
-- 实验难复现、无法批量对比？→ 全流程 CSV 日志（stage log / trace / timing）+ 统一 bundle 导出 + CLI 批量工具。
+- `stagewise_train`：分阶段训练、验证集驱动选模与快照回滚。
+- `symbolize_pipeline`：渐进剪枝、逐层符号化与微调。
+- 导出接口与 CLI：用于生成结构化日志、结果文件与批量实验产物。
 
 核心变换链（简化）：
 
@@ -93,9 +94,9 @@ $$
 
 ---
 
-## 2. 核心特性（Why symkan）
+## 2. 方法特征
 
-### 2.1 KAN + Symbolic 的工程化闭环
+### 2.1 流程组织
 
 - `stagewise_train`：分阶段训练，支持剪枝回滚、验证集驱动、符号化就绪评分。
 - `symbolize_pipeline`：渐进剪枝 + 输入压缩 + 严格逐层符号化 + 强化微调。
@@ -112,7 +113,7 @@ $$
 | 实验复现 | 提供 stage log/trace/timing/bundle | 常需自建日志系统 |
 | 适合场景 | 科学建模、符号回归、可解释分类 | 大规模黑盒预测 |
 
-> 注意：`symkan` 不是“任何任务都优于 MLP”。如果你的目标只有纯预测精度且不关心表达式，MLP 可能更直接。
+需要指出的是，`symkan` 并不适用于所有任务。若研究目标仅为预测性能而不涉及表达式分析，MLP 往往是更直接的选择。
 ---
 
 ### 2.3 与原版 pykan（MultKAN）对比
@@ -130,26 +131,26 @@ $$
 | 公式数值验证 | `validate_formula_numerically`（R² + 稳定性） | 无内置验证 |
 | 适合场景 | 论文批量实验、可复现对比、符号回归流水线 | 探索性实验、快速原型 |
 
-> 使用建议：如果只是在 Notebook 里试一个想法，直接用 `pykan` 就够了。需要批量跑多 seed、追踪符号化轨迹、确保结论可复现，`symkan` 才是必要的。
+对于探索性试验，直接使用 `pykan` 往往已经足够；对于多 seed 复现、轨迹记录和结果导出需求，`symkan` 更为合用。
 
-### 2.4 实验回证后的默认建议（2026-03）
+### 2.4 项目层设定（2026-03）
 
-基于 `benchmark_ablation/` 与 `benchmark_ab/comparison/` 的最新结果，建议把参数策略分成“默认”和“按目标切换”：
+基于 `benchmark_ablation/` 与 `benchmark_ab/comparison/` 的结果，可将参数策略区分为项目层默认设定与按目标调整的设定：
 
-| 设计项 | 默认建议 | 证据摘要 |
+| 设计项 | 项目层设定 | 证据摘要 |
 | --- | --- | --- |
 | Stagewise 训练 | 必开 | 关闭后最终精度约从 0.78 跌到 0.44，符号化入口过密 |
 | 渐进剪枝 | 默认开启 | 精度影响小，但显著压缩表达式复杂度与符号化耗时 |
 | 输入压缩 | 默认开启（追求速度） | 关闭后公式 R² 常变好，但搜索维度和耗时明显上升 |
 | LayerwiseFT（2 层 KAN） | 默认关闭（`--layerwise-finetune-steps 0`） | 旧版收益低且耗时高；改进版更稳但综合性价比仍弱于关闭 |
 
-一句话：默认配置优先“可复现与吞吐”，不是追求单次 seed 的偶然最高分。
+总体上，项目层默认设定优先考虑复现稳定性与计算成本，而非单次 seed 下的最优结果。
 
 ## 3. 环境安装
 
 ### 3.1 Python 与依赖
 
-推荐：`Python 3.9.x`（兼容 `>=3.9,<3.11`）
+运行环境：`Python 3.9.x`（兼容 `>=3.9,<3.11`）
 
 ```bash
 pip install -r requirements.txt
@@ -157,7 +158,7 @@ pip install -r requirements.txt
 
 `requirements.txt` 关键依赖包括：`torch`, `pykan`, `sympy`, `scikit-learn`, `pandas`, `matplotlib`。
 
-### 3.2 快速检查
+### 3.2 环境检查
 
 ```python
 import torch
@@ -169,7 +170,7 @@ print('symkan ok')
 
 ---
 
-## 4. 快速上手（可直接运行）
+## 4. 最小示例
 
 下面示例包含：生成数据 -> 构建数据集 -> 分阶段训练 -> 符号化 -> 公式验证。
 
@@ -229,7 +230,7 @@ sym_res = symbolize_pipeline(
     max_prune_rounds=25,
     lib_hidden=LIB_HIDDEN,
     lib_output=LIB_OUTPUT,
-    layerwise_finetune_steps=0,  # 2层KAN默认建议关闭，追求速度与稳定性
+    layerwise_finetune_steps=0,  # 典型 2 层 KAN 常设为 0
     affine_finetune_steps=200,
     prune_adaptive_threshold=True,
     collect_timing=True,
@@ -246,11 +247,11 @@ val_df = validate_formula_numerically(sym_res['model'], sym_res['formulas'], dat
 print(val_df.head() if val_df is not None else 'No valid formula')
 ```
 
-> 注意：`stagewise_train` 的返回是 `(best_model, result_dict)`；`symbolize_pipeline` 的返回是结果字典，包含 `trace`、`sym_stats`、`timing` 等字段。
+`stagewise_train` 返回 `(best_model, result_dict)`；`symbolize_pipeline` 返回结果字典，其中包含 `trace`、`sym_stats` 与 `timing` 等字段。
 
 ---
 
-## 5. 架构深度解析（Architecture）
+## 5. 架构说明
 
 ### 5.1 流程图（数据如何经过符号化层）
 
@@ -330,13 +331,13 @@ $$
 
 最终导出的公式来自 `model.symbolic_formula()`，并通过 `collect_valid_formulas` 过滤掉常数/无效表达式。
 
-### 5.3 为什么要“先稀疏后符号化”
+### 5.3 先稀疏后符号化
 
 如果直接在高复杂度网络上做符号搜索，搜索空间会迅速爆炸。`symkan` 先把边数压到可控范围，再做分层拟合，通常更稳、更快，也更容易得到可读表达式。
 
 ---
 
-## 6. 核心 API 参考
+## 6. API 参考
 
 ### 6.1 `symkan.core`
 
@@ -431,11 +432,11 @@ if len(trace_df) > 0:
     plt.show()
 ```
 
-> 注意：`trace` 是判断“过剪/空转”的第一现场证据，建议在实验报告中保留。
+`trace` 是判断“过剪”或“空转”的直接证据，结果报告通常需要保留该表。
 
 ---
 
-## 8. 进阶用法（Advanced Usage）
+## 8. 扩展用法
 
 ### 8.1 自定义函数库
 
@@ -453,7 +454,7 @@ sym_res = symbolize_pipeline(
 )
 ```
 
-### 8.2 推荐调参顺序
+### 8.2 调参顺序
 
 1. 先控制剪枝节奏：`prune_threshold_start/end`, `prune_max_drop_ratio_per_round`。
 2. 再看恢复能力：`finetune_steps`, `affine_finetune_steps`，并把 `layerwise_finetune_steps` 视为可选项（2层KAN优先设为 0）。
@@ -461,16 +462,16 @@ sym_res = symbolize_pipeline(
 
 ### 8.3 结构化返回（dataclass）
 
-如果你不想在脚本里使用大量字符串键，优先使用：
+若希望减少对字符串键的直接依赖，可优先使用：
 
 - `stagewise_train_report` -> `StagewiseResult`
 - `symbolize_pipeline_report` -> `SymbolizeResult`
 
 ---
 
-### 8.4 批量基准实验（symkanbenchmark.py）
+### 8.4 批量基准实验
 
-`symkanbenchmark.py` 是为批量复现设计的 CLI 脚本，封装了 Notebook 主流程。目标：同一组参数批量跑多 seed、稳定导出 CSV，适合论文表格生成。
+`symkanbenchmark.py` 是面向批量复现的 CLI 脚本，封装了 Notebook 主流程，用于在同一组参数下批量运行多 seed 并稳定导出 CSV。
 
 三组核心实验设计：
 
@@ -520,18 +521,18 @@ python benchmark_ab_compare.py \
 
 输出文件说明：`variant_summary.csv`（均值统计）、`pairwise_delta_summary.csv`（胜负计数与中位数差值）、`seedwise_delta.csv`（逐 seed 差值）、`trace_summary.csv`（剪枝轨迹统计）。
 
-**当前实验结论（3 seeds: 42/52/62）**：
+当前 3 个 seeds（42/52/62）上的结果如下：
 
 - `baseline` 在 `final_acc` 与 `macro_auc` 上均高于 `adaptive` 与 `adaptive_auto`。
 - `adaptive` 在 `final_acc` 上对 baseline 为 **1胜2负**；`adaptive_auto` 为 **0胜3负**，不支持“精度增强”表述。
 - `adaptive_auto` 的 `rounds_mean = 3.67`（vs `adaptive` 的 1.0），说明它在剪枝节奏控制上优于 `adaptive`，但未转化为稳定精度收益。
-- 论文写作建议：同时报告均值、标准差、中位数差值、胜负计数，避免只报均值。
+- 结果报告宜同时给出均值、标准差、中位数差值与胜负计数。
 
-### 8.5 LayerwiseFT 改进版使用建议（esreg）
+### 8.5 LayerwiseFT 改进版
 
-如果你确实要启用 LayerwiseFT，请直接用“早停 + 轻正则 + 短步数”的改进组合，而不是旧版长步数无约束微调：
+如需启用 LayerwiseFT，可采用带早停和轻正则的短步数设置，而非旧版的长步数无约束微调：
 
-- 推荐起点：`--layerwise-finetune-steps 60 --layerwise-use-validation --layerwise-finetune-lamb 1e-5 --layerwise-early-stop-patience 2`
+- 参考起点：`--layerwise-finetune-steps 60 --layerwise-use-validation --layerwise-finetune-lamb 1e-5 --layerwise-early-stop-patience 2`
 - 适用场景：你愿意用更多时间换取极小的分类指标提升。
 - 不适用场景：批量跑 seed、追求最低方差、追求最快导出（这时优先 `--layerwise-finetune-steps 0`）。
 
@@ -540,15 +541,15 @@ python benchmark_ab_compare.py \
 - 改进版相对当前 full（两者默认参数已对齐）：分类与结构指标几乎不变，仅有轻微时间收益（~0.3s 级别）。
 - 改进版相对关闭 LayerwiseFT：收益极小，但耗时增加明显，且公式 R² 更差。
 
-理论解释（简版）：
+理论解释如下：
 
 - 逐层符号化本质是有损替换，`fix_symbolic` 确定函数族后不能回退重选。
 - 对 2 层 KAN，LayerwiseFT 只有一次层间补偿窗口，优化自由度受限。
 - 改进版（早停 + 轻正则 + 60 步）主要是降低旧版长步数无约束微调的副作用，不等于稳定创造净收益。
 
-所以默认仍建议关闭 LayerwiseFT，把它作为可选实验开关。
+因此，LayerwiseFT 更接近可选实验开关，而非常规默认设置。
 
-### 8.6 关键 CLI 参数速查
+### 8.6 关键 CLI 参数
 
 #### stagewise 自适应参数
 
@@ -583,7 +584,7 @@ python benchmark_ab_compare.py \
 
 | CLI 参数 | 对应 Python 参数 | 说明 |
 | --- | --- | --- |
-| `--layerwise-finetune-steps N` | `layerwise_finetune_steps=N` | 每层符号化后的局部微调步数（2层KAN建议默认 0） |
+| `--layerwise-finetune-steps N` | `layerwise_finetune_steps=N` | 每层符号化后的局部微调步数（典型 2 层 KAN 常设为 0） |
 | `--layerwise-finetune-lr LR` | `layerwise_finetune_lr=LR` | layerwise 微调学习率 |
 | `--layerwise-finetune-lamb L` | `layerwise_finetune_lamb=L` | layerwise 微调正则强度 |
 | `--layerwise-use-validation` | `layerwise_use_validation=True` | 启用 layerwise 验证集评估与早停 |
@@ -594,27 +595,27 @@ python benchmark_ab_compare.py \
 | `--layerwise-eval-interval K` | `layerwise_eval_interval=K` | 每 K 步进行一次验证评估 |
 | `--layerwise-validation-n-sample N` | `layerwise_validation_n_sample=N` | layerwise 验证时采样规模 |
 
-## 9. FAQ
+## 9. 补充说明
 
-### Q1: 为什么符号化后精度会下降？
+### 9.1 符号化后的精度变化
 
-这是稀疏化与函数离散化的自然代价。优先尝试提高 `target_edges` 与 `affine_finetune_steps`；对 2 层 KAN，不建议盲目增大 `layerwise_finetune_steps`，先验证是否真的带来收益。
+符号化后的精度下降通常源于稀疏化与函数离散化带来的逼近误差。若需补偿，可优先调整 `target_edges` 与 `affine_finetune_steps`。对于 2 层 KAN，不宜直接增大 `layerwise_finetune_steps` 而缺乏验证。
 
-### Q2: 并行提速不明显正常吗？
+### 9.2 并行加速的边界
 
-正常。当前并行主要加速 `suggest_symbolic`，剪枝和微调仍占大量时间。
+当前并行主要作用于 `suggest_symbolic` 阶段，因此总体加速幅度受限于剪枝与微调阶段的耗时占比。
 
-### Q3: `validate_formula_numerically` 第二次更快？
+### 9.3 公式验证的缓存效应
 
-正常。内部有公式编译缓存 `_LAMBDA_CACHE`。
+`validate_formula_numerically` 的后续调用通常快于首次调用，原因在于内部存在公式编译缓存 `_LAMBDA_CACHE`。
 
-### Q4: 归因偶发报错怎么办？
+### 9.4 归因阶段的异常处理
 
-优先使用 `safe_attribute`；它包含推理模式回退和状态恢复。
+归因阶段若出现偶发异常，可优先使用 `safe_attribute`，该接口包含推理模式回退与状态恢复逻辑。
 
 ---
 
-## 10. Roadmap（建议）
+## 10. 后续工作
 
 - 增加端到端 CLI 配置模板，减少参数学习成本。
 - 增加符号表达式复杂度约束的自动调度策略。
@@ -623,9 +624,9 @@ python benchmark_ab_compare.py \
 
 ---
 
-## 11. 最佳实践总结
+## 11. 使用要点
 
 - 固定设备、随机种子与验证切分策略，先保证可复现。
 - 训练与符号化分阶段保存日志（`stage_logs`, `trace`, `timing`）。
 - 不只看 `final_acc`，同时报告 `final_n_edge` 与公式验证指标（R2/稳定性）。
-- 批量实验建议统一导出 CSV + bundle，避免“只剩一个精度数字”。
+- 批量实验宜统一导出 CSV + bundle，避免结果仅保留单一精度指标。
