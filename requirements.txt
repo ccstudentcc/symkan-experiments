@@ -5,6 +5,7 @@
 numpy==1.24.4
 pandas==2.0.1
 scipy==1.11.4
+python-dateutil==2.9.0.post0
 
 ## --- Core numerical / scientific ---
 numpy==1.24.4
@@ -37,6 +38,8 @@ mdurl==0.1.2
 
 ## --- Utilities / system / packaging ---
 pyyaml==6.0.3
+pydantic==2.12.5
 psutil==7.1.2
 tqdm==4.66.4
 setuptools==68.2.2
+pytest==8.4.2

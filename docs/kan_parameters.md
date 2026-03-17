@@ -212,7 +212,9 @@ $$
 ### 8.3 结果导出
 
 - `collect_all_formulas(export_formulas)`
-- `save_symbolic_summary(summary_df, csv_path='kan_symbolic_summary.csv')`
+- `save_symbolic_summary(summary_df, csv_path=str(notebook_output_dir / 'kan_symbolic_summary.csv'))`
+
+其中 `notebook_output_dir = repo_root / 'outputs' / 'notebooks'`，用于避免把结构化结果直接落在 `notebooks/` 目录下。
 
 ## 9. 性能基准与并行对照参数
 
@@ -224,9 +226,9 @@ $$
 
 输出文件包括：
 
-- `benchmark_multi_round_raw.csv`
-- `benchmark_multi_round_summary_cn.csv`
-- `benchmark_multi_round_summary_en.csv`
+- `outputs/notebooks/benchmark_multi_round_raw.csv`
+- `outputs/notebooks/benchmark_multi_round_summary_cn.csv`
+- `outputs/notebooks/benchmark_multi_round_summary_en.csv`
 
 ### 9.2 并行对照参数
 
@@ -244,6 +246,8 @@ $$
 - `heavy_ft_early_stop_min_delta = 5e-4`
 
 该组参数主要用于速度专题对照，而非常规主实验设置。
+
+对应并行专题 CSV 默认导出到 `outputs/notebooks/benchmark_symbolic_parallel_quick.csv`。
 
 ## 10. 调参顺序
 

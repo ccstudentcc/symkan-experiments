@@ -1,0 +1,125 @@
+runtime:
+  tasks: all
+  output_dir: outputs/benchmark_runs
+  device: auto
+  batch_size: 0
+  global_seed: 123
+  baseline_seed: 123
+  stagewise_seeds: "42"
+  lib_preset: layered
+  save_bundle: false
+  verbose: false
+  quiet: false
+
+data:
+  x_train: data/X_train.npy
+  x_test: data/X_test.npy
+  y_train: data/Y_train_cat.npy
+  y_test: data/Y_test_cat.npy
+  auto_fetch_mnist: true
+  mnist_classes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+model:
+  inner_dim: 16
+  grid: 5
+  k: 3
+  baseline_steps: 150
+  baseline_lr: 0.02
+  baseline_lamb: 0.0001
+  baseline_log: 12
+  top_k: 120
+
+stagewise:
+  lamb_schedule: [0.0, 0.0, 0.00002, 0.00005, 0.0001, 0.0002, 0.0003, 0.0005, 0.0007, 0.001]
+  lr_schedule: [0.02, 0.015, 0.012, 0.01, 0.008, 0.006, 0.005, 0.004, 0.003, 0.002]
+  steps_per_stage: 60
+  prune_start_stage: 3
+  stage_target_edges: 120
+  prune_edge_threshold_init: 0.003
+  prune_edge_threshold_step: 0.003
+  prune_acc_drop_tol: 0.04
+  post_prune_ft_steps: 50
+  sym_target_edges: 50
+  acc_weight: 0.5
+  disable_stagewise_train: false
+  e2e_steps: 0
+  e2e_lr: 0.0
+  e2e_lamb: -1.0
+  prune_collapse_floor: 0.6
+  use_validation: false
+  validation_ratio: 0.15
+  validation_seed: null
+  adaptive_threshold: false
+  threshold_base_step: 0.005
+  threshold_min: 0.001
+  threshold_max: 0.1
+  success_boost: 0.5
+  failure_penalty: 0.3
+  stage_min_gain_threshold: 3
+  stage_max_prune_attempts: 20
+  adaptive_lamb: false
+  min_lamb_ratio: 0.3
+  max_lamb_ratio: 1.5
+  adaptive_ft: false
+  min_ft_ratio: 0.3
+  stage_early_stop: false
+  stage_early_stop_patience: 2
+  stage_early_stop_min_acc_gain: 0.002
+  stage_early_stop_edge_buffer: 0
+
+symbolic:
+  symbolic_target_edges: 90
+  max_prune_rounds: 30
+  weight_simple: 0.1
+  finetune_steps: 50
+  finetune_lr: 0.0005
+  layerwise_finetune_steps: 60
+  layerwise_finetune_lr: 0.005
+  layerwise_finetune_lamb: 0.00001
+  layerwise_use_validation: true
+  layerwise_validation_ratio: 0.15
+  layerwise_validation_seed: null
+  layerwise_early_stop_patience: 2
+  layerwise_early_stop_min_delta: 0.001
+  layerwise_eval_interval: 20
+  layerwise_validation_n_sample: 300
+  affine_finetune_steps: 200
+  affine_lr_schedule: [0.003, 0.001, 0.0005, 0.0002]
+  parallel_mode: auto
+  parallel_workers: null
+  parallel_min_tasks: 16
+  prune_eval_interval: 2
+  prune_attr_sample_adaptive: true
+  prune_attr_sample_min: 768
+  prune_attr_sample_max: 2048
+  heavy_ft_early_stop_patience: 2
+  heavy_ft_early_stop_min_delta: 0.0005
+  validate_n_sample: 500
+  input_compaction: true
+  symbolic_prune_threshold_start: 0.02
+  symbolic_prune_threshold_end: 0.03
+  symbolic_prune_max_drop_ratio: 1.0
+  symbolic_prune_threshold_backoff: 0.7
+  symbolic_prune_adaptive_threshold: true
+  symbolic_prune_adaptive_step: 0.0
+  symbolic_prune_adaptive_acc_drop_tol: 0.02
+  symbolic_prune_adaptive_min_edges_gain: 1
+  symbolic_prune_adaptive_low_gain_patience: 4
+
+benchmarking:
+  bench_repeat: 3
+  bench_warmup: 1
+  eval_rounds: 3
+  parallel_modes: auto,off,thread4
+  parallel_target_min: 40
+  parallel_target_max: 80
+  parallel_max_prune_rounds: 8
+  parallel_finetune_steps: 20
+  parallel_layerwise_finetune_steps: 20
+  parallel_affine_finetune_steps: 0
+  parallel_prune_eval_interval: 2
+  parallel_prune_attr_sample_adaptive: true
+  parallel_prune_attr_sample_min: 512
+  parallel_prune_attr_sample_max: 1536
+  parallel_heavy_ft_patience: 1
+  parallel_heavy_ft_min_delta: 0.0005

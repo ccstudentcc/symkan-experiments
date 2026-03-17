@@ -39,6 +39,22 @@ python symkanbenchmark.py --tasks all --verbose
 
 脚本默认优先读取 `data/X_train.npy`、`data/X_test.npy`、`data/Y_train_cat.npy`、`data/Y_test_cat.npy`（兼容旧版根目录 `X_train.npy`、`X_test.npy`、`Y_train_cat.npy`、`Y_test_cat.npy`）。若文件缺失，脚本会自动获取 MNIST 并生成对应文件，优先使用 `tensorflow.keras.datasets.mnist`，失败时回退至 `sklearn.fetch_openml`。
 
+## 配置管理建议
+
+`symkanbenchmark.py` 现支持通过 `--config` 加载 YAML 运行配置，例如：
+
+```bash
+python symkanbenchmark.py --config configs/symkanbenchmark.default.yaml --quiet
+```
+
+约定如下：
+
+- YAML 管运行逻辑：训练参数、设备、seed、输出目录等。
+- 环境变量管敏感项或环境差异：支持 `${ENV_VAR}` 和 `${ENV_VAR:-default}`。
+- CSV 管输入数据与结果产物：例如 `symkanbenchmark_runs.csv`、`kan_stage_logs.csv`、`kan_symbolic_summary.csv`。
+
+命令行参数仍然可以覆盖 YAML 中的字段，因此适合“固定主配置 + 局部实验覆盖”的工作流。
+
 ### 1.2 主实验
 
 ```bash

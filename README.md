@@ -41,6 +41,20 @@ pip install -r requirements.txt
 python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 --quiet
 ```
 
+也支持将“程序如何运行”的参数集中写入 YAML，并继续保留 CLI 覆盖能力：
+
+```bash
+python symkanbenchmark.py --config configs/symkanbenchmark.default.yaml --quiet
+```
+
+推荐约定：
+
+- YAML：运行配置、实验参数、输出目录、设备、seed 等。
+- 环境变量：敏感配置或机器相关差异，通过 `${ENV_VAR}` / `${ENV_VAR:-default}` 注入。
+- CSV：结果表、分析表、可直接插入 LaTeX 的产物。
+
+也就是说，本仓库继续保留 CSV 产物，但不再把 CSV 视作运行时配置载体。
+
 运行结果通常写入以下位置：
 
 - `outputs/benchmark_runs/symkanbenchmark_runs.csv`：多 seed 主表。
@@ -72,7 +86,7 @@ symkan-experiments/
 
 目录和脚本职责的详细说明见 [docs/project_map.md](docs/project_map.md)。
 
-补充说明：运行 `notebooks/kan.ipynb` 时，会在 `notebooks/` 下自动生成 `model/` 目录，用于存放运行期模型产物；该目录不属于仓库整理后的固定结构。
+补充说明：运行 `notebooks/kan.ipynb` 时，会在 `notebooks/` 下自动生成 `model/` 目录；而 notebook 导出的 CSV 结果会统一写入 `outputs/notebooks/`，避免污染 notebook 目录。
 
 ## 工作流概览
 

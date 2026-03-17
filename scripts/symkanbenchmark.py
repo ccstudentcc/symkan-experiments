@@ -28,6 +28,7 @@ from symkan.core import (
     set_device,
 )
 from symkan.core.runtime import default_batch_size, resolve_device
+from symkan.config import BenchmarkConfigError, apply_config_defaults, load_benchmark_config
 from symkan.eval import compute_multiclass_roc_auc, validate_formula_numerically
 from symkan.io import save_export_bundle, save_stage_logs, save_symbolic_summary
 from symkan.pruning import safe_attribute
@@ -993,6 +994,7 @@ def run_single_experiment(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Notebook-aligned symkan benchmark runner.")
+    parser.add_argument("--config", default=None, help="YAML 配置文件路径；CLI 参数优先于配置文件")
     parser.add_argument("--tasks", default="all", help="full,eval-bench,parallel-bench 或 all")
     parser.add_argument("--output-dir", default=DEFAULT_BENCHMARK_RUNS_DIR, help="输出目录")
     parser.add_argument("--device", default="auto", help="auto/cpu/cuda/cuda:0")
@@ -1169,8 +1171,17 @@ def normalize_numeric_args(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    bootstrap = argparse.ArgumentParser(add_help=False)
+    bootstrap.add_argument("--config", default=None)
+    bootstrap_args, remaining_argv = bootstrap.parse_known_args()
+
     parser = build_parser()
-    args = parser.parse_args()
+    try:
+        config_values = load_benchmark_config(bootstrap_args.config)
+    except BenchmarkConfigError as exc:
+        raise SystemExit(f"[config] {exc}") from exc
+    apply_config_defaults(parser, config_values)
+    args = parser.parse_args(remaining_argv)
     normalize_numeric_args(args)
 
     if args.quiet:

@@ -52,7 +52,7 @@ def clone_model_via_ckpt(model, path: str = "_safe_copy_temp", device: Optional[
     model.saveckpt(path)
 
     with open(f"{path}_config.yml", "r", encoding="utf-8") as f:
-        config = _yaml.load(f, Loader=_yaml.UnsafeLoader)
+        config = _yaml.safe_load(f)
 
     state = torch.load(f"{path}_state", map_location=dev)
 

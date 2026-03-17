@@ -58,10 +58,11 @@
 
 - `outputs/benchmark_ab/`：A/B 对比结果。
 - `outputs/benchmark_ablation/`：单因素消融与 LayerwiseFT 分析结果。
+- `outputs/notebooks/`：`notebooks/kan.ipynb` 导出的结构化 CSV。
 
 这些目录既保存实验产物，也构成当前文档结论的主要证据来源。
 
-补充说明：运行 `notebooks/kan.ipynb` 时，会在 `notebooks/` 下自动生成 `model/` 目录，用于存放运行期模型文件；该目录不属于仓库整理后的固定结构。
+补充说明：运行 `notebooks/kan.ipynb` 时，会在 `notebooks/` 下自动生成 `model/` 目录，用于存放运行期模型文件；结构化 CSV 则统一写入 `outputs/notebooks/`。
 
 ## 阅读入口
 
