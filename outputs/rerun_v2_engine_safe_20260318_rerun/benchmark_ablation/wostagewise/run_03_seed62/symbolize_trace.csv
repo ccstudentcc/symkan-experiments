@@ -1,0 +1,2 @@
+﻿round,threshold,edges_before,edges_after,drop_ratio,edges_removed,acc_drop,acc
+0,0.02,2080,39,0.98125,2041,0.7436999827623367,0.13689999282360077

@@ -1,0 +1,103 @@
+{
+  "metrics": {
+    "run_index": 2,
+    "total_runs": 3,
+    "stage_seed": 52,
+    "device": "cpu",
+    "batch_size": 64,
+    "lib_preset": "layered",
+    "base_acc": 0.8526,
+    "base_n_edge": 12704,
+    "selected_input_dim": 120,
+    "enhanced_acc": 0.8424999713897705,
+    "enhanced_n_edge": 130,
+    "selected_stage": "final",
+    "selected_score": 0.6135576780025775,
+    "final_acc": 0.7817999720573425,
+    "final_n_edge": 90,
+    "effective_target_edges": 90,
+    "effective_input_dim": 120,
+    "valid_expression_count": 10,
+    "expr_complexity_mean": 158.3,
+    "macro_auc": 0.9501606328640623,
+    "validation_mean_r2": 0.20641947013413314,
+    "validation_negative_r2_count": 2,
+    "stage_total_seconds": 50.51581229999999,
+    "stage_train_total_seconds": 15.36061399999997,
+    "stage_prune_total_seconds": 18.60560769999998,
+    "stage_final_finetune_seconds": 1.127876600000036,
+    "symbolic_total_seconds": 47.32284420000002,
+    "symbolic_core_seconds": 47.32284420000002,
+    "symbolize_wall_time_s": 123.5839191,
+    "post_symbolic_eval_wall_time_s": 1.3712717999999882,
+    "run_total_wall_time_s": 194.17259570000002,
+    "run_overhead_wall_time_s": 20.07286430000002,
+    "symbolic_non_core_seconds": 76.26107489999998,
+    "symbolic_abort_stage": null,
+    "symbolic_abort_reason": null,
+    "symbolic_abort_error_type": null,
+    "symbolic_warning_count": 0,
+    "export_wall_time_s": 123.5839191,
+    "pre_symbolic_n_edge": 130,
+    "pre_symbolic_too_dense": false,
+    "stagewise_enabled": true,
+    "stage_guard_mode": "light",
+    "input_compaction_enabled": false,
+    "input_compaction_fallback": false,
+    "input_compaction_reason": null,
+    "input_compaction_error_type": null,
+    "layerwise_finetune_steps": 60,
+    "layerwise_finetune_lr": 0.005,
+    "layerwise_finetune_lamb": 1e-05,
+    "layerwise_use_validation": true,
+    "layerwise_validation_ratio": 0.15,
+    "layerwise_validation_seed": 123,
+    "layerwise_early_stop_patience": 2,
+    "layerwise_early_stop_min_delta": 0.001,
+    "layerwise_eval_interval": 20,
+    "layerwise_validation_n_sample": 300,
+    "output_dir": "D:\\chenpeng\\Documents\\学习\\数学\\毕业论文\\symkan-experiments\\outputs\\rerun_v2_engine_safe_20260318\\benchmark_ablation\\wocompact\\run_02_seed52"
+  },
+  "roc": [
+    {
+      "class": 0,
+      "auc": 0.9912152133580705
+    },
+    {
+      "class": 1,
+      "auc": 0.9915000086962787
+    },
+    {
+      "class": 2,
+      "auc": 0.956722200035959
+    },
+    {
+      "class": 3,
+      "auc": 0.9520815207215939
+    },
+    {
+      "class": 4,
+      "auc": 0.9023041267544115
+    },
+    {
+      "class": 5,
+      "auc": 0.9153104327541353
+    },
+    {
+      "class": 6,
+      "auc": 0.96912413838644
+    },
+    {
+      "class": 7,
+      "auc": 0.9398621370246559
+    },
+    {
+      "class": 8,
+      "auc": 0.9464652878224031
+    },
+    {
+      "class": 9,
+      "auc": 0.9370212630866744
+    }
+  ]
+}
