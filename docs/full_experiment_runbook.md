@@ -22,7 +22,7 @@
 
 ## 1. 适用范围
 
-本文面向“从头重新跑一遍当前项目完整实验链路”的场景，覆盖：
+本文面向“从零开始复现当前项目完整实验链路”的场景，覆盖：
 
 1. 主 benchmark 多 seed 复跑。
 2. Adaptive A/B 三组对照及汇总。
@@ -31,22 +31,25 @@
 
 说明：
 
-- 命令统一推荐使用 `python -m scripts.*` 入口，而不是仓库根目录兼容 shim。
-- 下文统一把输出写到 `outputs/rerun/`，目的是避免覆盖你已有的 `outputs/benchmark_runs/`、`outputs/benchmark_ab/`、`outputs/benchmark_ablation/`。
-- 如果你希望继续沿用默认目录，只需把文中的 `outputs/rerun/...` 替换回项目默认路径。
+1. 命令统一推荐使用 `python -m scripts.*` 入口，不建议使用仓库根目录兼容 shim。
+2. 下文默认输出目录为 `outputs/rerun/`，用于避免覆盖既有 `outputs/benchmark_runs/`、`outputs/benchmark_ab/`、`outputs/benchmark_ablation/`。
+3. 若需沿用默认目录，可将文中 `outputs/rerun/...` 替换为项目默认路径。
 
-路径模式建议：
+路径命名建议：
 
-- 通用复跑与流程演示：使用本文默认的 `outputs/rerun/...`。
-- 工程版归档复测：使用 `scripts/run_engineering_rerun.ps1`，默认输出到 `outputs/rerun_v2_engine_safe_<date>/...`。
+1. 通用复跑与流程演示：使用 `outputs/rerun/...`。
+2. 工程版归档复测：使用 `scripts/run_engineering_rerun.ps1`，默认输出到 `outputs/rerun_v2_engine_safe_<date>/...`。
 
 ## 2. 运行前准备
+
+默认约定：本文所有命令均在 `PowerShell` 环境下执行，代码块中的行续接符与参数换行也按 PowerShell 语法给出。
 
 ### 2.1 环境检查
 
 推荐在仓库根目录执行：
 
 ```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python --version
 python -m pytest -q
 python -m scripts.symkanbenchmark --help
@@ -54,11 +57,19 @@ python -m scripts.ablation_runner --help
 python -m scripts.benchmark_ab_compare --help
 ```
 
-预期：
+预期结果：
 
-- `python --version` 显示 Python 3.9.x。
-- `python -m pytest -q` 通过。
-- 三个 CLI `--help` 都能正常打印帮助，而不是因为缺少重依赖或导入失败直接退出。
+1. `python --version` 显示 Python 3.9.x。
+2. `python -m pytest -q` 全部通过。
+3. 三个 CLI 的 `--help` 均可正常打印，且不出现导入失败或依赖缺失导致的提前退出。
+
+本轮工程复测参考环境（用于结果解释）：
+
+1. 操作系统：Windows 11 专业版 `23H2`（OS Build `22631.5472`）。
+2. Python：`Miniconda` 的 `kan` 环境，解释器路径 `C:\Users\chenpeng\miniconda3\envs\kan\python.exe`（`3.9.25`）。
+3. CPU：`12th Gen Intel(R) Core(TM) i5-12500H`。
+4. 内存：`16 GB`。
+5. 深度学习运行时：`PyTorch 2.1.2+cpu`（CPU 路径）。
 
 ### 2.2 数据检查
 
@@ -71,7 +82,7 @@ python -m scripts.benchmark_ab_compare --help
 
 `scripts.symkanbenchmark` 也兼容旧版根目录路径 `X_train.npy`、`X_test.npy`、`Y_train_cat.npy`、`Y_test_cat.npy`；若配置中的 `data/` 路径不存在，会继续尝试这些 legacy 文件名。
 
-若这些文件缺失，且配置中 `data.auto_fetch_mnist: true`，脚本会尝试自动补齐 MNIST 数据；默认只允许写入仓库 `data/` 目录。若确需写到 `data/` 之外，必须显式设置 `data.allow_auto_fetch_outside_data_dir: true`。
+若上述文件缺失且配置中 `data.auto_fetch_mnist: true`，脚本将尝试自动补齐 MNIST 数据。默认仅允许写入仓库 `data/` 目录；如需写入 `data/` 目录外路径，必须显式设置 `data.allow_auto_fetch_outside_data_dir: true`。
 
 ### 2.3 配置文件
 
@@ -87,7 +98,7 @@ python -m scripts.benchmark_ab_compare --help
 
 其中 `configs/benchmark_ab/` 下的 3 份文件已按原始 A/B 实验口径预置，可直接使用。
 
-如果你想在此基础上派生自己的 A/B 变体，推荐复制这三份模板后再修改，而不是把差异重新散落回命令行参数中。
+若需在此基础上派生新的 A/B 变体，建议复制这三份模板后再修改，而非将差异重新分散到命令行参数中。
 
 补充说明：
 
@@ -106,9 +117,9 @@ python -m scripts.benchmark_ab_compare --help
 3. 再跑单因素消融矩阵。
 4. 最后基于消融结果做 LayerwiseFT 专项分析。
 
-如果你只是要论文主表而不需要性能专题，`symkanbenchmark` 建议跑 `--tasks full`。
+若仅用于生成论文主表且不涉及性能专题分析，建议 `symkanbenchmark` 使用 `--tasks full`。
 
-如果你还需要评估 benchmark 与并行 benchmark 的补充结果，可把 `--tasks full` 改为 `--tasks all`，一次生成：
+若还需补充 `eval-bench` 与 `parallel-bench` 结果，可将 `--tasks full` 改为 `--tasks all`，一次生成：
 
 - `full`
 - `eval-bench`
@@ -119,6 +130,7 @@ python -m scripts.benchmark_ab_compare --help
 ### 4.1 主结果链路
 
 ```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.symkanbenchmark `
   --config configs/symkanbenchmark.default.yaml `
   --tasks full `
@@ -127,15 +139,16 @@ python -m scripts.symkanbenchmark `
   --quiet
 ```
 
-如果你还需要补充 benchmark 专题，把 `--tasks full` 改为：
+若需补充 benchmark 专题分析，可将 `--tasks full` 改为：
 
 ```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 --tasks all
 ```
 
 ### 4.2 预期生成的文件
 
-根目录下应至少出现：
+根目录下应至少包含：
 
 - `outputs/rerun/benchmark_runs/symkanbenchmark_runs.csv`
 
@@ -145,7 +158,7 @@ python -m scripts.symkanbenchmark `
 - `outputs/rerun/benchmark_runs/run_02_seed52/`
 - `outputs/rerun/benchmark_runs/run_03_seed62/`
 
-每个 run 目录下应至少出现：
+每个 run 目录下应至少包含：
 
 - `kan_stage_logs.csv`
 - `kan_symbolic_summary.csv`
@@ -154,7 +167,7 @@ python -m scripts.symkanbenchmark `
 - `symbolize_trace.csv`
 - `metrics.json`
 
-如果使用 `--tasks all`，还会额外生成：
+若使用 `--tasks all`，还会额外生成：
 
 - `outputs/rerun/benchmark_runs/symkanbenchmark_eval_runs.csv`
 - `outputs/rerun/benchmark_runs/symkanbenchmark_parallel_runs.csv`
@@ -169,20 +182,20 @@ python -m scripts.symkanbenchmark `
 
 ### 4.3 重点检查的结果文件
 
-- `symkanbenchmark_runs.csv`
-  这是多 seed 主表，适合直接做均值、方差和论文表格。
-- `metrics.json`
-  这是单次 run 的结构化指标快照。现在还会记录符号化过程中的可观测性字段，例如：
+1. `symkanbenchmark_runs.csv`
+   该文件是多 seed 主表，适合用于均值、方差与论文表格统计。
+2. `metrics.json`
+   该文件是单次 run 的结构化指标快照，同时记录符号化阶段的可观测性字段，例如：
   - `symbolic_abort_stage`
   - `symbolic_abort_reason`
   - `symbolic_abort_error_type`
   - `symbolic_warning_count`
   - `input_compaction_fallback`
   - `input_compaction_reason`
-- `symbolize_trace.csv`
-  用来检查剪枝轮次、`drop_ratio` 和实际节奏是否异常。
-- `formula_validation.csv`
-  用来检查导出公式的数值 R² 与不稳定情况。
+3. `symbolize_trace.csv`
+   用于检查剪枝轮次、`drop_ratio` 与节奏异常。
+4. `formula_validation.csv`
+   用于检查导出公式的数值 `R²` 与数值稳定性。
 
 ## 5. Step 2: Adaptive A/B 实验与汇总
 
@@ -195,6 +208,7 @@ python -m scripts.symkanbenchmark `
 - `configs/benchmark_ab/adaptive_auto.yaml`
 
 ```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.symkanbenchmark `
   --tasks full `
   --stagewise-seeds 42,52,62 `
@@ -204,6 +218,7 @@ python -m scripts.symkanbenchmark `
 ```
 
 ```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.symkanbenchmark `
   --tasks full `
   --stagewise-seeds 42,52,62 `
@@ -213,6 +228,7 @@ python -m scripts.symkanbenchmark `
 ```
 
 ```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.symkanbenchmark `
   --tasks full `
   --stagewise-seeds 42,52,62 `
@@ -224,6 +240,7 @@ python -m scripts.symkanbenchmark `
 ### 5.2 生成 A/B 汇总
 
 ```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.benchmark_ab_compare `
   --root outputs/rerun/benchmark_ab `
   --baseline baseline `
@@ -253,6 +270,7 @@ python -m scripts.benchmark_ab_compare `
 ### 6.1 跑消融矩阵
 
 ```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.ablation_runner `
   --config configs/ablation_runner.default.yaml `
   --stagewise-seeds 42,52,62 `
@@ -275,9 +293,10 @@ python -m scripts.ablation_runner `
 
 ### 6.2 只重新汇总已有结果
 
-如果各变体目录已经存在，只想重算总表，可以执行：
+若各变体目录已存在且仅需重算总表，可执行：
 
 ```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.ablation_runner `
   --aggregate-only `
   --output-dir outputs/rerun/benchmark_ablation
@@ -311,6 +330,7 @@ python -m scripts.ablation_runner `
 ### 7.1 基于已有消融结果做专项分析
 
 ```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.analyze_layerwiseft `
   --ablation-dir outputs/rerun/benchmark_ablation `
   --seeds 42,52,62
@@ -328,15 +348,17 @@ python -m scripts.analyze_layerwiseft `
 ### 7.2 跑改进版 LayerwiseFT 并做比较
 
 ```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.compare_layerwiseft_improved `
   --ablation-dir outputs/rerun/benchmark_ablation `
   --seeds 42,52,62 `
   --quiet
 ```
 
-如果 `layerwiseft_esreg/` 已经存在，只想重新聚合：
+若 `layerwiseft_esreg/` 已存在且仅需重新聚合：
 
 ```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.compare_layerwiseft_improved `
   --ablation-dir outputs/rerun/benchmark_ablation `
   --seeds 42,52,62 `
@@ -410,8 +432,8 @@ outputs/rerun/
    - `symbolic_abort_stage`
    - `symbolic_abort_reason`
    - `input_compaction_fallback`
-4. `outputs/rerun/benchmark_ab/comparison/comparison_summary.md` 已生成，说明 A/B 汇总链路跑通。
-5. `outputs/rerun/benchmark_ablation/layerwiseft_analysis/` 与 `layerwiseft_improved_analysis/` 都有 CSV 输出，说明专项分析链路跑通。
+4. `outputs/rerun/benchmark_ab/comparison/comparison_summary.md` 已生成，表明 A/B 汇总链路执行成功。
+5. `outputs/rerun/benchmark_ablation/layerwiseft_analysis/` 与 `layerwiseft_improved_analysis/` 均有 CSV 输出，表明专项分析链路执行成功。
 
 如需进一步解读结果，继续参考：
 

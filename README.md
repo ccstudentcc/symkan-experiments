@@ -37,20 +37,23 @@
 
 运行环境：Python 3.9。
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 pip install -r requirements.txt
 python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --quiet
 ```
 
 也支持将“程序如何运行”的参数集中写入 YAML，并继续保留 CLI 覆盖能力：
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.symkanbenchmark --config configs/symkanbenchmark.default.yaml --quiet
 ```
 
 对于单因素消融，也支持同样的配置方式：
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml
 ```
 
@@ -153,7 +156,8 @@ symkan-experiments/
 
 推荐在项目环境中于仓库根目录执行：
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m pytest
 ```
 

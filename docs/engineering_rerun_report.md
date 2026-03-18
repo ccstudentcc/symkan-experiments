@@ -1,31 +1,39 @@
 # 工程版复测报告（Rerun）
 
-## 1. 版本与口径
+## 1. 研究设定与口径
 
-1. 历史参考版（Legacy）：`d8e09b5edadb988bd4a1638ea7109cf3ff5ef7d7`，对应 pre-release：`v1.0.0-legacy-d8`。
+1. 历史参考版（Legacy）：`d8e09b5edadb988bd4a1638ea7109cf3ff5ef7d7`，对应 pre-release `v1.0.0-legacy-d8`。
 2. 工程版（Current）：当前 `main`。
 3. 本轮复测默认参数：`stagewise.guard_mode=light`，`stagewise.prune_acc_drop_tol=0.08`。
-4. 本轮复测执行日期：`2026-03-18`。
+4. 复测执行日期：`2026-03-18`。
 5. 本轮输出目录：`outputs/rerun_v2_engine_safe_20260318_rerun/`。
-6. 上一轮工程归档目录：`outputs/rerun_v2_engine_safe_20260318/`（用于本报告中的“工程内二次对照”）。
-7. 复测执行命令（PowerShell）：
+6. 对照目录（上一轮工程归档）：`outputs/rerun_v2_engine_safe_20260318/`。
+7. 命令默认执行环境：`PowerShell`（Windows）。
+8. 测试设备与运行时环境：
+   - 操作系统：Windows 11 专业版 `23H2`（OS Build `22631.5472`）
+   - Python：`Miniconda` 的 `kan` 环境，解释器路径 `C:\Users\chenpeng\miniconda3\envs\kan\python.exe`（`3.9.25`）
+   - CPU：`12th Gen Intel(R) Core(TM) i5-12500H`
+   - 内存：`16 GB`
+   - 深度学习运行时：`PyTorch 2.1.2+cpu`（本轮复测按 CPU 路径执行）
+9. 执行命令（PowerShell）：
 
 ```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 .\scripts\run_engineering_rerun.ps1 -PythonExe C:\Users\chenpeng\miniconda3\envs\kan\python.exe -OutRoot outputs/rerun_v2_engine_safe_20260318_rerun
 ```
 
-## 2. 产物完整性检查
+## 2. 产物完整性核验
 
-检查结果：完整通过。
+核验结论：本轮产物完整，具备后续统计分析条件。
 
-1. 主 benchmark：`benchmark_runs/` 下有 `3` 个 run 目录，且存在 `symkanbenchmark_runs.csv`。
-2. A/B 三变体：`baseline/adaptive/adaptive_auto` 各有 `3` 个 run，且各自 `symkanbenchmark_runs.csv` 完整。
-3. A/B 汇总产物完整：`variant_summary.csv`、`pairwise_delta_summary.csv`、`seedwise_delta.csv`、`trace_seedwise.csv`、`trace_summary.csv`、`comparison_summary.md` 均存在。
-4. 消融五变体：`full/wostagewise/wopruning/wocompact/wolayerwiseft` 各有 `3` 个 run，且 `ablation_runs_raw.csv`、`ablation_runs_summary.csv` 存在。
+1. 主 benchmark：`benchmark_runs/` 下共 `3` 个 run 目录，并存在 `symkanbenchmark_runs.csv`。
+2. A/B 三变体：`baseline/adaptive/adaptive_auto` 各包含 `3` 个 run，且各自 `symkanbenchmark_runs.csv` 完整。
+3. A/B 汇总文件齐全：`variant_summary.csv`、`pairwise_delta_summary.csv`、`seedwise_delta.csv`、`trace_seedwise.csv`、`trace_summary.csv`、`comparison_summary.md`。
+4. 消融五变体齐全：`full/wostagewise/wopruning/wocompact/wolayerwiseft` 各包含 `3` 个 run，并生成 `ablation_runs_raw.csv` 与 `ablation_runs_summary.csv`。
 
-## 3. 主 benchmark 结果（本轮 rerun）
+## 3. 主 benchmark 统计结果（本轮 rerun）
 
-数据来源：`outputs/rerun_v2_engine_safe_20260318_rerun/benchmark_runs/symkanbenchmark_runs.csv`
+数据源：`outputs/rerun_v2_engine_safe_20260318_rerun/benchmark_runs/symkanbenchmark_runs.csv`
 
 | 指标 | 均值 | 标准差 |
 | --- | ---: | ---: |
@@ -37,9 +45,9 @@
 | `symbolize_wall_time_s` | 75.6998 | 2.8740 |
 | `run_total_wall_time_s` | 140.3330 | 3.5777 |
 
-## 4. 与上一轮工程归档对比（`...20260318`）
+## 4. 与上一轮工程归档对照（`...20260318`）
 
-数据来源：
+数据源：
 
 1. 本轮：`outputs/rerun_v2_engine_safe_20260318_rerun/benchmark_runs/symkanbenchmark_runs.csv`
 2. 上轮：`outputs/rerun_v2_engine_safe_20260318/benchmark_runs/symkanbenchmark_runs.csv`
@@ -54,20 +62,20 @@
 | `symbolize_wall_time_s` | 75.6998 | 88.5343 | -12.8345 | -14.50% |
 | `run_total_wall_time_s` | 140.3330 | 154.0382 | -13.7053 | -8.90% |
 
-解读：
+解释：
 
-1. 相比上一轮工程归档，本轮在 wall-time 指标上明显更快。
-2. `macro_auc` 基本持平，但 `final_acc` 小幅下降。
-3. 本轮 `final_n_edge` 更低，说明结构压缩更激进，这与精度轻微回落同向。
+1. 相较上一轮工程归档，本轮端到端 wall-time 明显收敛并下降。
+2. `macro_auc` 基本稳定，而 `final_acc` 出现轻微回落。
+3. `final_n_edge` 进一步降低，提示结构压缩程度提高，与精度轻微下降方向一致。
 
-## 5. 与历史参考版（Legacy）对比
+## 5. 与历史参考版（Legacy）对照
 
-历史参考数据来源：`outputs/benchmark_ab/baseline/symkanbenchmark_runs.csv`
+历史参考数据源：`outputs/benchmark_ab/baseline/symkanbenchmark_runs.csv`
 
-说明：
+口径说明：
 
-1. Legacy 使用 `export_wall_time_s`，语义对应工程版的 `symbolize_wall_time_s`。
-2. Legacy 无 `run_total_wall_time_s`，因此该字段无法直接对齐对比。
+1. Legacy 使用 `export_wall_time_s`，其语义对应工程版 `symbolize_wall_time_s`。
+2. Legacy 不含 `run_total_wall_time_s`，该指标无法做一一对应比较。
 
 | 指标 | 本轮 rerun | 历史参考版 | 差值 | 相对变化 |
 | --- | ---: | ---: | ---: | ---: |
@@ -78,20 +86,20 @@
 | `symbolic_total_seconds` | 35.6519 | 33.2678 | +2.3841 | +7.17% |
 | `symbolize_wall_time_s` | 75.6998 | 73.1687 | +2.5311 | +3.46% |
 
-解读：
+解释：
 
-1. 工程版在可观测性与稳定性增强后，仍保留了与 Legacy 接近的 AUC 水平。
-2. `final_acc` 仍有可见差距，且阶段训练与符号化核心耗时仍高于 Legacy。
-3. 相比上一轮工程归档，本轮 `symbolize_wall_time_s` 显著下降，说明工程链路内部仍有优化空间。
+1. 工程版在增强可观测性与稳健性后，仍保持与 Legacy 接近的 AUC 水平。
+2. `final_acc` 仍存在可见差距，阶段训练与符号化核心耗时也高于 Legacy。
+3. 与上一轮工程归档相比，本轮 `symbolize_wall_time_s` 的下降幅度较大，提示工程链路内部仍有可优化空间。
 
 ## 6. 工程版 A/B 结果（本轮 rerun）
 
-数据来源：
+数据源：
 
 1. `outputs/rerun_v2_engine_safe_20260318_rerun/benchmark_ab/comparison/variant_summary.csv`
 2. `outputs/rerun_v2_engine_safe_20260318_rerun/benchmark_ab/comparison/pairwise_delta_summary.csv`
 
-关键均值（mean）：
+关键均值：
 
 1. `baseline`：`final_acc=0.7774`，`macro_auc=0.9561`，`run_total_wall_time_s=153.4705`。
 2. `adaptive`：`final_acc=0.7425`，`macro_auc=0.9457`，`run_total_wall_time_s=209.5523`。
@@ -108,15 +116,15 @@ pairwise（variant - baseline）：
 | `adaptive_auto vs baseline` | `macro_auc` | -0.0099 | 0 / 3 / 0 |
 | `adaptive_auto vs baseline` | `run_total_wall_time_s` | -22.7553 | 2 / 1 / 0 |
 
-补充说明：
+说明：
 
-1. 本表中 `run_total_wall_time_s` 的 `win` 定义为“耗时更低（delta<0）”。
-2. 本轮 `adaptive` 波动显著（`symbolize_wall_time_s` 标准差约 `59.78s`），存在 seed 级异常放大。
-3. `adaptive_auto` 依然是三者中端到端耗时最优，但精度不及 baseline。
+1. 对 `run_total_wall_time_s`，`win` 定义为“耗时更低（delta < 0）”。
+2. `adaptive` 在本轮呈现较高方差（`symbolize_wall_time_s` 标准差约 `59.78s`），存在 seed 级异常放大风险。
+3. `adaptive_auto` 在端到端耗时上最优，但准确率仍低于 baseline。
 
 ## 7. 工程版消融结果（本轮 rerun）
 
-数据来源：`outputs/rerun_v2_engine_safe_20260318_rerun/benchmark_ablation/ablation_runs_summary.csv`
+数据源：`outputs/rerun_v2_engine_safe_20260318_rerun/benchmark_ablation/ablation_runs_summary.csv`
 
 | 变体 | `final_acc_mean` | `macro_auc_mean` | `symbolic_total_seconds_mean` | `effective_input_dim_mean` |
 | --- | ---: | ---: | ---: | ---: |
@@ -128,15 +136,21 @@ pairwise（variant - baseline）：
 
 主要观察：
 
-1. `wostagewise` 仍明显失效，stagewise 训练依然是必要组件。
-2. `wopruning` 与 `wocompact` 的精度较高，但都带来显著符号化成本上升。
-3. `wolayerwiseft` 在本轮仍保持较高的成本收益比。
+1. `wostagewise` 依旧显著失效，说明 stagewise 训练是核心必要组件。
+2. `wopruning` 与 `wocompact` 虽提高精度，但符号化成本显著上升。
+3. `wolayerwiseft` 在当前口径下仍体现较高成本收益比。
 
-## 8. 结论与后续建议
+## 8. 方法学限制
 
-1. 本轮 rerun 产物完整、口径一致，可作为当前工程版的最新主引用结果。
-2. 结论层面建议继续采用“双锚点”：Legacy（历史参考）+ 工程版 rerun（当前主结论）。
+1. 历史版与工程版的指标体系并非完全同构，部分对比仅可做语义映射而非严格同名比较。
+2. 本轮统计基于固定三 seed，结论具备工程决策意义，但不应外推为充分统计显著性结论。
+3. `adaptive` 的高方差提示其在局部随机条件下仍可能出现不稳定行为，后续需结合更细粒度日志进一步定位。
+
+## 9. 结论与后续工作
+
+1. 本轮 rerun 产物完整、口径一致，可作为当前工程版的主引用结果。
+2. 建议继续采用“双锚点”叙述：Legacy 作为历史参考，工程版 rerun 作为当前正式结论。
 3. 后续优化优先级建议：
-   - 排查 `adaptive` 在特定 seed 下的 wall-time 异常放大；
-   - 继续压缩 `symbolize_wall_time_s` 中的非核心开销；
-   - 在保持 `macro_auc` 的前提下回收 `final_acc` 的轻微损失。
+   - 针对 `adaptive` 的 seed 级异常放大进行机制性排查；
+   - 持续压缩 `symbolize_wall_time_s` 的非核心开销；
+   - 在维持 `macro_auc` 稳定前提下，回收 `final_acc` 的小幅损失。

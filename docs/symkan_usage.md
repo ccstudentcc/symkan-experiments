@@ -155,7 +155,8 @@ $$
 
 运行环境：`Python 3.9.x`（兼容 `>=3.9,<3.11`）
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 pip install -r requirements.txt
 ```
 
@@ -536,23 +537,24 @@ sym_res = symbolize_pipeline(
 | `adaptive` | 启用验证集反馈 + 自适应阈值/lamb/微调步数 |
 | `adaptive_auto` | 在 `adaptive` 基础上，额外启用阶段早停与符号化自适应剪枝节奏控制 |
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 # baseline
-python -m scripts.symkanbenchmark \
-    --tasks full --stagewise-seeds 42,52,62 \
-    --config configs/benchmark_ab/baseline.yaml \
+python -m scripts.symkanbenchmark `
+    --tasks full --stagewise-seeds 42,52,62 `
+    --config configs/benchmark_ab/baseline.yaml `
     --output-dir outputs/benchmark_ab/baseline --quiet
 
 # adaptive
-python -m scripts.symkanbenchmark \
-    --tasks full --stagewise-seeds 42,52,62 \
-    --config configs/benchmark_ab/adaptive.yaml \
+python -m scripts.symkanbenchmark `
+    --tasks full --stagewise-seeds 42,52,62 `
+    --config configs/benchmark_ab/adaptive.yaml `
     --output-dir outputs/benchmark_ab/adaptive --quiet
 
 # adaptive_auto
-python -m scripts.symkanbenchmark \
-    --tasks full --stagewise-seeds 42,52,62 \
-    --config configs/benchmark_ab/adaptive_auto.yaml \
+python -m scripts.symkanbenchmark `
+    --tasks full --stagewise-seeds 42,52,62 `
+    --config configs/benchmark_ab/adaptive_auto.yaml `
     --output-dir outputs/benchmark_ab/adaptive_auto --quiet
 ```
 
@@ -560,11 +562,12 @@ python -m scripts.symkanbenchmark \
 
 自动生成对比表：
 
-```bash
-python -m scripts.benchmark_ab_compare \
-    --root outputs/benchmark_ab \
-    --baseline baseline \
-    --variants adaptive,adaptive_auto \
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
+python -m scripts.benchmark_ab_compare `
+    --root outputs/benchmark_ab `
+    --baseline baseline `
+    --variants adaptive,adaptive_auto `
     --output outputs/benchmark_ab/comparison
 ```
 

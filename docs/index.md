@@ -1,54 +1,52 @@
-# docs 文档导航
+# docs 文档索引
 
-本页说明 `docs/` 目录中文档的主题范围及其相互关系，可作为仓库文档系统的总入口。
+本文档用于说明 `docs/` 目录的知识结构、阅读路径与文档间依赖关系，可作为项目文档系统的统一入口。
 
-## 基础阅读路径
+## 1. 建议起始阅读路径
 
-首次阅读本仓库时，可按以下顺序建立整体认识：
+对于首次接触本仓库的读者，建议按如下顺序建立整体认知：
 
-1. [project_map.md](project_map.md)：了解仓库组成、脚本职责与结果目录。
-2. [symkan_usage.md](symkan_usage.md)：理解核心库接口、主流程与方法边界。
-3. [symkanbenchmark_usage.md](symkanbenchmark_usage.md)：了解批量实验入口、输出产物与结果解释方式。
+1. [project_map.md](project_map.md)：理解仓库结构、脚本职责与结果目录组织方式。
+2. [symkan_usage.md](symkan_usage.md)：理解核心库接口、配置入口及方法边界。
+3. [symkanbenchmark_usage.md](symkanbenchmark_usage.md)：理解批量实验入口、输出产物与统计口径。
 
-完成上述阅读后，通常即可形成对项目定位、代码结构与实验工作流的基本理解。
+完成上述阅读后，通常可形成对项目定位、实现边界与实验流程的完整基础认知。
 
-## 按任务导航
+## 2. 按主题导航
 
-### 1. 项目结构与设计
+### 2.1 架构与设计
 
-- [project_map.md](project_map.md)：仓库地图、脚本职责与阅读入口。
-- [design.md](design.md)：模块边界、设计约束与项目层默认设定的依据。
-- [../ARCHITECTURE.md](../ARCHITECTURE.md)：公共库层与实验脚本层的整体架构。
+1. [project_map.md](project_map.md)：项目地图与阅读入口。
+2. [design.md](design.md)：模块边界、设计约束与默认策略依据。
+3. [../ARCHITECTURE.md](../ARCHITECTURE.md)：库层与脚本层的系统级架构。
 
-### 2. 核心库与参数
+### 2.2 核心库与参数体系
 
-- [symkan_usage.md](symkan_usage.md)：核心 API、`AppConfig` 配置层、最小示例与结果字段说明。
-- [kan_parameters.md](kan_parameters.md)：`notebooks/kan.ipynb` 的参数含义与调节顺序。
+1. [symkan_usage.md](symkan_usage.md)：核心 API、`AppConfig` 与结果字段语义。
+2. [kan_parameters.md](kan_parameters.md)：`notebooks/kan.ipynb` 的参数位置、作用与调节顺序。
 
-### 3. 实验运行与结果读取
+### 2.3 实验执行与复现
 
-- [symkanbenchmark_usage.md](symkanbenchmark_usage.md)：主 benchmark CLI、输出文件与 A/B 结果口径。
-- [ablation_usage.md](ablation_usage.md)：单因素消融与 LayerwiseFT 专项对比脚本说明。
-- [full_experiment_runbook.md](full_experiment_runbook.md)：按步骤复跑完整实验链路的操作手册。
-- [engineering_version_rerun_note.md](engineering_version_rerun_note.md)：历史参考版与工程版复测的口径分层说明。
-- [engineering_rerun_report.md](engineering_rerun_report.md)：工程版复测结果报告（含与历史版对照结构）。
+1. [symkanbenchmark_usage.md](symkanbenchmark_usage.md)：主 benchmark CLI 与 A/B 结果口径。
+2. [ablation_usage.md](ablation_usage.md)：单因素消融与 LayerwiseFT 专项实验说明。
+3. [full_experiment_runbook.md](full_experiment_runbook.md)：完整复跑操作手册。
+4. [engineering_version_rerun_note.md](engineering_version_rerun_note.md)：历史版与工程版口径分层说明。
+5. [engineering_rerun_report.md](engineering_rerun_report.md)：工程版复测报告及对照分析。
 
-这几份文档同时说明了当前的运行配置约定：Notebook / Python 优先直接构造 `AppConfig`，批量实验优先 `AppConfig` YAML + 少量显式 CLI 覆盖，而底层统一消费 `AppConfig`。
+### 2.4 报告与结论解释
 
-### 4. 结果报告与结论边界
+1. [ablation_report.md](ablation_report.md)：单因素消融结论与解释边界。
+2. [layerwiseft_improved_report.md](layerwiseft_improved_report.md)：改进版 LayerwiseFT 比较结果。
+3. [ablation_plan.md](ablation_plan.md)：实验设计目标、约束与风险控制。
 
-- [ablation_report.md](ablation_report.md)：单因素消融结果及其解释边界。
-- [layerwiseft_improved_report.md](layerwiseft_improved_report.md)：改进版 LayerwiseFT 的比较结果。
-- [ablation_plan.md](ablation_plan.md)：消融实验设计的背景、目标与约束。
+## 3. 按任务场景选择路径
 
-## 按使用情形选择路径
+1. 项目全貌快速建立：`project_map -> symkan_usage -> symkanbenchmark_usage`
+2. 架构与实现边界梳理：`project_map -> ../ARCHITECTURE.md -> design`
+3. 实验复现：`symkanbenchmark_usage -> ablation_usage`
+4. 全流程复跑：`full_experiment_runbook -> symkanbenchmark_usage -> ablation_usage`
+5. 报告撰写：`engineering_version_rerun_note -> engineering_rerun_report -> ablation_report`
 
-- 阅读项目全貌：`project_map -> symkan_usage -> symkanbenchmark_usage`
-- 阅读架构与实现边界：`project_map -> ../ARCHITECTURE.md -> design`
-- 复现实验：`symkanbenchmark_usage -> ablation_usage`
-- 完整复跑：`full_experiment_runbook -> symkanbenchmark_usage -> ablation_usage`
-- 撰写报告或论文：`ablation_report -> layerwiseft_improved_report -> design`
+## 4. 返回项目入口
 
-## 返回项目入口
-
-- 项目总览：[../README.md](../README.md)
+1. 项目总览：[../README.md](../README.md)

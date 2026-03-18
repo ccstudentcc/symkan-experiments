@@ -25,11 +25,11 @@
 
 ## 1. 说明范围
 
-本文说明当前仓库中 `notebooks/kan.ipynb` 所采用的实验参数，不涉及旧版接口或未使用配置。文中关注的是参数所在阶段、作用对象及其在实验流程中的位置。
+本文系统说明当前仓库 `notebooks/kan.ipynb` 所采用的实验参数，不覆盖旧版接口或未启用配置。重点关注参数所属阶段、作用对象及其在完整流程中的功能定位。
 
 ## 2. 主流程与参数位置
 
-当前 notebook 主流程可概括为六个阶段：
+当前 notebook 流程可抽象为六个阶段：
 
 1. 读取数据并统一运行时设置。
 2. 训练 baseline KAN 并计算输入归因。
@@ -38,7 +38,7 @@
 5. 通过 `symbolize_pipeline` 完成剪枝、符号化、微调与导出。
 6. 对结果进行数值验证、ROC/AUC 评估以及性能基准测试。
 
-参数解释应结合这一流程理解。单个参数的作用通常依赖于其所在阶段。
+参数解释应结合流程阶段进行。单个参数的效果通常依赖其上下游阶段与数据状态，不宜脱离流程孤立解读。
 
 ## 3. 数据与运行时
 
@@ -56,7 +56,7 @@
 - `set_device(device)`：将设备设置同步到 `symkan` 运行时。
 - `BATCH_SIZE = default_batch_size()`：给出与设备类型匹配的默认 batch 大小。
 
-该 `BATCH_SIZE` 同时影响 baseline 训练、阶段训练与符号化阶段的微调。若不存在显存或内存约束，通常不建议在 notebook 中途更改。
+该 `BATCH_SIZE` 同时影响 baseline 训练、阶段训练与符号化阶段微调。若无显存或内存约束，通常不建议在 notebook 执行过程中临时变更。
 
 ## 4. Baseline KAN 参数
 
@@ -76,7 +76,7 @@
 - `update_grid = True`
 - `log = 12`
 
-该阶段的目的不是追求 baseline 的极限性能，而是获得一个适于稳定归因的参考模型。
+该阶段的目标并非追求 baseline 极限性能，而是获得可稳定支持归因计算的参考模型。
 
 ## 5. 输入筛选参数
 
@@ -89,10 +89,10 @@
 
 一般而言：
 
-- `top_k` 较小：符号化成本较低，但精度上限可能下降。
-- `top_k` 较大：保留信息更多，但符号搜索成本与不稳定性也会提高。
+1. `top_k` 较小：符号化成本较低，但精度上限可能受限。
+2. `top_k` 较大：信息保留更充分，但符号搜索成本与不稳定性风险上升。
 
-对于当前 MNIST 任务，`top_k = 120` 是已有实验中较为平衡的设置。
+在当前 MNIST 任务上，`top_k = 120` 是既有实验中表现较为均衡的经验设定。
 
 ## 6. 阶段训练参数
 
@@ -117,20 +117,20 @@
 - `prune_acc_drop_tol = 0.08`
 - `post_prune_ft_steps = 50`
 
-这些参数共同决定阶段训练中的渐进剪枝节奏。其作用是控制模型稀疏化速度，并为后续符号化保留可接受的精度。
+上述参数共同决定阶段训练中的渐进剪枝节奏，其作用在于控制模型稀疏化速度，并为后续符号化维持可接受的精度下界。
 
 ### 6.3 选模参数
 
 - `sym_target_edges = 50`
 - `acc_weight = 0.5`
 
-`stagewise_train` 并非简单选取最后一个阶段或最高精度阶段，而是依据
+`stagewise_train` 并非简单选择“最后阶段”或“最高精度阶段”，而是依据
 
 $$
 \text{sym\_readiness\_score} = \text{acc\_weight} \cdot acc + (1 - \text{acc\_weight}) \cdot sparsity
 $$
 
-在多个阶段快照中选出更适于后续符号化的模型。
+在多个阶段快照中选取更适于后续符号化的模型。
 
 ## 7. 主符号化参数
 
@@ -166,7 +166,7 @@ $$
 - `affine_finetune_steps = 200`
 - `affine_finetune_lr_schedule = [0.003, 0.001, 0.0005, 0.0002]`
 
-其中 `layerwise_finetune_steps = 60` 属于技术默认值。对于典型 2 层 KAN（`[in, hidden, class]`），当前实验结果支持优先将 `layerwise_finetune_steps` 设为 `0`；改进版 LayerwiseFT（60 步、早停、轻正则）更适合作为按需启用的实验开关。
+其中 `layerwise_finetune_steps = 60` 为技术默认值。对于典型 2 层 KAN（`[in, hidden, class]`），现有结果支持优先将 `layerwise_finetune_steps` 设为 `0`；改进版 LayerwiseFT（60 步、早停、轻正则）更适合作为按需启用的实验选项。
 
 ### 7.4 并行参数
 
@@ -176,7 +176,7 @@ $$
 
 当前并行主要作用于 `suggest_symbolic` 阶段。由于 `fix_symbolic` 会修改模型状态，其余部分并不适合直接并行化。
 
-补充说明：当前工程实现为了正确性，实际会把 worker 数保守回落到 1；`parallel_mode` 更适合作为 requested mode 标签保存在 benchmark 输出中，而不是“已经生效的真实并行度”。
+补充说明：当前工程实现为保证正确性，通常会将 worker 数保守回落到 `1`。因此 `parallel_mode` 更适合作为 requested mode 标签存储于 benchmark 输出，而不宜直接解释为真实生效并行度。
 
 ### 7.5 低风险提速参数
 
@@ -187,7 +187,7 @@ $$
 - `heavy_ft_early_stop_patience = 2`
 - `heavy_ft_early_stop_min_delta = 5e-4`
 
-这组参数主要用于减少低收益评估与无明显收益的微调步骤。
+该参数组主要用于减少低收益评估调用与无显著增益的微调步骤。
 
 ## 8. 评估与导出参数
 
@@ -247,28 +247,28 @@ $$
 - `heavy_ft_early_stop_patience = 1`
 - `heavy_ft_early_stop_min_delta = 5e-4`
 
-该组参数主要用于速度专题对照，而非常规主实验设置。
+该参数组主要用于速度专题对照，不属于常规主实验设置。
 
-当前输出更适合解读为“requested mode 与实际 effective workers 的对照”；若 `benchmark_symbolic_parallel_quick.csv` 中 `parallel_workers_effective=1`，说明这轮仍以串行执行保证正确性。
+当前输出更适合解读为“requested mode 与实际 effective workers 的对照”。若 `benchmark_symbolic_parallel_quick.csv` 中 `parallel_workers_effective=1`，说明该轮仍以串行执行保证正确性。
 
 对应并行专题 CSV 默认导出到 `outputs/notebooks/benchmark_symbolic_parallel_quick.csv`。
 
 ## 10. 调参顺序
 
-若结果不理想，可按以下顺序调整：
+若结果不理想，建议按以下顺序调整：
 
 1. 先调整 `top_k`，确认输入维度是否过高。
 2. 再调整 `stagewise.target_edges` 与 `symbolize.target_edges`，确认剪枝是否过度。
 3. 随后调整 `layerwise_finetune_steps` 与 `affine_finetune_steps`，补偿符号化造成的精度损失。
 4. 最后再考虑调整 `lib_preset` 或扩展函数库。
 
-这一顺序的依据在于，问题往往首先来自模型规模与剪枝节奏，而不是函数库表达能力本身。
+该顺序的依据在于：多数问题首先来自模型规模与剪枝节奏，而非函数库表达能力本身。
 
 ## 11. 命令行运行说明
 
-若使用 [symkanbenchmark.py](../symkanbenchmark.py) 进行批量实验，通常应将参数调试与正式运行分开：
+若使用 [symkanbenchmark.py](../symkanbenchmark.py) 开展批量实验，通常应将参数调试与正式运行分离：
 
-- `--verbose`：用于观察阶段训练与符号化细节。
-- `--quiet`：用于正式批量运行，以减少终端输出干扰。
+1. `--verbose`：用于观察阶段训练与符号化细节。
+2. `--quiet`：用于正式批量运行，以降低终端输出干扰。
 
-`--quiet` 不会改变训练参数，仅影响输出行为。
+`--quiet` 不改变训练参数，仅影响日志输出行为。
