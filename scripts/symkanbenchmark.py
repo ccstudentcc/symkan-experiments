@@ -244,6 +244,7 @@ class BenchmarkRunnerConfig:
     batch_size: Optional[int] = None
     lib_preset: Optional[str] = None
     disable_stagewise_train: Optional[bool] = None
+    stage_guard_mode: Optional[str] = None
     max_prune_rounds: Optional[int] = None
     layerwise_finetune_steps: Optional[int] = None
     layerwise_finetune_lamb: Optional[float] = None
@@ -285,6 +286,15 @@ def maybe_silent(enabled: bool):
     with open(os.devnull, "w", encoding="utf-8") as sink:
         with redirect_stdout(sink), redirect_stderr(sink):
             yield
+
+
+def emit_progress(enabled: bool, message: str) -> None:
+    if enabled:
+        print(message)
+
+
+def _run_label(run_index: int, total_runs: int, stage_seed: int) -> str:
+    return f"[run {run_index}/{total_runs} seed={stage_seed}]"
 
 
 def set_global_seed(seed: int) -> None:
@@ -370,9 +380,16 @@ def _build_experiment_metrics(
     stage_train_total_seconds: float,
     stage_prune_total_seconds: float,
     stage_final_finetune_seconds: float,
-    export_wall_time: float,
+    symbolize_wall_time: float,
+    post_symbolic_eval_wall_time: float,
+    run_total_wall_time: float,
 ) -> Dict[str, Any]:
     timing = symbolize_result.get("timing", {}) or {}
+    symbolic_core_seconds = float(timing.get("symbolic_total_seconds", float("nan")))
+    symbolic_non_core_seconds, symbolic_non_core_valid = _compute_symbolic_non_core_seconds(
+        symbolic_core_seconds=symbolic_core_seconds,
+        symbolize_wall_time=symbolize_wall_time,
+    )
     input_n_edge = int(symbolize_result.get("input_n_edge", get_n_edge(enhanced_model)))
     pipeline_warnings = timing.get("pipeline_warnings", [])
     warning_count = len(pipeline_warnings) if isinstance(pipeline_warnings, list) else 0
@@ -404,15 +421,24 @@ def _build_experiment_metrics(
         "stage_train_total_seconds": stage_train_total_seconds,
         "stage_prune_total_seconds": stage_prune_total_seconds,
         "stage_final_finetune_seconds": stage_final_finetune_seconds,
-        "symbolic_total_seconds": float(timing.get("symbolic_total_seconds", float("nan"))),
+        "symbolic_total_seconds": symbolic_core_seconds,
+        "symbolic_core_seconds": symbolic_core_seconds,
+        "symbolize_wall_time_s": symbolize_wall_time,
+        "post_symbolic_eval_wall_time_s": post_symbolic_eval_wall_time,
+        "run_total_wall_time_s": run_total_wall_time,
+        "run_overhead_wall_time_s": run_total_wall_time - stage_total_seconds - symbolize_wall_time,
+        "symbolic_non_core_seconds": symbolic_non_core_seconds,
+        "symbolic_non_core_valid": bool(symbolic_non_core_valid),
         "symbolic_abort_stage": timing.get("abort_stage"),
         "symbolic_abort_reason": timing.get("abort_reason"),
         "symbolic_abort_error_type": timing.get("abort_error_type"),
         "symbolic_warning_count": int(warning_count),
-        "export_wall_time_s": export_wall_time,
+        # backward-compatible alias (legacy name): same value as symbolize_wall_time_s
+        "export_wall_time_s": symbolize_wall_time,
         "pre_symbolic_n_edge": input_n_edge,
         "pre_symbolic_too_dense": input_n_edge > int(config.stagewise.target_edges) * 2,
         "stagewise_enabled": bool(not config.workflow.disable_stagewise_train),
+        "stage_guard_mode": str(config.stagewise.guard_mode),
         "input_compaction_enabled": bool(config.symbolize.enable_input_compaction),
         "input_compaction_fallback": bool(timing.get("input_compaction_fallback", False)),
         "input_compaction_reason": timing.get("input_compaction_reason"),
@@ -652,7 +678,52 @@ def _validated_app_config_update(config: AppConfig, **sections: Any) -> AppConfi
     payload = config.model_dump(mode="python")
     for name, section in sections.items():
         payload[name] = section.model_dump(mode="python") if hasattr(section, "model_dump") else section
+    _normalize_stagewise_width_payload(payload)
     return validate_app_config(payload)
+
+
+def _normalize_stagewise_width_payload(payload: Dict[str, Any]) -> None:
+    stagewise = payload.get("stagewise")
+    if not isinstance(stagewise, dict):
+        return
+
+    width = stagewise.get("width")
+    if width is None or not isinstance(width, list):
+        return
+
+    normalized: list[int] = []
+    normalized_pair_like = False
+    for item in width:
+        try:
+            if isinstance(item, (list, tuple)):
+                if not item or isinstance(item[0], (list, tuple)):
+                    return
+                normalized.append(int(item[0]))
+                normalized_pair_like = True
+                continue
+            normalized.append(int(item))
+        except (TypeError, ValueError):
+            return
+
+    if normalized_pair_like:
+        warnings.warn(
+            "normalized pair-like stagewise.width entries before AppConfig validation",
+            category=UserWarning,
+            stacklevel=3,
+        )
+        stagewise["width"] = normalized
+
+
+def _compute_symbolic_non_core_seconds(symbolic_core_seconds: float, symbolize_wall_time: float) -> tuple[float, bool]:
+    if not (math.isfinite(symbolic_core_seconds) and math.isfinite(symbolize_wall_time)):
+        return float("nan"), False
+
+    symbolic_non_core_seconds = float(symbolize_wall_time - symbolic_core_seconds)
+    if symbolic_non_core_seconds < 0:
+        if symbolic_non_core_seconds > -1e-9:
+            return 0.0, True
+        return float("nan"), False
+    return symbolic_non_core_seconds, True
 
 
 def build_runtime_app_config(
@@ -704,6 +775,7 @@ def apply_benchmark_overrides(config: AppConfig, args: BenchmarkRunnerConfig) ->
     runtime_update: dict[str, Any] = {}
     library_update: dict[str, Any] = {}
     workflow_update: dict[str, Any] = {}
+    stagewise_update: dict[str, Any] = {}
     evaluation_update: dict[str, Any] = {}
     symbolize_update: dict[str, Any] = {}
 
@@ -722,6 +794,8 @@ def apply_benchmark_overrides(config: AppConfig, args: BenchmarkRunnerConfig) ->
         library_update["lib_preset"] = args.lib_preset
     if args.disable_stagewise_train is not None:
         workflow_update["disable_stagewise_train"] = args.disable_stagewise_train
+    if args.stage_guard_mode is not None:
+        stagewise_update["guard_mode"] = args.stage_guard_mode
     if args.max_prune_rounds is not None:
         symbolize_update["max_prune_rounds"] = args.max_prune_rounds
     if args.layerwise_finetune_steps is not None:
@@ -758,6 +832,8 @@ def apply_benchmark_overrides(config: AppConfig, args: BenchmarkRunnerConfig) ->
         updates["library"] = _validated_model_update(config.library, library_update)
     if workflow_update:
         updates["workflow"] = _validated_model_update(config.workflow, workflow_update)
+    if stagewise_update:
+        updates["stagewise"] = _validated_model_update(config.stagewise, stagewise_update)
     if evaluation_update:
         updates["evaluation"] = _validated_model_update(config.evaluation, evaluation_update)
     if symbolize_update:
@@ -1137,6 +1213,7 @@ def run_single_experiment(
     stage_seed: int,
 ) -> Dict[str, Any]:
     _ensure_runtime_deps()
+    run_t0 = time.perf_counter()
     run_dir = ensure_dir(Path(runner.output_dir) / f"run_{run_index:02d}_seed{stage_seed}")
 
     set_global_seed(config.runtime.global_seed)
@@ -1150,6 +1227,9 @@ def run_single_experiment(
     library_cfg = resolve_library(config.library.lib_preset)
     data = load_data(config, repo_root)
     silent = bool(config.runtime.quiet)
+    show_progress = not silent
+    run_label = _run_label(run_index, total_runs, stage_seed)
+    emit_progress(show_progress, f"{run_label} start: output={run_dir.name}")
 
     dataset_full = build_dataset(data["X_train"], data["Y_train"], data["X_test"], data["Y_test"])
     inner_dim = int(config.model.inner_dim)
@@ -1165,6 +1245,7 @@ def run_single_experiment(
         save_act=True,
         device=get_device(),
     )
+    emit_progress(show_progress, f"{run_label} baseline fit start")
     with maybe_silent(silent):
         base_res = safe_fit(
             base_model,
@@ -1183,6 +1264,10 @@ def run_single_experiment(
     feature_score = safe_attribute(base_model, dataset_full)
     top_k = min(int(config.model.top_k), data["input_dim"])
     keep_idx = np.sort(np.argsort(-feature_score)[:top_k])
+    emit_progress(
+        show_progress,
+        f"{run_label} baseline done: acc={base_acc:.4f}, kept_inputs={len(keep_idx)}/{data['input_dim']}",
+    )
     x_train_sel = data["X_train"][:, keep_idx]
     x_test_sel = data["X_test"][:, keep_idx]
     dataset_enhanced = build_dataset(x_train_sel, data["Y_train"], x_test_sel, data["Y_test"])
@@ -1196,6 +1281,7 @@ def run_single_experiment(
 
     stage_fallback_t0 = time.perf_counter()
     if config.workflow.disable_stagewise_train:
+        emit_progress(show_progress, f"{run_label} end-to-end fit start")
         enhanced_model = KAN(
             width=[int(x_train_sel.shape[1]), inner_dim, data["n_classes"]],
             grid=config.model.grid,
@@ -1280,18 +1366,33 @@ def run_single_experiment(
             "stage_total_seconds": float(stage_total_seconds),
         }
     else:
+        emit_progress(show_progress, f"{run_label} stagewise train start")
         with maybe_silent(silent):
             enhanced_model, enhanced_res = stagewise_train_report(dataset_enhanced, app_config)
     stage_result = enhanced_res.to_legacy_dict() if hasattr(enhanced_res, "to_legacy_dict") else enhanced_res
     enhanced_acc = float(model_acc_ds(enhanced_model, dataset_enhanced))
+    stage_total_seconds = float(stage_result.get("stage_total_seconds", time.perf_counter() - stage_fallback_t0))
+    stage_train_total_seconds = float(stage_result.get("stage_train_total_seconds", float("nan")))
+    stage_prune_total_seconds = float(stage_result.get("stage_prune_total_seconds", float("nan")))
+    stage_final_finetune_seconds = float(stage_result.get("final_finetune_seconds", float("nan")))
+    stage_mode = "end-to-end fit" if config.workflow.disable_stagewise_train else "stagewise train"
+    emit_progress(
+        show_progress,
+        (
+            f"{run_label} {stage_mode} done: selected_stage={stage_result.get('selected_stage')}, "
+            f"acc={enhanced_acc:.4f}, edges={int(get_n_edge(enhanced_model))}, "
+            f"wall_time={stage_total_seconds:.1f}s"
+        ),
+    )
     stage_logs = enhanced_res.stage_logs if hasattr(enhanced_res, "stage_logs") else stage_result.get("stage_logs", [])
     stage_df = pd.DataFrame(stage_logs)
     save_stage_logs(stage_df, csv_path=str(run_dir / "kan_stage_logs.csv"))
 
-    export_t0 = time.perf_counter()
+    symbolize_t0 = time.perf_counter()
+    emit_progress(show_progress, f"{run_label} symbolize start")
     with maybe_silent(silent):
         export_result = symbolize_pipeline_report(enhanced_model, dataset_enhanced, app_config)
-    export_wall_time = float(time.perf_counter() - export_t0)
+    symbolize_wall_time = float(time.perf_counter() - symbolize_t0)
     symbolize_result = export_result.to_legacy_dict() if hasattr(export_result, "to_legacy_dict") else export_result
 
     export_model = export_result.model
@@ -1299,7 +1400,12 @@ def run_single_experiment(
     valid_exprs = export_result.valid_expressions
     trace_df = export_result.trace
     trace_df.to_csv(run_dir / "symbolize_trace.csv", index=False, encoding="utf-8-sig")
+    emit_progress(
+        show_progress,
+        f"{run_label} symbolize done: valid_exprs={len(valid_exprs)}, wall_time={symbolize_wall_time:.1f}s",
+    )
 
+    post_symbolic_eval_t0 = time.perf_counter()
     val_df = validate_formula_numerically(
         export_model,
         export_formulas,
@@ -1319,15 +1425,11 @@ def run_single_experiment(
     valid_complexity = summary_df.loc[summary_df["expr_full"] != "N/A (零或常数)", "复杂度"]
     expr_complexity_mean = float(valid_complexity.mean()) if len(valid_complexity) > 0 else float("nan")
 
-    stage_total_seconds = float(stage_result.get("stage_total_seconds", time.perf_counter() - stage_fallback_t0))
-    stage_train_total_seconds = float(stage_result.get("stage_train_total_seconds", float("nan")))
-    stage_prune_total_seconds = float(stage_result.get("stage_prune_total_seconds", float("nan")))
-    stage_final_finetune_seconds = float(stage_result.get("final_finetune_seconds", float("nan")))
-
     roc_rows = [
         {"class": class_idx, "auc": float(roc_data[class_idx]["auc"])} for class_idx in range(data["n_classes"])
     ]
     pd.DataFrame(roc_rows).to_csv(run_dir / "roc_auc_summary.csv", index=False, encoding="utf-8-sig")
+    post_symbolic_eval_wall_time = float(time.perf_counter() - post_symbolic_eval_t0)
 
     if runner.save_bundle:
         save_export_bundle(
@@ -1342,6 +1444,7 @@ def run_single_experiment(
             path=str(run_dir / "symkanbenchmark_bundle.pkl"),
         )
 
+    run_total_wall_time = float(time.perf_counter() - run_t0)
     metrics = _build_experiment_metrics(
         config=config,
         run_dir=run_dir,
@@ -1364,9 +1467,12 @@ def run_single_experiment(
         stage_train_total_seconds=stage_train_total_seconds,
         stage_prune_total_seconds=stage_prune_total_seconds,
         stage_final_finetune_seconds=stage_final_finetune_seconds,
-        export_wall_time=export_wall_time,
+        symbolize_wall_time=symbolize_wall_time,
+        post_symbolic_eval_wall_time=post_symbolic_eval_wall_time,
+        run_total_wall_time=run_total_wall_time,
     )
     write_json(run_dir / "metrics.json", {"metrics": metrics, "roc": roc_rows})
+    emit_progress(show_progress, f"{run_label} completed")
 
     return {
         "run_dir": run_dir,
@@ -1390,14 +1496,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", default=DEFAULT_BENCHMARK_RUNS_DIR, help="输出目录")
     parser.add_argument("--stagewise-seeds", default="42", help="逗号分隔的 stagewise 种子列表")
     parser.add_argument("--save-bundle", action="store_true", help="额外导出 pkl bundle")
-    parser.add_argument("--verbose", action="store_true", help="打印 stagewise 与 symbolize 详细日志")
-    parser.add_argument("--quiet", action="store_true", help="静默运行，屏蔽训练与符号化过程输出")
+    parser.add_argument("--verbose", action="store_true", help="打印 stagewise 与 symbolize 详细日志；默认模式仍会显示简要阶段进度")
+    parser.add_argument("--quiet", action="store_true", help="静默运行，屏蔽简要进度与详细日志")
     parser.add_argument("--device", default=None, help="显式覆盖 runtime.device")
     parser.add_argument("--global-seed", type=int, default=None, help="显式覆盖 runtime.global_seed")
     parser.add_argument("--baseline-seed", type=int, default=None, help="显式覆盖 runtime.baseline_seed")
     parser.add_argument("--batch-size", type=int, default=None, help="显式覆盖 runtime.batch_size")
     parser.add_argument("--lib-preset", choices=["layered", "fast", "expressive", "full"], default=None)
     parser.add_argument("--disable-stagewise-train", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument(
+        "--stage-guard-mode",
+        choices=["light", "full"],
+        default=None,
+        help="显式覆盖 stagewise.guard_mode（light 更快，full 更稳健）",
+    )
     parser.add_argument("--max-prune-rounds", type=int, default=None, help="显式覆盖 symbolize.max_prune_rounds")
     parser.add_argument("--layerwise-finetune-steps", type=int, default=None)
     parser.add_argument("--layerwise-finetune-lamb", type=float, default=None)

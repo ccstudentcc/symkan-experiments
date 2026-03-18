@@ -212,6 +212,8 @@ outputs/benchmark_runs/
 - `--global-seed 321`：覆盖 `runtime.global_seed`。
 - `--baseline-seed 321`：覆盖 `runtime.baseline_seed`。
 - `--batch-size 256`：覆盖 `runtime.batch_size`。
+- `--stage-guard-mode light`：覆盖 `stagewise.guard_mode`（默认研究复跑建议）。
+- `--stage-guard-mode full`：覆盖 `stagewise.guard_mode`（回归验证建议，耗时更高）。
 - `--max-prune-rounds 12`：覆盖 `symbolize.max_prune_rounds`。
 - `--layerwise-finetune-steps 0`：覆盖 `symbolize.layerwise_finetune_steps`。
 - `--no-input-compaction`：覆盖 `symbolize.enable_input_compaction`。
@@ -247,12 +249,25 @@ outputs/benchmark_runs/
 - `macro_auc`
 - `validation_mean_r2`
 - `symbolic_total_seconds`
+- `symbolic_core_seconds`
+- `symbolize_wall_time_s`
+- `post_symbolic_eval_wall_time_s`
+- `run_total_wall_time_s`
+- `stage_guard_mode`
 
 若用于论文写作，不宜依据单次运行结果下结论，至少应在 3 个 seeds 上统计：
 
 1. `symkanbenchmark_runs.csv` 的均值与方差。
 2. `benchmark_multi_round_summary_cn.csv` 的速度均值与标准差。
 3. `benchmark_symbolic_parallel_quick.csv` 的 `vs_off_speedup_x`。
+
+耗时字段口径（新旧兼容）：
+
+1. `symbolic_total_seconds` / `symbolic_core_seconds`：符号化核心阶段耗时（`fast_symbolic` 主段）。
+2. `symbolize_wall_time_s`：`symbolize_pipeline` 的墙钟耗时（包含 pre-symbolic fit / post-symbolic affine 等）。
+3. `export_wall_time_s`：兼容旧字段，值等于 `symbolize_wall_time_s`。
+4. `post_symbolic_eval_wall_time_s`：符号化完成后到指标导出（验证、AUC、summary 写出）的耗时。
+5. `run_total_wall_time_s`：单次 run 的端到端墙钟耗时。
 
 ---
 
@@ -318,7 +333,9 @@ python -m scripts.benchmark_ab_compare --root outputs/benchmark_ab --baseline ba
 - [outputs/benchmark_ab/comparison/trace_summary.csv](../outputs/benchmark_ab/comparison/trace_summary.csv)
 - [outputs/benchmark_ab/comparison/comparison_summary.md](../outputs/benchmark_ab/comparison/comparison_summary.md)
 
-### 6.4 当前统计结果（seed: 42/52/62）
+### 6.4 历史参考统计结果（seed: 42/52/62）
+
+该小节基于历史参考产物 `outputs/benchmark_ab/...`，用于保留旧版对照语义。工程版复测结论请优先参考 [engineering_rerun_report.md](engineering_rerun_report.md)。
 
 基于 [outputs/benchmark_ab/comparison/variant_summary.csv](../outputs/benchmark_ab/comparison/variant_summary.csv)、[outputs/benchmark_ab/comparison/pairwise_delta_summary.csv](../outputs/benchmark_ab/comparison/pairwise_delta_summary.csv) 与 [outputs/benchmark_ab/comparison/trace_summary.csv](../outputs/benchmark_ab/comparison/trace_summary.csv)，可优先报告以下三张表。
 
@@ -355,7 +372,7 @@ python -m scripts.benchmark_ab_compare --root outputs/benchmark_ab --baseline ba
 
 1. 精度主指标（`final_acc` / `macro_auc`）上，adaptive 系列未形成对 baseline 的稳定优势。
 2. `validation_mean_r2` 的方向更复杂：adaptive 有改善趋势，但 adaptive_auto 的均值几乎为 0、对 seed 更敏感。
-3. `symbolic_total_seconds` 的加速较稳定；`export_wall_time_s` 则受端到端波动影响较大，不宜只看均值。
+3. `symbolic_total_seconds` 的加速较稳定；`symbolize_wall_time_s` 受 pre/post-symbolic 流程波动影响较大，不宜只看均值。
 
 #### 表 3：symbolize 节奏（trace）
 
@@ -390,7 +407,7 @@ python -m scripts.benchmark_ab_compare --root outputs/benchmark_ab --baseline ba
 1. 均值与标准差。
 2. 中位数差值。
 3. 相对 baseline 的胜负计数（win/lose/tie）。
-4. 运行代价指标（`export_wall_time_s`、`symbolic_total_seconds`）与结构指标（`final_n_edge`）。
+4. 运行代价指标（`run_total_wall_time_s`、`symbolize_wall_time_s`、`symbolic_total_seconds`）与结构指标（`final_n_edge`）。
 
 正文可采用以下较为保守的表述方式：
 

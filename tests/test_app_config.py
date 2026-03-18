@@ -106,6 +106,8 @@ def test_load_config_rejects_invalid_nested_field() -> None:
     [
         ({"stagewise": {"validation_ratio": 1.0}}, "stagewise.validation_ratio"),
         ({"symbolize": {"layerwise_validation_ratio": -0.1}}, "symbolize.layerwise_validation_ratio"),
+        ({"stagewise": {"prune_acc_drop_tol": -0.01}}, "stagewise.prune_acc_drop_tol"),
+        ({"stagewise": {"prune_acc_drop_tol": 1.5}}, "stagewise.prune_acc_drop_tol"),
         ({"data": {"mnist_classes": []}}, "mnist_classes"),
         ({"evaluation": {"validate_n_sample": 0}}, "evaluation.validate_n_sample"),
     ],
@@ -176,6 +178,7 @@ def test_benchmark_without_config_uses_checked_in_runner_defaults() -> None:
     assert config.stagewise.steps_per_stage == 60
     assert config.stagewise.prune_start_stage == 3
     assert config.stagewise.target_edges == 120
+    assert config.stagewise.guard_mode == "light"
     assert config.symbolize.target_edges == 90
 
 
@@ -208,3 +211,8 @@ def test_benchmark_parser_accepts_layerwise_cli_overrides() -> None:
     assert runner.layerwise_early_stop_min_delta == pytest.approx(5e-4)
     assert runner.layerwise_eval_interval == 10
     assert runner.layerwise_validation_n_sample == 128
+
+
+def test_benchmark_parser_accepts_stage_guard_mode_override() -> None:
+    runner = parse_benchmark_cli_config(["--stage-guard-mode", "full"])
+    assert runner.stage_guard_mode == "full"

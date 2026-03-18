@@ -51,7 +51,7 @@ stagewise:
   target_edges: 120
   prune_edge_threshold_init: 0.003
   prune_edge_threshold_step: 0.003
-  prune_acc_drop_tol: 0.04
+  prune_acc_drop_tol: 0.08
   post_prune_ft_steps: 50
   sym_target_edges: 50
   acc_weight: 0.5
@@ -75,6 +75,7 @@ stagewise:
   stage_early_stop_patience: 2
   stage_early_stop_min_acc_gain: 0.002
   stage_early_stop_edge_buffer: 0
+  guard_mode: light
 
 symbolize:
   target_edges: 90

@@ -161,6 +161,17 @@ def _fit_or_error(context: str, **fit_kwargs):
     return None, format_fit_failure(report, context=context)
 
 
+def _should_show_concise_progress(config: AppConfig, verbose: bool) -> bool:
+    runtime = getattr(config, "runtime", None)
+    quiet = bool(getattr(runtime, "quiet", False))
+    return not quiet and not verbose
+
+
+def _print_progress(enabled: bool, message: str) -> None:
+    if enabled:
+        print(message)
+
+
 def _compute_adaptive_lamb(
     base_lamb: float,
     current_edges,
@@ -205,6 +216,26 @@ def _compute_adaptive_ft_steps(
     sparsity_ratio = np.clip((initial_edges - current_edges) / denom, 0.0, 1.0)
     steps_ratio = max(min_ratio, 1.0 - 0.7 * sparsity_ratio)
     return max(1, int(base_steps * steps_ratio))
+
+
+def _normalize_width(width: list[object]) -> list[int]:
+    """Normalize KAN width values into a plain ``list[int]``.
+
+    Defensive handling is needed because some downstream components may mutate
+    width entries into pair-like shapes (for example ``[dim, 0]``). We keep the
+    first element as the effective dimension.
+    """
+    normalized: list[int] = []
+    for item in width:
+        if isinstance(item, (list, tuple)) and len(item) > 0:
+            normalized.append(int(item[0]))
+        else:
+            normalized.append(int(item))
+    return normalized
+
+
+def _clone_state_dict_cpu(model) -> dict[str, torch.Tensor]:
+    return {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
 
 
 @dataclass
@@ -274,8 +305,9 @@ def _attempt_prune_with_validation(
     current_lr: float,
     current_lamb: float,
     batch_size: int,
-    prune_acc_drop_tol: float = 0.03,
+    prune_acc_drop_tol: float = 0.08,
     post_prune_ft_steps: int = 40,
+    guard_mode: str = "full",
     use_disk_clone: bool = False,
     clone_ckpt_path: str = "_safe_copy_temp",
 ):
@@ -290,12 +322,15 @@ def _attempt_prune_with_validation(
         batch_size: 批大小。
         prune_acc_drop_tol: 允许的精度回落阈值。
         post_prune_ft_steps: 剪枝后恢复微调步数。
+        guard_mode: ``full`` 使用双段 guarded fit（quick + recovery），``light`` 使用单段 guarded fit。
         use_disk_clone: 是否使用磁盘克隆回滚快照。
         clone_ckpt_path: 磁盘克隆临时路径前缀。
 
     Returns:
         dict: 包含回滚模型、是否成功、边数收益和评估信息的记录。
     """
+    mode = str(guard_mode).strip().lower()
+    use_full_guard = mode == "full"
     snapshot = clone_model(model, use_disk_clone=use_disk_clone, ckpt_path=clone_ckpt_path)
     eval_before, eval_split = _safe_eval_acc(model, dataset, preferred_split="val")
     attribute_warning = _safe_attribute_for_prune(model, dataset)
@@ -309,39 +344,67 @@ def _attempt_prune_with_validation(
         else:
             edges_removed = 0
 
-        # 先做一次短恢复，尽快判断这轮剪枝是否值得保留，避免把大步数微调浪费在坏剪枝上。
-        quick_ft_steps = min(int(post_prune_ft_steps), 20) if post_prune_ft_steps > 0 else 0
-        if edges_removed > 0 and quick_ft_steps > 0:
-            _, quick_fit_error = _fit_or_error(
-                "post_prune_quick_fit",
-                model=model,
-                dataset=dataset,
-                opt="Adam",
-                steps=quick_ft_steps,
-                lr=current_lr * 0.5,
-                lamb=current_lamb * 0.1,
-                batch=batch_size,
-                update_grid=False,
-                singularity_avoiding=True,
-                log=max(1, quick_ft_steps // 5),
-            )
-            if quick_fit_error is not None:
-                return {
-                    "model": snapshot,
-                    "success": False,
-                    "edges_removed": 0,
-                    "eval_drop": np.nan,
-                    "threshold": float(threshold),
-                    "eval_split": eval_split,
-                    "rollback": quick_fit_error,
-                    "attribute_warning": attribute_warning,
-                }
+        quick_ft_steps = 0
+        if edges_removed > 0 and post_prune_ft_steps > 0:
+            if use_full_guard:
+                # Full guard 先做短恢复，快速筛掉无效剪枝，避免大步数微调浪费。
+                quick_ft_steps = min(int(post_prune_ft_steps), 20)
+                if quick_ft_steps > 0:
+                    _, quick_fit_error = _fit_or_error(
+                        "post_prune_quick_fit",
+                        model=model,
+                        dataset=dataset,
+                        opt="Adam",
+                        steps=quick_ft_steps,
+                        lr=current_lr * 0.5,
+                        lamb=current_lamb * 0.1,
+                        batch=batch_size,
+                        update_grid=False,
+                        singularity_avoiding=True,
+                        log=max(1, quick_ft_steps // 5),
+                    )
+                    if quick_fit_error is not None:
+                        return {
+                            "model": snapshot,
+                            "success": False,
+                            "edges_removed": 0,
+                            "eval_drop": np.nan,
+                            "threshold": float(threshold),
+                            "eval_split": eval_split,
+                            "rollback": quick_fit_error,
+                            "attribute_warning": attribute_warning,
+                        }
+            else:
+                _, prune_fit_error = _fit_or_error(
+                    "post_prune_fit",
+                    model=model,
+                    dataset=dataset,
+                    opt="Adam",
+                    steps=int(post_prune_ft_steps),
+                    lr=current_lr * 0.5,
+                    lamb=current_lamb * 0.1,
+                    batch=batch_size,
+                    update_grid=False,
+                    singularity_avoiding=True,
+                    log=max(1, int(post_prune_ft_steps) // 5),
+                )
+                if prune_fit_error is not None:
+                    return {
+                        "model": snapshot,
+                        "success": False,
+                        "edges_removed": 0,
+                        "eval_drop": np.nan,
+                        "threshold": float(threshold),
+                        "eval_split": eval_split,
+                        "rollback": prune_fit_error,
+                        "attribute_warning": attribute_warning,
+                    }
 
         eval_after, _ = _safe_eval_acc(model, dataset, preferred_split=eval_split)
         eval_drop = float(eval_before - eval_after)
         success = eval_drop <= prune_acc_drop_tol and edges_removed > 0
         if success:
-            remain_ft_steps = max(0, int(post_prune_ft_steps) - quick_ft_steps)
+            remain_ft_steps = max(0, int(post_prune_ft_steps) - quick_ft_steps) if use_full_guard else 0
             if remain_ft_steps > 0:
                 _, remain_fit_error = _fit_or_error(
                     "post_prune_recovery_fit",
@@ -418,6 +481,8 @@ def stagewise_train(dataset, config: AppConfig):
     width = stage_config.width
     if width is None:
         raise ValueError("config.stagewise.width is required")
+    # Copy + normalize to avoid in-place width mutations leaking back into config.
+    width = _normalize_width(list(width))
     grid = stage_config.grid
     k = stage_config.k
     seed = stage_config.seed
@@ -458,7 +523,10 @@ def stagewise_train(dataset, config: AppConfig):
     stage_early_stop_patience = stage_config.stage_early_stop_patience
     stage_early_stop_min_acc_gain = stage_config.stage_early_stop_min_acc_gain
     stage_early_stop_edge_buffer = stage_config.stage_early_stop_edge_buffer
-    verbose = stage_config.verbose
+    guard_mode = str(stage_config.guard_mode).strip().lower()
+    full_guard_enabled = guard_mode == "full"
+    verbose = bool(stage_config.verbose)
+    show_progress = _should_show_concise_progress(config, verbose)
 
     if batch_size is None:
         batch_size = default_batch_size()
@@ -470,6 +538,16 @@ def stagewise_train(dataset, config: AppConfig):
             seed=validation_seed,
             min_val_samples=int(validation_min_samples),
         )
+    eval_split_name = "val" if _has_split(dataset, "val") else "train"
+    total_stages = len(lamb_schedule)
+    _print_progress(
+        show_progress,
+        (
+            "[stagewise] start: "
+            f"stages={total_stages}, steps_per_stage={steps_per_stage}, "
+            f"target_edges={target_edges}, eval_split={eval_split_name}, guard_mode={guard_mode}"
+        ),
+    )
 
     model_device = str(resolve_device(get_device()))
 
@@ -493,6 +571,7 @@ def stagewise_train(dataset, config: AppConfig):
     stage_prune_total_seconds = 0.0
     stagewise_t0 = time.perf_counter()
     successful_fit_count = 0
+    initial_stage_state = _clone_state_dict_cpu(model)
 
     cur_prune_th = prune_edge_threshold_init
     max_acc_seen = 0.0
@@ -532,9 +611,21 @@ def stagewise_train(dataset, config: AppConfig):
                 max_lamb_ratio=max_lamb_ratio,
             )
         prune_attempts = []
+        _print_progress(
+            show_progress,
+            (
+                f"[stagewise] stage {si + 1}/{total_stages} start: "
+                f"lr={lr:.4f}, lamb={stage_lamb:.1e}, edges={edge_before}"
+            ),
+        )
 
         try:
-            state_before_fit = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            if full_guard_enabled:
+                rollback_state = _clone_state_dict_cpu(model)
+            elif stage_state_dicts:
+                rollback_state = stage_state_dicts[-1]["state_dict"]
+            else:
+                rollback_state = initial_stage_state
             fit_t0 = time.perf_counter()
             res, fit_error = _fit_or_error(
                 f"stage_{si}_fit",
@@ -558,7 +649,7 @@ def stagewise_train(dataset, config: AppConfig):
                 all_train_loss.extend(list(res.get("train_loss", [])))
                 all_test_loss.extend(list(res.get("test_loss", [])))
             else:
-                model.load_state_dict(state_before_fit)
+                model.load_state_dict(rollback_state)
                 rollback = fit_error
         except Exception as e:
             rollback = f"fit_error: {e}"
@@ -604,6 +695,7 @@ def stagewise_train(dataset, config: AppConfig):
                         batch_size=batch_size,
                         prune_acc_drop_tol=prune_acc_drop_tol,
                         post_prune_ft_steps=current_ft_steps,
+                        guard_mode=guard_mode,
                         use_disk_clone=use_disk_clone,
                         clone_ckpt_path=clone_ckpt_path,
                     )
@@ -701,7 +793,7 @@ def stagewise_train(dataset, config: AppConfig):
         max_acc_seen = max(max_acc_seen, acc_after)
 
         score = sym_readiness_score(acc_after, edge_after, sym_target_edges, acc_weight)
-        state_dict_cpu = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+        state_dict_cpu = _clone_state_dict_cpu(model)
         stage_state_dicts.append({"stage": si, "state_dict": state_dict_cpu})
 
         snapshot = {
@@ -743,6 +835,7 @@ def stagewise_train(dataset, config: AppConfig):
                 "prune_accepted": prune_accepted,
                 "prune_attempts": prune_attempts,
                 "prune_attempt_count": len(prune_attempts),
+                "guard_mode": guard_mode,
                 "fit_success": bool(fit_success),
                 "fit_error": fit_error,
                 "rollback": rollback,
@@ -761,6 +854,13 @@ def stagewise_train(dataset, config: AppConfig):
                 "stage_seconds": float(time.perf_counter() - stage_t0),
             }
         )
+        if show_progress:
+            rollback_suffix = f", rollback={rollback}" if rollback else ""
+            print(
+                f"[stagewise] stage {si + 1}/{total_stages} done: "
+                f"acc={acc_after:.4f}, edges={edge_after}, "
+                f"prune={'yes' if prune_accepted else 'no'}{rollback_suffix}"
+            )
         if verbose:
             prune_suffix = f" attempts={len(prune_attempts)}" if prune_attempts else ""
             print(
@@ -790,6 +890,10 @@ def stagewise_train(dataset, config: AppConfig):
                     f"gain={stage_gain:.6f} < {float(stage_early_stop_min_acc_gain):.6f}, "
                     f"stall={stage_stall_count}"
                 )
+                _print_progress(
+                    show_progress,
+                    f"[stagewise] early stop at stage {si + 1}/{total_stages}: {stage_early_stop_reason}",
+                )
                 if verbose:
                     print(f"[stage {si}] {stage_early_stop_reason}")
                 break
@@ -797,6 +901,8 @@ def stagewise_train(dataset, config: AppConfig):
     final_finetune_seconds = 0.0
     final_fit_success = False
     final_fit_error = ""
+    final_rollback_state = _clone_state_dict_cpu(model)
+    _print_progress(show_progress, "[stagewise] final finetune start")
     try:
         final_fit_t0 = time.perf_counter()
         final_res, final_fit_error = _fit_or_error(
@@ -821,8 +927,10 @@ def stagewise_train(dataset, config: AppConfig):
             all_test_loss.extend(list(final_res.get("test_loss", [])))
         else:
             final_fit_error = str(final_fit_error)
+            model.load_state_dict(final_rollback_state)
     except Exception as exc:
         final_fit_error = f"final_finetune_fit failed ({type(exc).__name__}: {exc})"
+        model.load_state_dict(final_rollback_state)
 
     if successful_fit_count <= 0:
         raise RuntimeError("stagewise_train failed: all guarded fit attempts failed")
@@ -831,8 +939,13 @@ def stagewise_train(dataset, config: AppConfig):
     final_edges = get_n_edge(model)
     final_score = sym_readiness_score(final_acc, final_edges, sym_target_edges, acc_weight)
     max_acc_seen = max(max_acc_seen, final_acc)
+    final_status = "ok" if final_fit_success else f"failed ({final_fit_error})"
+    _print_progress(
+        show_progress,
+        f"[stagewise] final finetune done: {final_status}, acc={final_acc:.4f}, edges={final_edges}",
+    )
 
-    final_state_dict_cpu = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+    final_state_dict_cpu = _clone_state_dict_cpu(model)
     stage_state_dicts.append({"stage": "final", "state_dict": final_state_dict_cpu})
 
     final_snapshot = {
@@ -876,7 +989,7 @@ def stagewise_train(dataset, config: AppConfig):
             selected_state = item["state_dict"]
             break
     if selected_state is None:
-        selected_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+        selected_state = _clone_state_dict_cpu(model)
 
     best_model = clone_model(model, use_disk_clone=use_disk_clone, ckpt_path=clone_ckpt_path)
     best_model.load_state_dict(selected_state)
@@ -892,6 +1005,14 @@ def stagewise_train(dataset, config: AppConfig):
             f"edges={best_snap['n_edges']}, "
             f"score={best_snap['score']:.3f}"
         )
+    _print_progress(
+        show_progress,
+        (
+            f"[stagewise] selected stage={best_snap['stage']}, "
+            f"acc={best_snap['acc']:.4f}, edges={best_snap['n_edges']}, "
+            f"score={best_snap['score']:.3f}"
+        ),
+    )
 
     result = {
         "train_loss": all_train_loss,
@@ -903,6 +1024,7 @@ def stagewise_train(dataset, config: AppConfig):
         "selected_score": float(best_snap["score"]),
         "best_state_dict": copy.deepcopy(selected_state),
         "stage_snapshots": stage_snapshots,
+        "stage_guard_mode": guard_mode,
         "stage_early_stopped": bool(stage_early_stopped),
         "stage_early_stop_reason": stage_early_stop_reason,
         "stage_timings": stage_timings,
@@ -945,5 +1067,16 @@ def stagewise_train_report(dataset, config: AppConfig):
         best_state_dict=result.get("best_state_dict"),
         stage_snapshots=result.get("stage_snapshots", []),
         topk_models=result.get("topk_models"),
+        stage_guard_mode=result.get("stage_guard_mode", "light"),
+        stage_early_stopped=result.get("stage_early_stopped", False),
+        stage_early_stop_reason=result.get("stage_early_stop_reason", ""),
+        stage_timings=result.get("stage_timings", []),
+        stage_train_total_seconds=result.get("stage_train_total_seconds", 0.0),
+        stage_prune_total_seconds=result.get("stage_prune_total_seconds", 0.0),
+        final_finetune_seconds=result.get("final_finetune_seconds", 0.0),
+        final_fit_success=result.get("final_fit_success", False),
+        final_fit_error=result.get("final_fit_error", ""),
+        successful_fit_count=result.get("successful_fit_count", 0),
+        stage_total_seconds=result.get("stage_total_seconds", 0.0),
     )
     return best_model, sr

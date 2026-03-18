@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -134,7 +134,7 @@ class StagewiseConfig(BaseModel):
     target_edges: int = Field(default=100, ge=0)
     prune_edge_threshold_init: float = 0.005
     prune_edge_threshold_step: float = 0.005
-    prune_acc_drop_tol: float = 0.03
+    prune_acc_drop_tol: float = Field(default=0.08, ge=0.0, le=1.0)
     post_prune_ft_steps: int = Field(default=40, ge=0)
     sym_target_edges: int = Field(default=50, ge=0)
     acc_weight: float = 0.4
@@ -163,6 +163,7 @@ class StagewiseConfig(BaseModel):
     stage_early_stop_patience: int = Field(default=2, ge=0)
     stage_early_stop_min_acc_gain: float = 0.002
     stage_early_stop_edge_buffer: int = Field(default=0, ge=0)
+    guard_mode: Literal["light", "full"] = "light"
     verbose: bool = True
 
 

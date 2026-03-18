@@ -30,6 +30,8 @@
 - [symkanbenchmark_usage.md](symkanbenchmark_usage.md)：主 benchmark CLI、输出文件与 A/B 结果口径。
 - [ablation_usage.md](ablation_usage.md)：单因素消融与 LayerwiseFT 专项对比脚本说明。
 - [full_experiment_runbook.md](full_experiment_runbook.md)：按步骤复跑完整实验链路的操作手册。
+- [engineering_version_rerun_note.md](engineering_version_rerun_note.md)：历史参考版与工程版复测的口径分层说明。
+- [engineering_rerun_report.md](engineering_rerun_report.md)：工程版复测结果报告（含与历史版对照结构）。
 
 这几份文档同时说明了当前的运行配置约定：Notebook / Python 优先直接构造 `AppConfig`，批量实验优先 `AppConfig` YAML + 少量显式 CLI 覆盖，而底层统一消费 `AppConfig`。
 

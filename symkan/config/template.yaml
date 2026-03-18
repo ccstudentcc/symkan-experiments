@@ -10,9 +10,9 @@ runtime:
   baseline_seed: 123
   # Batch size for training and symbolic fitting. Use 0 to delegate to default_batch_size().
   batch_size: 0
-  # Silence training / symbolic stdout from scripts.
+  # Silence concise progress as well as detailed training / symbolic stdout from scripts.
   quiet: false
-  # Print detailed stagewise / symbolic logs.
+  # Print detailed stagewise / symbolic logs on top of the default concise progress.
   verbose: false
 
 data:
@@ -95,7 +95,7 @@ stagewise:
   target_edges: 120
   prune_edge_threshold_init: 0.003
   prune_edge_threshold_step: 0.003
-  prune_acc_drop_tol: 0.04
+  prune_acc_drop_tol: 0.08
   post_prune_ft_steps: 50
   sym_target_edges: 50
   acc_weight: 0.5
@@ -124,6 +124,10 @@ stagewise:
   stage_early_stop_patience: 2
   stage_early_stop_min_acc_gain: 0.002
   stage_early_stop_edge_buffer: 0
+  # Guard strategy for stagewise fit/prune recovery.
+  # light: lower overhead (recommended for exploratory research runs)
+  # full: stronger rollback checks (recommended for regression verification)
+  guard_mode: light
   verbose: true
 
 symbolize:

@@ -114,7 +114,7 @@
 - `target_edges = 120`
 - `prune_edge_threshold_init = 0.003`
 - `prune_edge_threshold_step = 0.003`
-- `prune_acc_drop_tol = 0.04`
+- `prune_acc_drop_tol = 0.08`
 - `post_prune_ft_steps = 50`
 
 这些参数共同决定阶段训练中的渐进剪枝节奏。其作用是控制模型稀疏化速度，并为后续符号化保留可接受的精度。

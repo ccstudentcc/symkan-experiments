@@ -123,6 +123,17 @@ class StagewiseResult:
     best_state_dict: Optional[dict] = None
     stage_snapshots: List[dict] = field(default_factory=list)
     topk_models: Optional[List[dict]] = None
+    stage_guard_mode: str = "light"
+    stage_early_stopped: bool = False
+    stage_early_stop_reason: str = ""
+    stage_timings: List[dict] = field(default_factory=list)
+    stage_train_total_seconds: float = 0.0
+    stage_prune_total_seconds: float = 0.0
+    final_finetune_seconds: float = 0.0
+    final_fit_success: bool = False
+    final_fit_error: str = ""
+    successful_fit_count: int = 0
+    stage_total_seconds: float = 0.0
 
     def to_legacy_dict(self) -> dict:
         """转换回旧版 dict 格式以保持向后兼容。"""
@@ -136,6 +147,17 @@ class StagewiseResult:
             "selected_score": self.selected_score,
             "best_state_dict": self.best_state_dict,
             "stage_snapshots": self.stage_snapshots,
+            "stage_guard_mode": self.stage_guard_mode,
+            "stage_early_stopped": self.stage_early_stopped,
+            "stage_early_stop_reason": self.stage_early_stop_reason,
+            "stage_timings": self.stage_timings,
+            "stage_train_total_seconds": self.stage_train_total_seconds,
+            "stage_prune_total_seconds": self.stage_prune_total_seconds,
+            "final_finetune_seconds": self.final_finetune_seconds,
+            "final_fit_success": self.final_fit_success,
+            "final_fit_error": self.final_fit_error,
+            "successful_fit_count": self.successful_fit_count,
+            "stage_total_seconds": self.stage_total_seconds,
         }
         if self.topk_models is not None:
             d["topk_models"] = self.topk_models

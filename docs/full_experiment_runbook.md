@@ -35,6 +35,11 @@
 - 下文统一把输出写到 `outputs/rerun/`，目的是避免覆盖你已有的 `outputs/benchmark_runs/`、`outputs/benchmark_ab/`、`outputs/benchmark_ablation/`。
 - 如果你希望继续沿用默认目录，只需把文中的 `outputs/rerun/...` 替换回项目默认路径。
 
+路径模式建议：
+
+- 通用复跑与流程演示：使用本文默认的 `outputs/rerun/...`。
+- 工程版归档复测：使用 `scripts/run_engineering_rerun.ps1`，默认输出到 `outputs/rerun_v2_engine_safe_<date>/...`。
+
 ## 2. 运行前准备
 
 ### 2.1 环境检查
@@ -89,6 +94,8 @@ python -m scripts.benchmark_ab_compare --help
 - `configs/symkanbenchmark.default.yaml` 是 `scripts.symkanbenchmark` 在未传 `--config` 时的默认来源。
 - `configs/ablation_runner.default.yaml` 是给 `scripts.ablation_runner --config ...` 使用的共享 `AppConfig` 模板，不会在你省略 `--config` 时被自动选中。
 - `configs/benchmark_ab/*.yaml` 是仓库内置的 A/B 变体模板，也都需要通过 `--config` 显式传入，不属于自动默认回退来源。
+- 当前默认模板把 `stagewise.guard_mode` 设为 `light`（研究复跑优先）；做回归核对时可显式传 `--stage-guard-mode full`。
+- 当前工程版模板把 `stagewise.prune_acc_drop_tol` 设为 `0.08`，用于降低过于保守回滚对时延的影响；若做严格回归，可临时降回更保守值。
 
 ## 3. 推荐复跑顺序
 
