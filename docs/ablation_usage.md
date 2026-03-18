@@ -54,7 +54,13 @@
 ### 3.1 完整单因素消融
 
 ```bash
-python ablation_runner.py --quiet
+python -m scripts.ablation_runner --quiet
+```
+
+也可以用 YAML 固定每个变体共享的 `AppConfig`：
+
+```bash
+python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml
 ```
 
 该命令默认在 `outputs/benchmark_ablation/` 下生成各变体结果目录，并输出：
@@ -65,7 +71,7 @@ python ablation_runner.py --quiet
 ### 3.2 仅聚合已有结果
 
 ```bash
-python ablation_runner.py --aggregate-only --output-dir outputs/benchmark_ablation
+python -m scripts.ablation_runner --aggregate-only --output-dir outputs/benchmark_ablation
 ```
 
 该模式适用于各变体结果已存在，仅需重新汇总总表的情形。
@@ -106,9 +112,9 @@ python compare_layerwiseft_improved.py --ablation-dir outputs/benchmark_ablation
 
 常用参数如下：
 
+- `--config configs/ablation_runner.default.yaml`
 - `--variants full,wostagewise,wopruning,wocompact,wolayerwiseft`
 - `--stagewise-seeds 42,52,62`
-- `--global-seed 123`
 - `--output-dir outputs/benchmark_ablation`
 - `--python <path>`
 - `--quiet`
@@ -118,8 +124,16 @@ python compare_layerwiseft_improved.py --ablation-dir outputs/benchmark_ablation
 若用于论文统计，常见设置为：
 
 ```bash
-python ablation_runner.py --stagewise-seeds 42,52,62 --global-seed 123 --quiet
+python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml --stagewise-seeds 42,52,62 --quiet
 ```
+
+推荐实践是：
+
+- 用一份 `AppConfig` YAML 固定所有变体共享的算法参数。
+- 在 `ablation_runner` 层只保留变体矩阵、输出目录、Python 路径和聚合控制。
+- 各变体只保留最小的 benchmark CLI 覆盖，例如 `--no-input-compaction` 或 `--layerwise-finetune-steps 0`。
+
+这样可以保证不同变体共享同一套基础实验设定，而不是在多个子命令里重复拷贝 `AppConfig` 字段。
 
 ### 4.2 `analyze_layerwiseft.py`
 
@@ -157,6 +171,8 @@ python ablation_runner.py --stagewise-seeds 42,52,62 --global-seed 123 --quiet
 - `--layerwise-early-stop-min-delta 1e-3`
 - `--layerwise-eval-interval 20`
 - `--layerwise-validation-n-sample 300`
+
+说明：这里的 60 步是 `compare_layerwiseft_improved.py` 为了可比性设置的实验技术默认值，不等同项目推荐基线。
 
 ## 5. 输出目录与结果文件
 
@@ -196,7 +212,7 @@ outputs/benchmark_ablation/
 
 1. `stagewise_train` 视为当前流程的必要组成部分，而非可选优化项。
 2. 渐进剪枝与输入压缩主要体现为复杂度与成本控制，不预设其带来稳定精度提升。
-3. 对 2 层 KAN，`LayerwiseFT` 更适合作为可选实验配置；默认设置通常为 `--layerwise-finetune-steps 0`。
+3. 对 2 层 KAN，`LayerwiseFT` 更适合作为可选实验配置；项目推荐基线通常为 `--layerwise-finetune-steps 0`（而 4.3 节的 60 步用于改进版对照实验）。
 4. 对 `n=3` 的结果，应优先描述趋势与边界，而不宜作过度确定性表述。
 
 ## 7. 当前结果摘要

@@ -166,7 +166,7 @@ $$
 - `affine_finetune_steps = 200`
 - `affine_finetune_lr_schedule = [0.003, 0.001, 0.0005, 0.0002]`
 
-对于典型 2 层 KAN（`[in, hidden, class]`），当前实验结果支持优先将 `layerwise_finetune_steps` 设为 `0`；改进版 LayerwiseFT（60 步、早停、轻正则）更适合作为按需启用的实验开关。
+其中 `layerwise_finetune_steps = 60` 属于技术默认值。对于典型 2 层 KAN（`[in, hidden, class]`），当前实验结果支持优先将 `layerwise_finetune_steps` 设为 `0`；改进版 LayerwiseFT（60 步、早停、轻正则）更适合作为按需启用的实验开关。
 
 ### 7.4 并行参数
 
@@ -254,7 +254,7 @@ $$
 若结果不理想，可按以下顺序调整：
 
 1. 先调整 `top_k`，确认输入维度是否过高。
-2. 再调整 `stage_target_edges` 与 `symbolic_target_edges`，确认剪枝是否过度。
+2. 再调整 `stagewise.target_edges` 与 `symbolize.target_edges`，确认剪枝是否过度。
 3. 随后调整 `layerwise_finetune_steps` 与 `affine_finetune_steps`，补偿符号化造成的精度损失。
 4. 最后再考虑调整 `lib_preset` 或扩展函数库。
 

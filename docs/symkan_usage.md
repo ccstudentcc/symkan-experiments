@@ -80,7 +80,9 @@ KAN 每条边学到的是**单变量光滑函数**。训练收敛后，可以直
 
 - `stagewise_train`：分阶段训练、验证集驱动选模与快照回滚。
 - `symbolize_pipeline`：渐进剪枝、逐层符号化与微调。
-- 导出接口与 CLI：用于生成结构化日志、结果文件与批量实验产物。
+- 导出接口：用于生成结构化日志与结果文件。
+
+需要特别区分的是：`symkan` 是库层，提供训练、符号化、评估与导出能力；benchmark / ablation 的 CLI、YAML 配置与批量复现入口属于工具层脚本，不属于 `symkan` 包 API。
 
 核心变换链（简化）：
 
@@ -179,6 +181,7 @@ import numpy as np
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
 
+from symkan.config import AppConfig, StagewiseConfig, SymbolizeConfig
 from symkan.core import set_device, build_dataset
 from symkan.tuning import stagewise_train
 from symkan.symbolic import symbolize_pipeline, LIB_HIDDEN, LIB_OUTPUT
@@ -194,7 +197,7 @@ X, y = make_classification(
     random_state=42,
 )
 X = X.astype(np.float32)
-Y = np.eye(3, dtype=np.float32)[y]  # one-hot 标签
+Y = np.eye(3, dtype=np.float32)[y]  # one-hot 标签；build_dataset 也接受 1D 类别索引
 
 X_train, X_test, Y_train, Y_test = train_test_split(
     X, Y, test_size=0.2, random_state=42, stratify=y
@@ -208,34 +211,35 @@ dataset = build_dataset(
     seed=42,
 )
 
-# 3) 分阶段训练（内部自动创建 KAN）
-best_model, train_res = stagewise_train(
-    dataset=dataset,
-    width=[X_train.shape[1], 16, Y_train.shape[1]],
-    steps_per_stage=60,
-    target_edges=120,
-    sym_target_edges=60,
-    use_validation=True,
-    adaptive_threshold=True,
-    adaptive_lamb=True,
-    adaptive_ft=True,
-    verbose=False,
+# 3) 用统一配置对象组织运行参数
+app_config = AppConfig(
+    stagewise=StagewiseConfig(
+        width=[X_train.shape[1], 16, Y_train.shape[1]],
+        steps_per_stage=60,
+        target_edges=120,
+        sym_target_edges=60,
+        use_validation=True,
+        adaptive_threshold=True,
+        adaptive_lamb=True,
+        adaptive_ft=True,
+        verbose=False,
+    ),
+    symbolize=SymbolizeConfig(
+        target_edges=90,
+        max_prune_rounds=25,
+        lib_hidden=LIB_HIDDEN,
+        lib_output=LIB_OUTPUT,
+        layerwise_finetune_steps=0,  # 典型 2 层 KAN 常设为 0
+        affine_finetune_steps=200,
+        prune_adaptive_threshold=True,
+        collect_timing=True,
+        verbose=False,
+    ),
 )
 
-# 4) 执行符号化流水线
-sym_res = symbolize_pipeline(
-    model=best_model,
-    dataset=dataset,
-    target_edges=90,
-    max_prune_rounds=25,
-    lib_hidden=LIB_HIDDEN,
-    lib_output=LIB_OUTPUT,
-    layerwise_finetune_steps=0,  # 典型 2 层 KAN 常设为 0
-    affine_finetune_steps=200,
-    prune_adaptive_threshold=True,
-    collect_timing=True,
-    verbose=False,
-)
+# 4) 分阶段训练 + 符号化流水线
+best_model, train_res = stagewise_train(dataset=dataset, config=app_config)
+sym_res = symbolize_pipeline(model=best_model, dataset=dataset, config=app_config)
 
 # 5) 读取关键结果
 print('final_acc =', sym_res['final_acc'])
@@ -344,16 +348,29 @@ $$
 | API | 说明 | 关键参数 | 返回 |
 | --- | --- | --- | --- |
 | `set_device(device)` | 设置运行设备 | `cpu/cuda/auto` | `None` |
-| `build_dataset(Xtr, Ytr, Xte, Yte, ...)` | 构建统一数据字典 | `validation_ratio`, `seed` | `dict` |
-| `safe_fit(model, dataset, ...)` | 容错训练封装 | `steps`, `lr`, `lamb`, `update_grid` | `dict` |
+| `build_dataset(Xtr, Ytr, Xte, Yte, ...)` | 构建统一数据字典并校验标签/样本边界 | `validation_ratio`, `seed`, `device` | `dict` |
+| `safe_fit(model, dataset, ...)` | 带降级与失败边界的训练封装 | `steps`, `lr`, `lamb`, `raise_on_failure` | `dict` |
 
 数据字典字段固定为：`train_input`, `train_label`, `val_input`, `val_label`, `test_input`, `test_label`。
+
+`build_dataset` 接受两类标签输入：
+
+- 1D 类别索引（如 `array([0, 1, 0])`）
+- 2D one-hot 或概率矩阵（如 `array([[1, 0], [0, 1], [1, 0]])`）
+
+函数会统一把标签整理成 one-hot 形式存入 dataset，并在以下情况直接抛出明确错误：
+
+- 标签 rank 不是 1 或 2
+- 训练/测试标签类别维度不一致
+- 输入样本数与标签样本数不一致
+
+`safe_fit` 默认兼容旧接口：若训练失败，会打印错误并返回空字典；若调用方希望在失败时立即中止，可传 `raise_on_failure=True`。对需要显式区分成功、失败和降级重试的场景，优先使用 `safe_fit_report`。当前 `stagewise_train`、`symbolize_pipeline` 和逐层微调等关键路径内部都基于结构化报告处理 fit 失败，因此会回滚或中止，而不是继续沿用失败状态。
 
 ### 6.2 `symkan.tuning`
 
 | API | 说明 | 关键参数 | 返回 |
 | --- | --- | --- | --- |
-| `stagewise_train(...)` | 分阶段训练 + 剪枝 + 选模 | `lamb_schedule`, `target_edges`, `use_validation`, `adaptive_*` | `(best_model, result_dict)` |
+| `stagewise_train(...)` | 分阶段训练 + 剪枝 + 选模 | `config=AppConfig(...)` | `(best_model, result_dict)` |
 | `stagewise_train_report(...)` | 结构化返回版本 | 同上 | `StagewiseResult` |
 | `sym_readiness_score(...)` | 精度与稀疏度折中打分 | `acc_weight`, `sym_target_edges` | `float` |
 
@@ -368,7 +385,7 @@ $$
 
 | API | 说明 | 关键参数 | 返回 |
 | --- | --- | --- | --- |
-| `symbolize_pipeline(...)` | 主符号化流水线 | `target_edges`, `lib*`, `prune_*`, `layerwise_finetune_steps` | `dict` |
+| `symbolize_pipeline(...)` | 主符号化流水线 | `config=AppConfig(...)` | `dict` |
 | `symbolize_pipeline_report(...)` | 结构化版本 | 同上 | `SymbolizeResult` |
 | `register_custom_functions()` | 注册 `sigmoid/softplus` | 无 | `None` |
 
@@ -388,8 +405,10 @@ $$
 | --- | --- | --- | --- |
 | `save_stage_logs(stage_df, csv_path)` | 保存阶段日志 | 路径 | `str` |
 | `save_symbolic_summary(summary_df, csv_path)` | 保存符号汇总 | 路径 | `str` |
-| `save_export_bundle(bundle, path)` | 保存实验 bundle | 路径 | `str` |
-| `load_export_bundle(path)` | 读取 bundle | 路径 | `dict` |
+| `save_export_bundle(bundle, path)` | 用 `pickle` 保存实验 bundle | 路径 | `str` |
+| `load_export_bundle(path, trusted=True)` | 读取本地可信 bundle | `path`, `trusted` | `dict` |
+
+`save_export_bundle` / `load_export_bundle` 使用 `pickle` 序列化。读取时必须显式传入 `trusted=True`，且仅应用于本地生成、来源可信的 bundle；不要直接加载下载文件、邮件附件或第三方提供的 `.pkl`。
 
 ---
 
@@ -441,16 +460,22 @@ if len(trace_df) > 0:
 ### 8.1 自定义函数库
 
 ```python
+from copy import deepcopy
+
 from symkan.symbolic import register_custom_functions, EXPRESSIVE_LIB
 
 register_custom_functions()  # 注入 sigmoid / softplus
 my_lib = EXPRESSIVE_LIB + ['sigmoid', 'softplus']
 
+custom_config = deepcopy(app_config)
+custom_config.symbolize.lib = my_lib
+custom_config.symbolize.weight_simple = 0.10
+custom_config.symbolize.verbose = False
+
 sym_res = symbolize_pipeline(
-    best_model, dataset,
-    lib=my_lib,
-    weight_simple=0.10,
-    verbose=False,
+    model=best_model,
+    dataset=dataset,
+    config=custom_config,
 )
 ```
 
@@ -473,6 +498,8 @@ sym_res = symbolize_pipeline(
 
 `symkanbenchmark.py` 是面向批量复现的 CLI 脚本，封装了 Notebook 主流程，用于在同一组参数下批量运行多 seed 并稳定导出 CSV。
 
+当前 benchmark / ablation 工具已改为优先读取 `AppConfig` YAML；脚本 CLI 只保留任务调度和少量显式嵌套覆盖。需要调整训练、剪枝或符号化细节时，优先改 `configs/*.yaml` 或直接构造 `AppConfig`。
+
 三组核心实验设计：
 
 | 组别 | 说明 |
@@ -483,31 +510,25 @@ sym_res = symbolize_pipeline(
 
 ```bash
 # baseline
-python symkanbenchmark.py \
+python -m scripts.symkanbenchmark \
     --tasks full --stagewise-seeds 42,52,62 \
-    --global-seed 123 --output-dir outputs/benchmark_ab/baseline --quiet
+    --config configs/symkanbenchmark.default.yaml \
+    --output-dir outputs/benchmark_ab/baseline --quiet
 
 # adaptive
-python symkanbenchmark.py \
+python -m scripts.symkanbenchmark \
     --tasks full --stagewise-seeds 42,52,62 \
-    --global-seed 123 --output-dir outputs/benchmark_ab/adaptive \
-    --use-validation --validation-ratio 0.15 \
-    --adaptive-threshold --adaptive-lamb --adaptive-ft --quiet
+    --config configs/symkanbenchmark.default.yaml \
+    --output-dir outputs/benchmark_ab/adaptive --quiet
 
 # adaptive_auto
-python symkanbenchmark.py \
+python -m scripts.symkanbenchmark \
     --tasks full --stagewise-seeds 42,52,62 \
-    --global-seed 123 --output-dir outputs/benchmark_ab/adaptive_auto \
-    --use-validation --validation-ratio 0.15 \
-    --adaptive-threshold --adaptive-lamb --adaptive-ft \
-    --stage-early-stop --stage-early-stop-patience 2 \
-    --stage-early-stop-min-acc-gain 0.002 --stage-early-stop-edge-buffer 5 \
-    --symbolic-prune-threshold-start 0.010 --symbolic-prune-threshold-end 0.030 \
-    --symbolic-prune-max-drop-ratio 0.25 --symbolic-prune-threshold-backoff 0.65 \
-    --symbolic-prune-adaptive-acc-drop-tol 0.025 \
-    --symbolic-prune-adaptive-min-edges-gain 2 \
-    --symbolic-prune-adaptive-low-gain-patience 6 --quiet
+    --config configs/symkanbenchmark.default.yaml \
+    --output-dir outputs/benchmark_ab/adaptive_auto --quiet
 ```
+
+建议先从 `configs/symkanbenchmark.default.yaml` 复制出你自己的 variant 配置文件，再分别调整 `stagewise.*` / `symbolize.*` 字段。
 
 自动生成对比表：
 
@@ -555,45 +576,27 @@ python benchmark_ab_compare.py \
 
 | CLI 参数 | 对应 Python 参数 | 说明 |
 | --- | --- | --- |
-| `--use-validation` | `use_validation=True` | 启用验证集驱动训练 |
-| `--validation-ratio 0.15` | `validation_ratio=0.15` | 验证集占训练集比例 |
-| `--adaptive-threshold` | `adaptive_threshold=True` | 自适应剪枝阈值 |
-| `--adaptive-lamb` | `adaptive_lamb=True` | 自适应稀疏正则强度 |
-| `--adaptive-ft` | `adaptive_ft=True` | 自适应微调步数 |
-| `--stage-early-stop` | `stage_early_stop=True` | 启用阶段早停 |
-| `--stage-early-stop-patience N` | `stage_early_stop_patience=N` | 连续 N 阶段无增益则停止 |
-| `--stage-early-stop-min-acc-gain G` | `stage_early_stop_min_acc_gain=G` | 每阶段至少精度增益阈值 |
-| `--stage-early-stop-edge-buffer B` | `stage_early_stop_edge_buffer=B` | 未达目标边数时保留 B 条 buffer |
+| `--device cpu` | `runtime.device="cpu"` | 覆盖运行设备 |
+| `--global-seed 123` | `runtime.global_seed=123` | 覆盖全局随机种子 |
+| `--baseline-seed 123` | `runtime.baseline_seed=123` | 覆盖基线模型随机种子 |
+| `--batch-size 256` | `runtime.batch_size=256` | 覆盖训练批大小 |
+| `--lib-preset fast` | `library.lib_preset="fast"` | 覆盖函数库预设 |
 
 #### symbolize 剪枝参数
 
 | CLI 参数 | 对应 Python 参数 | 说明 |
 | --- | --- | --- |
-| `--symbolic-prune-threshold-start S` | `prune_threshold_start=S` | 剪枝起始阈值 |
-| `--symbolic-prune-threshold-end E` | `prune_threshold_end=E` | 剪枝退火目标阈值 |
-| `--symbolic-prune-max-drop-ratio R` | `prune_max_drop_ratio=R` | 单轮最大边数降幅比例（如 0.25 = 25%） |
-| `--symbolic-prune-threshold-backoff B` | `prune_threshold_backoff=B` | 精度跌幅过大时阈值回退系数 |
-| `--symbolic-prune-adaptive-threshold` | `prune_adaptive_threshold=True` | 自适应阈值控制（默认开启） |
-| `--no-symbolic-prune-adaptive-threshold` | `prune_adaptive_threshold=False` | 显式关闭自适应阈值 |
-| `--symbolic-prune-adaptive-step S` | `prune_adaptive_step=S` | 自适应阈值步进量 |
-| `--symbolic-prune-adaptive-acc-drop-tol T` | `prune_adaptive_acc_drop_tol=T` | 容忍的精度跌幅上限 |
-| `--symbolic-prune-adaptive-min-edges-gain G` | `prune_adaptive_min_edges_gain=G` | 最小有效边数增益 |
-| `--symbolic-prune-adaptive-low-gain-patience P` | `prune_adaptive_low_gain_patience=P` | 低增益连续轮数耐心值 |
+| `--max-prune-rounds 12` | `symbolize.max_prune_rounds=12` | 覆盖符号化最大剪枝轮数 |
+| `--no-input-compaction` | `symbolize.enable_input_compaction=False` | 关闭输入压缩 |
+| `--prune-collapse-floor 0.0` | `symbolize.prune_collapse_floor=0.0` | 调整或关闭崩塌保护 |
+| `--symbolic-prune-adaptive-acc-drop-tol 0.025` | `symbolize.prune_adaptive_acc_drop_tol=0.025` | 覆盖自适应精度跌幅容忍度 |
 
 #### layerwise 微调参数
 
 | CLI 参数 | 对应 Python 参数 | 说明 |
 | --- | --- | --- |
-| `--layerwise-finetune-steps N` | `layerwise_finetune_steps=N` | 每层符号化后的局部微调步数（典型 2 层 KAN 常设为 0） |
-| `--layerwise-finetune-lr LR` | `layerwise_finetune_lr=LR` | layerwise 微调学习率 |
-| `--layerwise-finetune-lamb L` | `layerwise_finetune_lamb=L` | layerwise 微调正则强度 |
-| `--layerwise-use-validation` | `layerwise_use_validation=True` | 启用 layerwise 验证集评估与早停 |
-| `--layerwise-validation-ratio R` | `layerwise_validation_ratio=R` | layerwise 验证集比例 |
-| `--layerwise-validation-seed S` | `layerwise_validation_seed=S` | layerwise 验证集切分种子 |
-| `--layerwise-early-stop-patience P` | `layerwise_early_stop_patience=P` | 连续 P 次评估无提升则停止 |
-| `--layerwise-early-stop-min-delta D` | `layerwise_early_stop_min_delta=D` | 视为“有提升”的最小 R² 增量 |
-| `--layerwise-eval-interval K` | `layerwise_eval_interval=K` | 每 K 步进行一次验证评估 |
-| `--layerwise-validation-n-sample N` | `layerwise_validation_n_sample=N` | layerwise 验证时采样规模 |
+| `--layerwise-finetune-steps 0` | `symbolize.layerwise_finetune_steps=0` | 关闭或缩短 layerwise 微调 |
+| 更细的 layerwise 参数 | `symbolize.*` | 如 `layerwise_finetune_lr`、`layerwise_use_validation`、`layerwise_early_stop_*` 建议直接写入 `AppConfig` YAML |
 
 ## 9. 补充说明
 

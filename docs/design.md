@@ -111,7 +111,8 @@ $$
 
 所以当前做法是：
 
-- 保留 `safe_fit`、`stagewise_train`、`symbolize_pipeline` 的旧行为。
+- 保留 `stagewise_train`、`symbolize_pipeline` 的公开入口与主返回结构，避免破坏 notebook / 脚本工作流。
+- `safe_fit` 默认仍兼容旧接口：失败时打印错误并返回空字典；若调用方需要严格失败边界，可使用 `raise_on_failure=True` 或直接改用 `safe_fit_report`。
 - 额外提供 `safe_fit_report`、`safe_attribute_report`、`stagewise_train_report`、`symbolize_pipeline_report`。
 
 因此，现有实现采取“保留旧接口、增补结构化报告接口”的方式。
@@ -128,11 +129,13 @@ $$
 
 ## 风险与边界
 
-当前实现最需要警惕的点有三个：
+当前实现最需要警惕的点有五个：
 
 1. pykan 内部状态不是完全无副作用，任何“共享模型并行搜索”都必须非常谨慎。
 2. 环境可能缺少部分依赖，验证和运行脚本不应把导入错误伪装成算法错误。
 3. 宽松的目标边数策略会影响 benchmark 公平性，因此需要明确区分默认行为和实验行为。
+4. `load_export_bundle()` 基于 `pickle`，只能用于本地生成且来源可信的 bundle。
+5. 配置中的环境变量占位符只在 YAML 解析后的标量字符串上展开，数据自动补齐默认也只允许写入仓库 `data/`，两者都属于显式安全边界而非隐式便利行为。
 
 ## 实验结果支持下的设计收敛（2026-03）
 

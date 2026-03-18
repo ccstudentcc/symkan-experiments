@@ -30,6 +30,8 @@
 - [symkanbenchmark_usage.md](symkanbenchmark_usage.md)：主 benchmark CLI、输出文件与 A/B 结果口径。
 - [ablation_usage.md](ablation_usage.md)：单因素消融与 LayerwiseFT 专项对比脚本说明。
 
+这两份文档同时说明了当前的运行配置约定：Notebook 优先函数传参或 `AppConfig`，批量实验优先 `AppConfig` YAML + 少量显式 CLI 覆盖，而底层统一只认结构化配置对象。
+
 ### 4. 结果报告与结论边界
 
 - [ablation_report.md](ablation_report.md)：单因素消融结果及其解释边界。

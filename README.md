@@ -38,22 +38,35 @@
 
 ```bash
 pip install -r requirements.txt
-python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 --quiet
+python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --quiet
 ```
 
 也支持将“程序如何运行”的参数集中写入 YAML，并继续保留 CLI 覆盖能力：
 
 ```bash
-python symkanbenchmark.py --config configs/symkanbenchmark.default.yaml --quiet
+python -m scripts.symkanbenchmark --config configs/symkanbenchmark.default.yaml --quiet
+```
+
+对于单因素消融，也支持同样的配置方式：
+
+```bash
+python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml
 ```
 
 推荐约定：
 
 - YAML：运行配置、实验参数、输出目录、设备、seed 等。
-- 环境变量：敏感配置或机器相关差异，通过 `${ENV_VAR}` / `${ENV_VAR:-default}` 注入。
+- 环境变量：敏感配置或机器相关差异，通过 `${ENV_VAR}` / `${ENV_VAR:-default}` 注入；占位符会在 YAML 解析后仅对标量字符串展开，避免把环境变量内容当成新的 YAML 结构注入。
 - CSV：结果表、分析表、可直接插入 LaTeX 的产物。
 
 也就是说，本仓库继续保留 CSV 产物，但不再把 CSV 视作运行时配置载体。
+
+当前项目的分层方式是：
+
+- Notebook / 库调用：统一优先构造 `symkan.config.AppConfig`，由其承载 `stagewise` / `symbolize` 子配置。
+- CLI / 批量实验：优先使用 `AppConfig` YAML，并仅在脚本层做显式嵌套覆盖。
+- 核心编排逻辑：统一依赖工具层的结构化 `Config` 对象。
+- 底层库逻辑：统一依赖 `symkan.config.AppConfig`，而 `StagewiseConfig` / `SymbolizeConfig` 作为其嵌套子配置存在。
 
 运行结果通常写入以下位置：
 
@@ -61,6 +74,12 @@ python symkanbenchmark.py --config configs/symkanbenchmark.default.yaml --quiet
 - `outputs/benchmark_runs/run_01_seed42/kan_stage_logs.csv`：阶段训练日志。
 - `outputs/benchmark_runs/run_01_seed42/symbolize_trace.csv`：剪枝与符号化轨迹。
 - `outputs/benchmark_runs/run_01_seed42/formula_validation.csv`：导出公式的数值验证结果。
+
+数据补充边界：
+
+- `symkanbenchmark.py` 默认只会在仓库 `data/` 目录下自动补齐缺失的 MNIST `.npy` 文件。
+- 若配置把 `x_train/x_test/y_train/y_test` 指向 `data/` 之外，需显式设置 `data.allow_auto_fetch_outside_data_dir: true` 才允许自动写入。
+- `symkan.io.load_export_bundle()` 基于 `pickle`，读取时必须显式传入 `trusted=True`，且仅应用于本地生成、来源可信的 bundle。
 
 最小可运行示例见 [docs/symkan_usage.md](docs/symkan_usage.md)；交互式实验入口位于 [notebooks/kan.ipynb](notebooks/kan.ipynb)。
 

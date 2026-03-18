@@ -24,7 +24,7 @@
 该层作为仓库的公共库层，负责组织训练、符号化、评估和导出接口。
 
 - `symkan.core`
-  负责设备管理、数据集构建、训练基础函数、结构化类型。
+  负责设备管理、数据集构建、训练基础函数、结构化类型；`build_dataset` 统一接受 1D 类别索引或 2D one-hot/概率标签，并在样本数、标签 rank 与类别维度不合法时直接报错。
 - `symkan.tuning`
   负责 `stagewise_train`、阶段快照、选模和自适应节奏控制。
 - `symkan.symbolic`
@@ -34,9 +34,16 @@
 - `symkan.eval`
   负责 ROC/AUC 与公式数值验证。
 - `symkan.io`
-  负责 CSV、JSON、bundle 的导出与读取。
-- `symkan.config`
-  负责 YAML 运行配置加载、环境变量展开与 Pydantic 校验。
+  负责 CSV、JSON、bundle 的导出与读取；其中 bundle 读取基于 `pickle`，仅支持显式信任的本地文件。
+
+### `scripts/` 与工具层
+
+工具脚本保留 CLI 编排职责，但算法运行参数统一通过 `symkan.config.AppConfig` 加载。
+
+- `symkan/config`
+  负责 `AppConfig`、YAML 加载、环境变量占位符展开、Pydantic 校验与 `load_config()`；环境变量只会在 YAML 解析后的标量字符串上展开。
+- `scripts/`
+  负责 benchmark / ablation 的调度参数、输出目录和实验矩阵控制。
 
 ### 根目录脚本
 
@@ -57,7 +64,7 @@
 
 主链路按顺序分为五步：
 
-1. 读入 `X/Y` 数据并构造成统一 `dataset`。
+1. 读入 `X/Y` 数据并构造成统一 `dataset`；标签既可来自 1D 类别索引，也可来自 2D one-hot/概率矩阵。
 2. `stagewise_train` 训练并筛选更便于符号化的模型快照。
 3. `symbolize_pipeline` 做渐进剪枝、输入压缩、逐层符号化和微调。
 4. `validate_formula_numerically` 验证导出公式与模型输出的一致性。
@@ -133,8 +140,21 @@
 - YAML 配置：描述程序如何运行，例如 seed、设备、训练节奏、输出目录。
 - 环境变量：注入敏感信息或机器相关差异，不写入仓库。
 - CSV / NPY / JSON：作为输入数据、结果产物和分析中间表。
+- `pickle` bundle：仅作为本地可信实验归档格式，不作为跨来源交换格式。
 
-当前实现中，`scripts/symkanbenchmark.py` 支持 `--config <yaml>`，并遵循 `CLI > YAML > 代码默认值`。这保证了大型项目里配置可维护，同时保留现有 CSV 工作流和论文表格产物。
+当前实现遵循以下分层：
+
+- notebook / Python 调用层：优先显式构造 `symkan.config.AppConfig`，便于演示和单元测试。
+- 脚本入口层：支持 `--config <yaml>`，先 `load_config()` 得到 `AppConfig`，再对少量字段做显式嵌套覆盖。
+- 实验编排层：脚本先 `load_config()` 得到 `AppConfig`，再做显式嵌套覆盖与批量调度。
+- 底层能力层：统一依赖 `symkan.config.AppConfig`，其中嵌套 `StagewiseConfig` / `SymbolizeConfig`；数据层继续使用 `DatasetBundle`。
+
+这样做的目的是让核心逻辑不关心参数来源，同时避免 YAML 路径和 CLI 路径出现两套不同校验或默认值逻辑。
+
+当前还额外约束了两个安全边界：
+
+1. `${ENV_VAR}` / `${ENV_VAR:-default}` 会在 YAML 解析后仅对标量字符串展开，避免环境变量注入新的配置结构。
+2. `data.auto_fetch_mnist` 默认只允许在仓库 `data/` 下补齐缺失 `.npy` 文件；若要写入自定义目录，必须显式开启 `data.allow_auto_fetch_outside_data_dir`。
 
 ## 设计约束
 

@@ -45,7 +45,7 @@
 
 1. 网络结构固定为 `inner_dim=16, grid=5, k=3`。
 2. 函数库固定为 `lib-preset=layered`。
-3. 符号化目标固定为 `symbolic_target_edges=90`。
+3. 符号化目标固定为 `symbolize.target_edges=90`。
 4. 除被消融模块外，其余参数与基线保持一致。
 5. 每个变体均须保留完整中间文件，而非仅保留最终指标。
 
@@ -62,7 +62,7 @@
 参考命令如下：
 
 ```bash
-python symkanbenchmark.py \
+python -m scripts.symkanbenchmark \
   --tasks full \
   --stagewise-seeds 42,52,62 \
   --global-seed 123 \

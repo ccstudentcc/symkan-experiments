@@ -18,12 +18,12 @@
 
 该目录是仓库的核心实现层，也是主要复用逻辑所在。
 
-- `symkan/core/`：设备、数据集、训练基础接口、结构化类型。
+- `symkan/core/`：设备、数据集、训练基础接口、结构化类型；dataset 构建同时兼容 1D 类别索引和 2D one-hot/概率标签。
 - `symkan/tuning/`：`stagewise_train` 和相关自适应控制逻辑。
 - `symkan/symbolic/`：函数库、输入压缩、逐层符号化、主流水线。
 - `symkan/pruning/`：归因与剪枝辅助逻辑。
 - `symkan/eval/`：ROC/AUC 和公式数值验证。
-- `symkan/io/`：结果导出、bundle 读写。
+- `symkan/io/`：结果导出、bundle 读写；bundle 读取仅面向显式信任的本地 pickle 文件。
 
 该目录是理解项目主流程的主要代码入口。
 
@@ -45,6 +45,12 @@
   专门分析 `full` 和 `wolayerwiseft` 的差异。
 - `compare_layerwiseft_improved.py`
   运行并汇总改进版 LayerwiseFT 相对 `full / wolayerwiseft` 的结果。
+
+这些脚本当前统一采用“`AppConfig` + 脚本编排参数”的模式：
+
+- `symkanbenchmark.py` 先用 `symkan.config.load_config()` 读取 `AppConfig`。
+- `ablation_runner.py` 复用同一份 `AppConfig`，只在脚本层组织 variants / output-dir / seeds。
+- 更底层的训练/符号化逻辑继续直接依赖 `symkan.config.AppConfig`。
 
 ### 4. `docs/`
 

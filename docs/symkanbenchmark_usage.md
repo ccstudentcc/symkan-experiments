@@ -32,47 +32,63 @@
 ### 1.1 完整流程
 
 ```bash
-python symkanbenchmark.py --tasks all --verbose
+python -m scripts.symkanbenchmark --tasks all --verbose
 ```
 
 其中，`all = full + eval-bench + parallel-bench`。
 
-脚本默认优先读取 `data/X_train.npy`、`data/X_test.npy`、`data/Y_train_cat.npy`、`data/Y_test_cat.npy`（兼容旧版根目录 `X_train.npy`、`X_test.npy`、`Y_train_cat.npy`、`Y_test_cat.npy`）。若文件缺失，脚本会自动获取 MNIST 并生成对应文件，优先使用 `tensorflow.keras.datasets.mnist`，失败时回退至 `sklearn.fetch_openml`。
+脚本默认优先读取 `data/X_train.npy`、`data/X_test.npy`、`data/Y_train_cat.npy`、`data/Y_test_cat.npy`（兼容旧版根目录 `X_train.npy`、`X_test.npy`、`Y_train_cat.npy`、`Y_test_cat.npy`）。若文件缺失且启用了 `data.auto_fetch_mnist`，脚本默认只会在仓库 `data/` 下补齐缺失文件；若配置把目标路径指向 `data/` 之外，需显式设置 `data.allow_auto_fetch_outside_data_dir: true`。自动下载优先使用 `tensorflow.keras.datasets.mnist`，失败时会先发出 warning，再回退到 `sklearn.fetch_openml`。
 
 ## 配置管理建议
 
 `symkanbenchmark.py` 现支持通过 `--config` 加载 YAML 运行配置，例如：
 
 ```bash
-python symkanbenchmark.py --config configs/symkanbenchmark.default.yaml --quiet
+python -m scripts.symkanbenchmark --config configs/symkanbenchmark.default.yaml --quiet
 ```
 
 约定如下：
 
-- YAML 管运行逻辑：训练参数、设备、seed、输出目录等。
-- 环境变量管敏感项或环境差异：支持 `${ENV_VAR}` 和 `${ENV_VAR:-default}`。
+- `AppConfig` YAML 管算法运行逻辑：训练参数、设备、数据路径、符号化策略等。
+- 环境变量管敏感项或环境差异：支持 `${ENV_VAR}` 和 `${ENV_VAR:-default}`，且只会在 YAML 解析后的标量字符串上展开，避免把环境变量内容当成新的配置结构。
 - CSV 管输入数据与结果产物：例如 `symkanbenchmark_runs.csv`、`kan_stage_logs.csv`、`kan_symbolic_summary.csv`。
 
-命令行参数仍然可以覆盖 YAML 中的字段，因此适合“固定主配置 + 局部实验覆盖”的工作流。
+命令行参数不再由 `load_config()` 自动合并进配置对象；脚本只对少量嵌套字段做显式覆盖，因此适合“固定主配置 + 少量局部覆盖”的工作流。
+
+## 配置分层原则
+
+当前项目采用三层口径：
+
+1. notebook / Python 调用：直接构造 `AppConfig` 并传给核心函数。
+2. CLI：先 `load_config()` 得到 `AppConfig`，再做少量显式嵌套覆盖。
+3. 核心编排：统一只认 `AppConfig`，而不是 `argparse.Namespace` 或脚本私有配置模型。
+
+`symkanbenchmark.py` 现在直接把 `AppConfig` 传给 `stagewise_train` / `symbolize_pipeline`。也就是说，YAML、CLI 和 notebook 最终都收敛到同一份库层配置对象。
 
 ### 1.2 主实验
 
 ```bash
-python symkanbenchmark.py --tasks full
+python -m scripts.symkanbenchmark --tasks full
 ```
 
 静默模式：
 
 ```bash
-python symkanbenchmark.py --tasks full --quiet
+python -m scripts.symkanbenchmark --tasks full --quiet
 ```
 
 `--quiet` 用于抑制训练与符号化过程输出；若与 `--verbose` 同时设置，则 `--quiet` 优先。
 
+说明：
+
+- 当前脚本把算法参数统一收敛到 `AppConfig` YAML。
+- CLI 主要保留任务调度、输出目录、seed 列表和少量显式嵌套覆盖。
+- 更细的训练/剪枝/符号化参数，推荐直接修改 `configs/symkanbenchmark.default.yaml` 或你自己的 `AppConfig` 文件。
+
 ### 1.3 多 seed 运行
 
 ```bash
-python symkanbenchmark.py --tasks all --stagewise-seeds 42,52,62
+python -m scripts.symkanbenchmark --tasks all --stagewise-seeds 42,52,62
 ```
 
 ## 2. 任务与命令速查
@@ -80,25 +96,25 @@ python symkanbenchmark.py --tasks all --stagewise-seeds 42,52,62
 - 主实验：
 
 ```bash
-python symkanbenchmark.py --tasks full
+python -m scripts.symkanbenchmark --tasks full
 ```
 
 - 评估链路 benchmark（仍会先构造主流程上下文）：
 
 ```bash
-python symkanbenchmark.py --tasks eval-bench
+python -m scripts.symkanbenchmark --tasks eval-bench
 ```
 
 - 并行策略 benchmark：
 
 ```bash
-python symkanbenchmark.py --tasks parallel-bench --parallel-modes auto,off,thread4,thread8
+python -m scripts.symkanbenchmark --tasks parallel-bench --parallel-modes auto,off,thread4,thread8
 ```
 
 - 组合任务：
 
 ```bash
-python symkanbenchmark.py --tasks full,parallel-bench
+python -m scripts.symkanbenchmark --tasks full,parallel-bench
 ```
 
 ## 3. 输出目录与文件含义
@@ -134,22 +150,22 @@ outputs/benchmark_runs/
 
 ## 4. 参数速查
 
-### 4.1 主实验参数默认值（CLI 实际默认）
+### 4.1 主实验参数来源
 
-- `--inner-dim 16`：隐藏层宽度（主干表达能力与训练成本的平衡点）。
-- `--top-k 120`：归因后保留的输入特征数（越大保留信息越多，搜索也更慢）。
-- `--stage-target-edges 120`：stagewise 阶段期望保留的边数目标。
-- `--symbolic-target-edges 90`：symbolize 后期望收敛到的边数目标（控制最终复杂度）。
-- `--steps-per-stage 60`：每个 stage 的训练步数。
-- `--finetune-steps 50`：阶段内常规微调步数。
-- `--layerwise-finetune-steps 60`：逐层微调步数（改进版默认，含早停与轻正则参数）。
-- `--affine-finetune-steps 200`：仿射参数微调步数（提高最后拟合质量）。
+当前实现中，大多数算法参数不再作为长 CLI 直接暴露，而是来自 `AppConfig` YAML，例如：
+
+- `model.inner_dim`
+- `stagewise.target_edges`
+- `stagewise.steps_per_stage`
+- `symbolize.target_edges`
+- `symbolize.layerwise_finetune_steps`
+- `symbolize.affine_finetune_steps`
 
 口径说明如下：
 
-1. 上述是 CLI 技术默认值，用于“不开任何额外开关即可运行”。
-2. 对典型 2 层 KAN（`[in, hidden, class]`），项目层设定通常显式传入 `--layerwise-finetune-steps 0`，并将 LayerwiseFT 视为按需开关。
-3. 如果确实启用 LayerwiseFT，优先使用当前改进版参数（steps=60 + validation early-stop + `lamb=1e-5`），不要回退到旧版长步数无约束微调。
+1. 算法参数的正式默认值以 `AppConfig` 模型和示例 YAML 为准。
+2. CLI 主要承担任务调度和少量显式嵌套覆盖，不再承载整套研究参数。
+3. 对典型 2 层 KAN（`[in, hidden, class]`），项目层设定通常仍将 `layerwise_finetune_steps` 视为按需开关。
 
 逐层符号化属于有损替换；`fix_symbolic` 选定函数族后无法回退。在 2 层 KAN 中，LayerwiseFT 仅有一次层间补偿窗口，因此其改进版更接近风险控制选项，而非默认增益模块。
 
@@ -163,15 +179,25 @@ outputs/benchmark_runs/
 - `--output-dir outputs/benchmark_runs_alt`：指定输出根目录，避免和已有实验互相覆盖。
 - `--verbose`：打印过程日志，便于观察训练与剪枝过程。
 - `--quiet`：静默运行，只保留必要结果输出。
-- `--auto-fetch-mnist/--no-auto-fetch-mnist`：是否在 `*.npy` 缺失时自动获取并生成 MNIST 数据文件（默认开启）。
-- `--mnist-classes 0,1,2,3,4,5,6,7,8,9`：自动获取 MNIST 时保留的类别集合。
+- 数据路径、MNIST 自动拉取、类别集合等参数现在统一由 `AppConfig.data` 管理。
+- `data.auto_fetch_mnist=true`：缺少 `.npy` 文件时自动补齐 MNIST 数据。
+- `data.allow_auto_fetch_outside_data_dir=true`：显式允许把自动补齐文件写到仓库 `data/` 目录之外。
 
-### 4.3 函数库预设
+### 4.3 常见显式覆盖
 
 - `--lib-preset layered`：分层函数库，精度与复杂度较均衡。
 - `--lib-preset fast`：精简函数库，优先降低搜索成本与运行时间。
 - `--lib-preset expressive`：增强表达能力，可在分层库不足时试验。
 - `--lib-preset full`：完整函数库，搜索空间最大，通常最慢但最灵活。
+
+- `--device cpu`：覆盖 `runtime.device`。
+- `--global-seed 321`：覆盖 `runtime.global_seed`。
+- `--baseline-seed 321`：覆盖 `runtime.baseline_seed`。
+- `--batch-size 256`：覆盖 `runtime.batch_size`。
+- `--max-prune-rounds 12`：覆盖 `symbolize.max_prune_rounds`。
+- `--layerwise-finetune-steps 0`：覆盖 `symbolize.layerwise_finetune_steps`。
+- `--no-input-compaction`：覆盖 `symbolize.enable_input_compaction`。
+- `--prune-collapse-floor 0.0`：覆盖 `symbolize.prune_collapse_floor`。
 
 ### 4.4 评估 benchmark 参数
 
@@ -225,10 +251,10 @@ outputs/benchmark_runs/
 公共参数：
 
 ```bash
-python symkanbenchmark.py \
+python -m scripts.symkanbenchmark \
   --tasks full \
   --stagewise-seeds 42,52,62 \
-  --global-seed 123 \
+  --config configs/symkanbenchmark.default.yaml \
   --output-dir <OUT_DIR> \
   <EXTRA_FLAGS> \
   --quiet
@@ -238,37 +264,25 @@ python symkanbenchmark.py \
 
 ```bash
 # baseline
-python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 --global-seed 123 --output-dir outputs/benchmark_ab/baseline --quiet
+python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/symkanbenchmark.default.yaml --output-dir outputs/benchmark_ab/baseline --quiet
 
 # adaptive
-python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 --global-seed 123 --output-dir outputs/benchmark_ab/adaptive --use-validation --validation-ratio 0.15 --adaptive-threshold --adaptive-lamb --adaptive-ft --quiet
+# 先复制 configs/symkanbenchmark.default.yaml 到你自己的变体 YAML，再调整 stagewise/symbolize 字段
+python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/symkanbenchmark.default.yaml --output-dir outputs/benchmark_ab/adaptive --quiet
 
 # adaptive_auto
-python symkanbenchmark.py --tasks full --stagewise-seeds 42,52,62 --global-seed 123 --output-dir outputs/benchmark_ab/adaptive_auto --use-validation --validation-ratio 0.15 --adaptive-threshold --adaptive-lamb --adaptive-ft --stage-early-stop --stage-early-stop-patience 2 --stage-early-stop-min-acc-gain 0.002 --stage-early-stop-edge-buffer 5 --symbolic-prune-threshold-start 0.010 --symbolic-prune-threshold-end 0.030 --symbolic-prune-max-drop-ratio 0.25 --symbolic-prune-threshold-backoff 0.65 --symbolic-prune-adaptive-threshold --symbolic-prune-adaptive-acc-drop-tol 0.025 --symbolic-prune-adaptive-min-edges-gain 2 --symbolic-prune-adaptive-low-gain-patience 6 --quiet
+# 同样建议为 adaptive_auto 单独准备一份 AppConfig YAML
+python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/symkanbenchmark.default.yaml --output-dir outputs/benchmark_ab/adaptive_auto --quiet
 ```
 
-### 6.2 新增参数分组
+### 6.2 配置建议
 
-stagewise 相关：
+这一组实验不再推荐通过长 CLI 逐项传参。
 
-- `--stage-early-stop`：开启 stagewise 早停。
-- `--stage-early-stop-patience`：早停耐心轮数（连续多少轮无改进后停止）。
-- `--stage-early-stop-min-acc-gain`：判定“有效改进”的最小精度提升阈值。
-- `--stage-early-stop-edge-buffer`：边数缓冲区（避免过早因边数抖动触发早停）。
-
-symbolize 相关：
-
-- `--symbolic-prune-threshold-start`：初始剪枝阈值。
-- `--symbolic-prune-threshold-end`：目标/上限剪枝阈值。
-- `--symbolic-prune-max-drop-ratio`：单轮允许的最大性能下降比例。
-- `--symbolic-prune-threshold-backoff`：触发回退时的阈值收缩系数。
-- `--symbolic-prune-adaptive-threshold`：开启自适应阈值调节。
-- `--symbolic-prune-adaptive-step`：每轮阈值调节步长。
-- `--symbolic-prune-adaptive-acc-drop-tol`：可容忍的精度下降阈值。
-- `--symbolic-prune-adaptive-min-edges-gain`：每轮至少要减少的边数下限。
-- `--symbolic-prune-adaptive-low-gain-patience`：连续低收益轮数容忍度，超过后调整策略。
-
-当前默认启用 `symbolic-prune-adaptive-threshold`；如需禁用，应显式传入 `--no-symbolic-prune-adaptive-threshold`。
+- `baseline`、`adaptive`、`adaptive_auto` 的差异应直接体现在各自复制出来的 `AppConfig` YAML 中。
+- 当前仓库只内置 `configs/symkanbenchmark.default.yaml`；建议从它复制出你自己的 variant 配置文件。
+- benchmark CLI 主要保留 `--config`、`--output-dir`、`--stagewise-seeds` 和少量显式覆盖项。
+- 需要复现实验时，优先保留完整 YAML，而不是把研究参数重新散落回命令行。
 
 ### 6.3 结果自动汇总
 
@@ -372,6 +386,6 @@ python benchmark_ab_compare.py --root outputs/benchmark_ab --baseline baseline -
 
 为避免跨文档“默认值”和“项目层设定”混用，统一采用以下写法：
 
-1. **CLI 默认值**：指参数解析器内置默认（本文件第 4 节）。
-2. **项目配置**：指基于实验结论所采用的配置组合（见 [symkan_usage.md](symkan_usage.md) 与 [design.md](design.md)）。
-3. 对 2 层 KAN：运行稳定与效率优先时使用 `--layerwise-finetune-steps 0`；改进版 LayerwiseFT（steps=60 等）仅作为按需实验开关，不默认承诺分类增益。
+1. **CLI 默认值**：指脚本当前保留的调度参数与少量显式覆盖项默认值。
+2. **项目配置**：指基于实验结论所采用的 `AppConfig` 组合（见 [symkan_usage.md](symkan_usage.md) 与 [design.md](design.md)）。
+3. 对 2 层 KAN：运行稳定与效率优先时可将 `layerwise_finetune_steps` 设为 0；改进版 LayerwiseFT（steps=60 等）仅作为按需实验开关，不默认承诺分类增益。
