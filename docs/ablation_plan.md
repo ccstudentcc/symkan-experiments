@@ -61,13 +61,14 @@
 
 参考命令如下：
 
-```bash
-python -m scripts.symkanbenchmark \
-  --config configs/symkanbenchmark.default.yaml \
-  --tasks full \
-  --stagewise-seeds 42,52,62 \
-  --global-seed 123 \
-  --output-dir outputs/benchmark_ablation/full \
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
+python -m scripts.symkanbenchmark `
+  --config configs/symkanbenchmark.default.yaml `
+  --tasks full `
+  --stagewise-seeds 42,52,62 `
+  --global-seed 123 `
+  --output-dir outputs/benchmark_ablation/full `
   --quiet
 ```
 

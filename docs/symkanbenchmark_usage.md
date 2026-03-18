@@ -29,9 +29,18 @@
 
 ## 1. 运行入口
 
+参考环境（用于结果解释）：
+
+1. 操作系统：Windows 11 专业版 `23H2`（OS Build `22631.5472`）。
+2. Python：`Miniconda` 的 `kan` 环境，解释器路径 `C:\Users\chenpeng\miniconda3\envs\kan\python.exe`（`3.9.25`）。
+3. CPU：`12th Gen Intel(R) Core(TM) i5-12500H`。
+4. 内存：`16 GB`。
+5. 深度学习运行时：`PyTorch 2.1.2+cpu`（CPU 路径）。
+
 ### 1.1 完整流程
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.symkanbenchmark --tasks all --verbose
 ```
 
@@ -43,13 +52,15 @@ python -m scripts.symkanbenchmark --tasks all --verbose
 
 `symkanbenchmark.py` 现支持通过 `--config` 加载 YAML 运行配置，例如：
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.symkanbenchmark --config configs/symkanbenchmark.default.yaml --quiet
 ```
 
 若未显式传入 `--config`，脚本当前会默认读取：
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 configs/symkanbenchmark.default.yaml
 ```
 
@@ -83,13 +94,15 @@ configs/symkanbenchmark.default.yaml
 
 ### 1.2 主实验
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.symkanbenchmark --tasks full
 ```
 
 静默模式：
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.symkanbenchmark --tasks full --quiet
 ```
 
@@ -103,7 +116,8 @@ python -m scripts.symkanbenchmark --tasks full --quiet
 
 ### 1.3 多 seed 运行
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.symkanbenchmark --tasks all --stagewise-seeds 42,52,62
 ```
 
@@ -111,19 +125,22 @@ python -m scripts.symkanbenchmark --tasks all --stagewise-seeds 42,52,62
 
 - 主实验：
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.symkanbenchmark --tasks full
 ```
 
 - 评估链路 benchmark（仍会先构造主流程上下文）：
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.symkanbenchmark --tasks eval-bench
 ```
 
 - 并行策略 benchmark：
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.symkanbenchmark --tasks parallel-bench --parallel-modes auto,off,thread4,thread8
 ```
 
@@ -131,7 +148,8 @@ python -m scripts.symkanbenchmark --tasks parallel-bench --parallel-modes auto,o
 
 - 组合任务：
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.symkanbenchmark --tasks full,parallel-bench
 ```
 
@@ -283,19 +301,21 @@ outputs/benchmark_runs/
 
 公共参数：
 
-```bash
-python -m scripts.symkanbenchmark \
-  --tasks full \
-  --stagewise-seeds 42,52,62 \
-  --config <VARIANT_APP_CONFIG> \
-  --output-dir <OUT_DIR> \
-  <EXTRA_FLAGS> \
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
+python -m scripts.symkanbenchmark `
+  --tasks full `
+  --stagewise-seeds 42,52,62 `
+  --config <VARIANT_APP_CONFIG> `
+  --output-dir <OUT_DIR> `
+  <EXTRA_FLAGS> `
   --quiet
 ```
 
 实例：
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 # baseline
 python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/baseline.yaml --output-dir outputs/benchmark_ab/baseline --quiet
 
@@ -320,7 +340,8 @@ python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --conf
 
 结果汇总可使用 [benchmark_ab_compare.py](../benchmark_ab_compare.py)：
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.benchmark_ab_compare --root outputs/benchmark_ab --baseline baseline --variants adaptive,adaptive_auto --output outputs/benchmark_ab/comparison
 ```
 

@@ -51,9 +51,18 @@
 
 ## 3. 运行方式
 
+参考环境（用于结果解释）：
+
+1. 操作系统：Windows 11 专业版 `23H2`（OS Build `22631.5472`）。
+2. Python：`Miniconda` 的 `kan` 环境，解释器路径 `C:\Users\chenpeng\miniconda3\envs\kan\python.exe`（`3.9.25`）。
+3. CPU：`12th Gen Intel(R) Core(TM) i5-12500H`。
+4. 内存：`16 GB`。
+5. 深度学习运行时：`PyTorch 2.1.2+cpu`（CPU 路径）。
+
 ### 3.1 完整单因素消融
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.ablation_runner --quiet
 ```
 
@@ -61,7 +70,8 @@ python -m scripts.ablation_runner --quiet
 
 若希望显式固定所有变体共享的 `AppConfig`，建议传入：
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml
 ```
 
@@ -72,7 +82,8 @@ python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml
 
 ### 3.2 仅聚合已有结果
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.ablation_runner --aggregate-only --output-dir outputs/benchmark_ablation
 ```
 
@@ -80,7 +91,8 @@ python -m scripts.ablation_runner --aggregate-only --output-dir outputs/benchmar
 
 ### 3.3 LayerwiseFT 专项分析
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.analyze_layerwiseft --ablation-dir outputs/benchmark_ablation --seeds 42,52,62
 ```
 
@@ -90,7 +102,8 @@ python -m scripts.analyze_layerwiseft --ablation-dir outputs/benchmark_ablation 
 
 ### 3.4 改进版 LayerwiseFT 比较
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.compare_layerwiseft_improved --ablation-dir outputs/benchmark_ablation --seeds 42,52,62 --quiet
 ```
 
@@ -104,7 +117,8 @@ python -m scripts.compare_layerwiseft_improved --ablation-dir outputs/benchmark_
 
 若 `layerwiseft_esreg` 已存在，可跳过重新训练：
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.compare_layerwiseft_improved --ablation-dir outputs/benchmark_ablation --seeds 42,52,62 --skip-run
 ```
 
@@ -125,7 +139,8 @@ python -m scripts.compare_layerwiseft_improved --ablation-dir outputs/benchmark_
 
 若用于论文统计，常见设置为：
 
-```bash
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml --stagewise-seeds 42,52,62 --quiet
 ```
 

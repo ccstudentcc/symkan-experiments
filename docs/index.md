@@ -9,6 +9,16 @@
 3. 配置来源口径：自动默认来源仅 `configs/symkanbenchmark.default.yaml`；`configs/ablation_runner.default.yaml` 与 `configs/benchmark_ab/*.yaml` 均为显式模板，需通过 `--config` 传入。
 4. 跨版本指标口径：仅将 `export_wall_time_s` 语义映射到 `symbolize_wall_time_s`；`run_total_wall_time_s` 为工程版新增字段，历史版无同名可比项。
 
+## 0.1 文档写作规范速查
+
+1. 代码块语言：命令示例统一使用 `powershell` 代码块，不使用 `bash` / `sh` / `shell`。
+2. 运行目录注释：每个命令代码块首行必须注明 `# 运行目录：仓库根目录（symkan-experiments/）`。
+3. 命令换行风格：多行命令统一使用 PowerShell 续行符 `` ` ``，不使用反斜杠 `\`。
+4. 参考环境放置规则：
+   - 执行类文档（如 `symkanbenchmark_usage.md`、`ablation_usage.md`、`full_experiment_runbook.md`）应在“运行方式/运行入口”章节前给出“参考环境（用于结果解释）”。
+   - 报告类文档应在“研究设定与口径/默认设定”章节给出设备与运行时环境。
+   - 同一轮实验复测使用同一套环境描述，避免跨文档表述不一致。
+
 ## 1. 建议起始阅读路径
 
 对于首次接触本仓库的读者，建议按如下顺序建立整体认知：
