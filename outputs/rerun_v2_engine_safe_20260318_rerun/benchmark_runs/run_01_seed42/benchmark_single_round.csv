@@ -1,0 +1,6 @@
+﻿name,time_mean_s,time_std_s,rss_delta_mean_mb,gpu_peak_mean_mb
+legacy_numpy_path,1.762704066666667,0.7384529094354616,0.08723958333333333,
+fast_tensor_path,2.2579833666666596,0.0780017702835117,0.0390625,
+model_acc_ds_current,2.163048100000007,0.06361819087812765,0.0,
+validate_formula_first,0.6928683999999805,0.0,0.671875,
+validate_formula_cached,0.6917040999999813,0.0,0.0,
