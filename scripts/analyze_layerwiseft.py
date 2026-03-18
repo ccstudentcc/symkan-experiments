@@ -428,7 +428,7 @@ def main() -> None:
   结果取决于 seed 决定的随机游走方向，因此方差更大。
 
   【早停与改进方向建议】
-  1. 为层间微调引入验证集早停（类似 stagewise_train 的 --use-validation）
+  1. 为层间微调引入验证集早停（类似 stagewise_train 的 validation-driven 配置）
   2. 加入轻量正则化：lamb=1e-5（仅防止过拟合，不破坏稀疏性）
   3. 将层间微调步数从 200 缩短至 50~100，减小过拟合窗口
   4. 最根本的替代方案：用全局 affine 微调替代逐层微调——

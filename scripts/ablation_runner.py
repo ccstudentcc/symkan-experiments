@@ -58,6 +58,12 @@ def ensure_dir(path: Path) -> Path:
     return path
 
 
+def normalize_optional_path(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    return str(Path(raw).resolve())
+
+
 def _format_mean_std(mean: float, std: float, ndigits: int = 4) -> str:
     if not np.isfinite(mean):
         return "nan"
@@ -174,13 +180,13 @@ def summarize_results(raw_df: pd.DataFrame) -> pd.DataFrame:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run single-factor ablation matrix for symkan.")
+    parser.add_argument("--config", default=None, help="传递给 symkanbenchmark.py 的 AppConfig YAML 路径")
     parser.add_argument(
         "--variants",
         default="full,wostagewise,wopruning,wocompact,wolayerwiseft",
         help="Comma-separated variant keys",
     )
     parser.add_argument("--stagewise-seeds", default="42,52,62")
-    parser.add_argument("--global-seed", type=int, default=123)
     parser.add_argument("--output-dir", default=DEFAULT_BENCHMARK_ABLATION_DIR)
     parser.add_argument("--python", default=sys.executable, help="Python executable path")
     parser.add_argument("--quiet", action="store_true")
@@ -193,38 +199,44 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
+def parse_ablation_cli_config(argv: List[str] | None = None) -> argparse.Namespace:
     parser = build_parser()
-    args = parser.parse_args()
+    namespace = parser.parse_args(argv)
+    if namespace.quiet:
+        namespace.verbose = False
+    return namespace
 
+
+def run_ablation(config: argparse.Namespace) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     output_root = resolve_preferred_dir(
-        str(args.output_dir),
+        str(config.output_dir),
         repo_root=repo_root,
         default_dir=DEFAULT_BENCHMARK_ABLATION_DIR,
         legacy_dir=LEGACY_BENCHMARK_ABLATION_DIR,
     )
     ensure_dir(output_root)
 
-    variant_keys = parse_csv_list(args.variants)
+    variant_keys = parse_csv_list(config.variants)
     invalid = [key for key in variant_keys if key not in VARIANT_SPECS]
     if invalid:
         raise ValueError(f"unknown variants: {invalid}")
 
     common_args = [
         "--stagewise-seeds",
-        args.stagewise_seeds,
-        "--global-seed",
-        str(args.global_seed),
+        config.stagewise_seeds,
     ]
-    if args.quiet:
+    config_path = normalize_optional_path(config.config)
+    if config_path:
+        common_args.extend(["--config", config_path])
+    if config.quiet:
         common_args.append("--quiet")
-    if args.verbose and not args.quiet:
+    if config.verbose and not config.quiet:
         common_args.append("--verbose")
 
     all_frames = []
     for key in variant_keys:
-        if args.aggregate_only:
+        if config.aggregate_only:
             variant_dir = output_root / key
             if not variant_dir.exists():
                 print(f"[ablation] skip {key}: directory not found ({variant_dir})")
@@ -237,7 +249,7 @@ def main() -> None:
                 output_root=output_root,
                 variant_key=key,
                 common_args=common_args,
-                python_executable=args.python,
+                python_executable=config.python,
             )
         frame = collect_variant_results(variant_dir, key)
         all_frames.append(frame)
@@ -255,6 +267,11 @@ def main() -> None:
 
     print(f"[ablation] raw saved: {raw_path}")
     print(f"[ablation] summary saved: {summary_path}")
+
+
+def main() -> None:
+    config = parse_ablation_cli_config()
+    run_ablation(config)
 
 
 if __name__ == "__main__":

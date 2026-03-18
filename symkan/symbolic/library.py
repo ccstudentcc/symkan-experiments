@@ -21,6 +21,7 @@ FULL_LIB = EXPRESSIVE_LIB
 
 
 _CUSTOM_REGISTERED = False
+_SAFE_EXPR_PATTERN = _re.compile(r"^[0-9A-Za-z_+\-*/().,^ \t]+$")
 
 
 def register_custom_functions():
@@ -49,7 +50,18 @@ def register_custom_functions():
     )
 
 
+def _is_safe_expression_text(expr) -> bool:
+    text = str(expr).strip()
+    if not text:
+        return False
+    if "__" in text:
+        return False
+    return bool(_SAFE_EXPR_PATTERN.fullmatch(text))
+
+
 def _is_nontrivial_expr(expr):
+    if not _is_safe_expression_text(expr):
+        return False
     try:
         sx = sp.sympify(expr)
         if sx is sp.S.Zero or sx.is_zero:
@@ -71,6 +83,8 @@ def count_expression_complexity(expr):
     Returns:
         int: 表达式复杂度分数，越大表示结构越复杂。
     """
+    if not _is_safe_expression_text(expr):
+        return 1
     try:
         sx = sp.sympify(expr)
     except Exception:

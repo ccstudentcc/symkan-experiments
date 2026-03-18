@@ -1,17 +1,47 @@
-"""Structured runtime configuration for symkan scripts."""
+"""Structured runtime config for symkan internals."""
 
-from symkan.config.schema import BenchmarkConfigModel, DEFAULT_CONFIG, PYDANTIC_AVAILABLE
+from symkan.config.exceptions import ConfigError
 from symkan.config.loader import (
-    BenchmarkConfigError,
-    apply_config_defaults,
-    load_benchmark_config,
+    load_app_config,
+    load_config,
+    preprocess_yaml_text,
+    validate_app_config,
+    validate_stagewise_config,
+    validate_symbolize_config,
+    validate_train_config,
+)
+from symkan.config.schema import (
+    AppConfig,
+    DataConfig,
+    EvaluationConfig,
+    LibraryConfig,
+    ModelConfig,
+    PYDANTIC_AVAILABLE,
+    RuntimeConfig,
+    StagewiseConfig,
+    SymbolizeConfig,
+    TrainConfig,
+    WorkflowConfig,
 )
 
 __all__ = [
-    "BenchmarkConfigError",
-    "BenchmarkConfigModel",
-    "DEFAULT_CONFIG",
+    "AppConfig",
+    "ConfigError",
+    "DataConfig",
+    "EvaluationConfig",
+    "LibraryConfig",
+    "ModelConfig",
     "PYDANTIC_AVAILABLE",
-    "apply_config_defaults",
-    "load_benchmark_config",
+    "RuntimeConfig",
+    "StagewiseConfig",
+    "SymbolizeConfig",
+    "TrainConfig",
+    "WorkflowConfig",
+    "load_app_config",
+    "load_config",
+    "preprocess_yaml_text",
+    "validate_app_config",
+    "validate_stagewise_config",
+    "validate_symbolize_config",
+    "validate_train_config",
 ]

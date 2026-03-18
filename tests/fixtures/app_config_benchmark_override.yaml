@@ -1,0 +1,7 @@
+runtime:
+  device: auto
+  global_seed: 123
+symbolize:
+  max_prune_rounds: 30
+  enable_input_compaction: true
+  layerwise_finetune_steps: 60

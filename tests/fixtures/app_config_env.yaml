@@ -1,0 +1,6 @@
+runtime:
+  device: ${SYMKAN_DEVICE:-cpu}
+stagewise:
+  steps_per_stage: 88
+symbolize:
+  target_edges: 47

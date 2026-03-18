@@ -1,3 +1,7 @@
+# ablation_runner.py 现在直接复用 AppConfig。
+# 该示例可直接作为 --config 传给 ablation_runner.py，
+# 具体的 variants / output-dir / stagewise-seeds 则通过 CLI 传入。
+
 runtime:
   device: auto
   global_seed: 123
@@ -51,26 +55,6 @@ stagewise:
   post_prune_ft_steps: 50
   sym_target_edges: 50
   acc_weight: 0.5
-  use_validation: false
-  validation_ratio: 0.15
-  validation_seed: null
-  adaptive_threshold: false
-  threshold_base_step: 0.005
-  threshold_min: 0.001
-  threshold_max: 0.1
-  success_boost: 0.5
-  failure_penalty: 0.3
-  min_gain_threshold: 3
-  max_prune_attempts: 20
-  adaptive_lamb: false
-  min_lamb_ratio: 0.3
-  max_lamb_ratio: 1.5
-  adaptive_ft: false
-  min_ft_ratio: 0.3
-  stage_early_stop: false
-  stage_early_stop_patience: 2
-  stage_early_stop_min_acc_gain: 0.002
-  stage_early_stop_edge_buffer: 0
 
 symbolize:
   target_edges: 90

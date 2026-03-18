@@ -1,48 +1,96 @@
+# symkan AppConfig template
+# This file describes algorithm/runtime inputs consumed by the library and benchmark tools.
+
 runtime:
+  # Device selection for model construction and training: auto / cpu / cuda / cuda:0
   device: auto
+  # Global seed used by the benchmark script before each run.
   global_seed: 123
+  # Seed used for the baseline dense model before feature filtering.
   baseline_seed: 123
+  # Batch size for training and symbolic fitting. Use 0 to delegate to default_batch_size().
   batch_size: 0
+  # Silence training / symbolic stdout from scripts.
   quiet: false
+  # Print detailed stagewise / symbolic logs.
   verbose: false
 
 data:
+  # Training feature matrix path (.npy).
   x_train: data/X_train.npy
+  # Test feature matrix path (.npy).
   x_test: data/X_test.npy
+  # Training labels path (.npy), either class ids or one-hot labels.
   y_train: data/Y_train_cat.npy
+  # Test labels path (.npy), either class ids or one-hot labels.
   y_test: data/Y_test_cat.npy
+  # Auto-download / generate MNIST files when local numpy files are missing.
   auto_fetch_mnist: true
-  # Default safety boundary: auto-fetch only writes under repo data/.
-  # Set true only when you intentionally want to write missing files outside data/.
+  # Default safety boundary: auto-fetch may only create missing files under repo data/.
+  # Set true only when you intentionally want auto-fetch to write outside data/.
   allow_auto_fetch_outside_data_dir: false
+  # Which MNIST classes to keep when auto-generating the dataset.
   mnist_classes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 model:
+  # Hidden width used before symbolic compression.
   inner_dim: 16
+  # KAN spline grid size.
   grid: 5
+  # KAN spline order.
   k: 3
+  # Dense baseline training steps used for feature ranking.
   baseline_steps: 150
+  # Dense baseline learning rate.
   baseline_lr: 0.02
+  # Dense baseline sparsity regularization.
   baseline_lamb: 0.0001
+  # Dense baseline logging interval.
   baseline_log: 12
+  # Number of top-ranked inputs kept before stagewise training.
   top_k: 120
 
 library:
+  # Symbolic library preset: layered / fast / expressive / full
   lib_preset: layered
 
 workflow:
+  # When true, skip stagewise_train() and run a single end-to-end fit.
   disable_stagewise_train: false
+  # End-to-end fallback training steps. Use 0 to infer from stagewise schedule length.
   e2e_steps: 0
+  # End-to-end fallback learning rate. Use 0 to infer from stagewise lr schedule.
   e2e_lr: 0.0
+  # End-to-end fallback sparsity regularization. Use -1 to infer from stagewise lamb schedule.
   e2e_lamb: -1.0
 
 evaluation:
+  # Sample count used by formula numeric validation.
   validate_n_sample: 500
 
+train:
+  # Defaults for safe_fit()-style training helpers.
+  opt: Adam
+  steps: 50
+  lr: 0.01
+  lamb: 0.0
+  lamb_l1: 1.0
+  lamb_entropy: 0.0
+  batch: -1
+  update_grid: false
+  singularity_avoiding: true
+  log: 10
+
 stagewise:
+  # Width is usually injected by the caller; keep null in YAML unless fixed manually.
+  width: null
+  grid: 5
+  k: 3
+  seed: 123
   lamb_schedule: [0.0, 0.0, 0.00002, 0.00005, 0.0001, 0.0002, 0.0003, 0.0005, 0.0007, 0.001]
   lr_schedule: [0.02, 0.015, 0.012, 0.01, 0.008, 0.006, 0.005, 0.004, 0.003, 0.002]
   steps_per_stage: 60
+  batch_size: null
   prune_start_stage: 3
   target_edges: 120
   prune_edge_threshold_init: 0.003
@@ -51,9 +99,14 @@ stagewise:
   post_prune_ft_steps: 50
   sym_target_edges: 50
   acc_weight: 0.5
+  keep_topk_models: 0
+  keep_full_snapshots: false
+  use_disk_clone: false
+  clone_ckpt_path: _safe_copy_temp
   use_validation: false
   validation_ratio: 0.15
   validation_seed: null
+  validation_min_samples: 10
   adaptive_threshold: false
   threshold_base_step: 0.005
   threshold_min: 0.001
@@ -71,13 +124,21 @@ stagewise:
   stage_early_stop_patience: 2
   stage_early_stop_min_acc_gain: 0.002
   stage_early_stop_edge_buffer: 0
+  verbose: true
 
 symbolize:
+  # Target sparsity before symbolic conversion.
   target_edges: 90
   max_prune_rounds: 30
+  # Custom libraries can be injected directly; null means use the preset resolved by scripts.
+  lib: null
+  lib_hidden: null
+  lib_output: null
   weight_simple: 0.1
   finetune_steps: 50
   finetune_lr: 0.0005
+  affine_finetune_steps: 200
+  affine_finetune_lr_schedule: [0.003, 0.001, 0.0005, 0.0002]
   # Technical default for comparison workflows; project-level recommendation
   # for typical 2-layer KAN often sets this to 0.
   layerwise_finetune_steps: 60
@@ -90,8 +151,7 @@ symbolize:
   layerwise_early_stop_min_delta: 0.001
   layerwise_eval_interval: 20
   layerwise_validation_n_sample: 300
-  affine_finetune_steps: 200
-  affine_finetune_lr_schedule: [0.003, 0.001, 0.0005, 0.0002]
+  batch_size: null
   parallel_mode: auto
   parallel_workers: null
   parallel_min_tasks: 16
@@ -113,3 +173,4 @@ symbolize:
   heavy_ft_early_stop_patience: 2
   heavy_ft_early_stop_min_delta: 0.0005
   collect_timing: true
+  verbose: true

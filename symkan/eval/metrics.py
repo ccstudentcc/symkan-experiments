@@ -5,7 +5,7 @@ import pandas as pd
 import sympy as sp
 from sklearn.metrics import auc, roc_curve
 
-from symkan.core import model_logits
+from symkan.core import model_logits, model_logits_ds
 from symkan.symbolic.library import collect_valid_formulas
 
 
@@ -52,8 +52,13 @@ def validate_formula_numerically(model, formulas, dataset, n_sample: int = 500):
     if not valid:
         return None
 
-    X = dataset["test_input"][:n_sample].detach().cpu().numpy()
-    y_model = model(dataset["test_input"][:n_sample]).detach().cpu().numpy()
+    test_input = dataset["test_input"][:n_sample]
+    actual_n = int(test_input.shape[0])
+    if actual_n <= 0:
+        return pd.DataFrame(columns=["index", "r2", "complexity", "numerically_unstable"])
+
+    X = test_input.detach().cpu().numpy()
+    y_model = model_logits_ds(model, {"test_input": test_input}, split="test").detach().cpu().numpy()
 
     n_feat = X.shape[1]
 
@@ -63,7 +68,7 @@ def validate_formula_numerically(model, formulas, dataset, n_sample: int = 500):
             f = _get_compiled_formula(item["expr"], n_feat)
             y_sym = f(*[X[:, i] for i in range(n_feat)])
             if isinstance(y_sym, (int, float)):
-                y_sym = np.full(n_sample, y_sym)
+                y_sym = np.full(actual_n, y_sym)
             y_sym = np.array(y_sym, dtype=np.float64).flatten()
 
             has_extreme = bool(np.any(np.abs(y_sym) > 1e6) or np.any(np.isnan(y_sym)) or np.any(np.isinf(y_sym)))
@@ -71,7 +76,7 @@ def validate_formula_numerically(model, formulas, dataset, n_sample: int = 500):
             y_sym = np.nan_to_num(y_sym, nan=0.0, posinf=100.0, neginf=-100.0)
 
             idx = item["index"]
-            y_ref = y_model[:, idx] if idx < y_model.shape[1] else np.zeros(n_sample)
+            y_ref = y_model[:, idx] if idx < y_model.shape[1] else np.zeros(actual_n)
             ss_res = np.sum((y_ref - y_sym) ** 2)
             ss_tot = np.sum((y_ref - np.mean(y_ref)) ** 2) + 1e-12
             r2 = 1.0 - ss_res / ss_tot

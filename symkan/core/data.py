@@ -5,6 +5,7 @@ from typing import Optional
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from .runtime import get_device, resolve_device
 
@@ -91,6 +92,82 @@ def _split_train_validation(
     )
 
 
+def _to_label_tensor(y, *, device: torch.device, split: str) -> torch.Tensor:
+    tensor = torch.as_tensor(y, device=device)
+    if tensor.ndim == 1:
+        if tensor.numel() == 0:
+            raise ValueError(f"{split} labels cannot be empty")
+        if tensor.dtype.is_floating_point:
+            rounded = tensor.round()
+            if not torch.allclose(tensor, rounded):
+                raise ValueError(f"{split} 1D labels must be integer class indices")
+            tensor = rounded.to(torch.long)
+        else:
+            tensor = tensor.to(torch.long)
+        if torch.any(tensor < 0):
+            raise ValueError(f"{split} labels must be non-negative class indices")
+        return tensor
+    if tensor.ndim == 2:
+        if tensor.shape[1] <= 0:
+            raise ValueError(f"{split} 2D labels must have non-zero class dimension")
+        return tensor.to(torch.float32)
+    raise ValueError(
+        f"{split} labels must be rank-1 class indices or rank-2 one-hot/probability matrix; "
+        f"got rank={tensor.ndim}"
+    )
+
+
+def _to_one_hot_if_needed(
+    train_label: torch.Tensor,
+    test_label: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    train_is_index = train_label.ndim == 1
+    test_is_index = test_label.ndim == 1
+
+    if not train_is_index and not test_is_index:
+        if train_label.shape[1] != test_label.shape[1]:
+            raise ValueError(
+                "train/test 2D labels must use the same class dimension; "
+                f"got train={train_label.shape[1]}, test={test_label.shape[1]}"
+            )
+        return train_label, test_label
+
+    if train_is_index and test_is_index:
+        n_classes = int(max(train_label.max().item(), test_label.max().item())) + 1
+        return (
+            F.one_hot(train_label, num_classes=n_classes).to(torch.float32),
+            F.one_hot(test_label, num_classes=n_classes).to(torch.float32),
+        )
+
+    if not train_is_index:
+        n_classes = int(train_label.shape[1])
+        if torch.any(test_label >= n_classes):
+            raise ValueError(
+                f"test labels contain class index >= train class dimension ({n_classes})"
+            )
+        return train_label, F.one_hot(test_label, num_classes=n_classes).to(torch.float32)
+
+    n_classes = int(test_label.shape[1])
+    if torch.any(train_label >= n_classes):
+        raise ValueError(
+            f"train labels contain class index >= test class dimension ({n_classes})"
+        )
+    return F.one_hot(train_label, num_classes=n_classes).to(torch.float32), test_label
+
+
+def _validate_sample_count(
+    x: torch.Tensor,
+    y: torch.Tensor,
+    *,
+    split: str,
+) -> None:
+    if x.shape[0] != y.shape[0]:
+        raise ValueError(
+            f"{split} input/label sample count mismatch: "
+            f"input={int(x.shape[0])}, labels={int(y.shape[0])}"
+        )
+
+
 def build_dataset(
     Xtr,
     Ytr,
@@ -119,7 +196,12 @@ def build_dataset(
     """
     dev = resolve_device(_resolve_device(device))
     train_input = torch.as_tensor(Xtr, dtype=torch.float32, device=dev)
-    train_label = torch.as_tensor(Ytr, dtype=torch.float32, device=dev)
+    test_input = torch.as_tensor(Xte, dtype=torch.float32, device=dev)
+    train_label_raw = _to_label_tensor(Ytr, device=dev, split="train")
+    test_label_raw = _to_label_tensor(Yte, device=dev, split="test")
+    train_label, test_label = _to_one_hot_if_needed(train_label_raw, test_label_raw)
+    _validate_sample_count(train_input, train_label, split="train")
+    _validate_sample_count(test_input, test_label, split="test")
     train_input, train_label, val_input, val_label = _split_train_validation(
         train_input,
         train_label,
@@ -132,6 +214,6 @@ def build_dataset(
         "train_label": train_label,
         "val_input": val_input,
         "val_label": val_label,
-        "test_input": torch.as_tensor(Xte, dtype=torch.float32, device=dev),
-        "test_label": torch.as_tensor(Yte, dtype=torch.float32, device=dev),
+        "test_input": test_input,
+        "test_label": test_label,
     }

@@ -5,6 +5,10 @@ Y_train_cat.npy
 data/
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.pytest_tmp/
+outputs/test_tmp/
+outputs/pytest_tmp_run_01/
 
 MNIST/raw/
 benchmark_runs/

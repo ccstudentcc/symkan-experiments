@@ -13,6 +13,8 @@ from scripts.project_paths import (
     DEFAULT_BENCHMARK_ABLATION_DIR,
     LEGACY_BENCHMARK_ABLATION_DIR,
     resolve_preferred_dir,
+    resolve_named_child,
+    validate_child_name,
 )
 
 
@@ -30,8 +32,8 @@ def ensure_dir(path: Path) -> Path:
     return path
 
 
-def run_improved_variant(repo_root: Path, args: argparse.Namespace) -> Path:
-    out_dir = ensure_dir((repo_root / args.ablation_dir / args.new_variant).resolve())
+def run_improved_variant(repo_root: Path, ablation_root: Path, args: argparse.Namespace) -> Path:
+    out_dir = ensure_dir(resolve_named_child(ablation_root, args.new_variant, kind="variant name"))
     cmd = [
         args.python,
         str(repo_root / "symkanbenchmark.py"),
@@ -88,7 +90,7 @@ def find_runs(variant_dir: Path, seeds: List[int]) -> List[Tuple[int, Path]]:
 
 
 def load_variant_frame(ablation_root: Path, variant: str, seeds: List[int]) -> pd.DataFrame:
-    variant_dir = (ablation_root / variant).resolve()
+    variant_dir = resolve_named_child(ablation_root, variant, kind="variant name")
     if not variant_dir.exists():
         raise FileNotFoundError(f"variant directory not found: {variant_dir}")
 
@@ -209,6 +211,7 @@ def main() -> None:
     parser.add_argument("--layerwise-eval-interval", type=int, default=20)
     parser.add_argument("--layerwise-validation-n-sample", type=int, default=300)
     args = parser.parse_args()
+    args.new_variant = validate_child_name(args.new_variant, kind="variant name")
 
     repo_root = Path(__file__).resolve().parents[1]
     ablation_root = resolve_preferred_dir(
@@ -220,7 +223,7 @@ def main() -> None:
     seeds = parse_csv_ints(args.seeds)
 
     if not args.skip_run:
-        run_improved_variant(repo_root, args)
+        run_improved_variant(repo_root, ablation_root, args)
 
     out_dir = ensure_dir(ablation_root / "layerwiseft_improved_analysis")
     print("[analyze] loading variants...")

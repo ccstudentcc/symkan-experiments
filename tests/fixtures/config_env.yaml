@@ -1,4 +1,0 @@
-runtime:
-  output_dir: ${SYMKAN_OUTPUT_DIR}
-  stagewise_seeds: ${SYMKAN_STAGEWISE_SEEDS:-42,52,62}
-

@@ -10,13 +10,29 @@ import numpy as np
 import pandas as pd
 import torch
 
-from symkan.core import get_n_edge, model_acc_ds, safe_fit
+from symkan.core import get_n_edge, model_acc_ds, safe_fit_report
+from symkan.config import AppConfig
+from symkan.core.train import format_fit_failure
 from symkan.core.runtime import default_batch_size
 from symkan.io import clone_model
 from symkan.pruning import safe_attribute
 from .compact import compact_inputs_for_symbolic
 from .library import LIB_HIDDEN, LIB_OUTPUT, collect_valid_formulas, register_custom_functions
 from .search import fast_symbolic
+
+
+def _fit_or_raise(context: str, **fit_kwargs):
+    report = safe_fit_report(**fit_kwargs)
+    if report.success:
+        return report.result
+    raise RuntimeError(format_fit_failure(report, context=context))
+
+
+def _fit_or_error(context: str, **fit_kwargs):
+    report = safe_fit_report(**fit_kwargs)
+    if report.success:
+        return report.result, None
+    return None, format_fit_failure(report, context=context)
 
 
 def _count_effective_edges(work):
@@ -122,9 +138,10 @@ def _heavy_finetune(
         if phase_steps <= 0:
             continue
 
-        safe_fit(
-            work,
-            dataset,
+        _, fit_error = _fit_or_error(
+            f"heavy_finetune_phase_{phase_idx}",
+            model=work,
+            dataset=dataset,
             opt="Adam",
             steps=phase_steps,
             lr=lr,
@@ -134,6 +151,10 @@ def _heavy_finetune(
             singularity_avoiding=True,
             log=max(1, phase_steps // 5),
         )
+        if fit_error is not None:
+            if verbose:
+                print(f"[heavy_finetune] stop at phase={phase_idx}: {fit_error}")
+            break
 
         acc_now = model_acc_ds(work, dataset)
         improved = acc_now > (best_acc + float(early_stop_min_delta))
@@ -159,49 +180,7 @@ def _heavy_finetune(
 def symbolize_pipeline(
     model,
     dataset,
-    target_edges=60,
-    max_prune_rounds=40,
-    lib=None,
-    lib_hidden=None,
-    lib_output=None,
-    weight_simple=0.0,
-    finetune_steps=30,
-    finetune_lr=0.005,
-    affine_finetune_steps=600,
-    affine_finetune_lr_schedule=None,
-    layerwise_finetune_steps=60,
-    layerwise_finetune_lr=0.005,
-    layerwise_finetune_lamb=1e-5,
-    layerwise_use_validation=True,
-    layerwise_validation_ratio=0.15,
-    layerwise_validation_seed=None,
-    layerwise_early_stop_patience=2,
-    layerwise_early_stop_min_delta=1e-3,
-    layerwise_eval_interval=20,
-    layerwise_validation_n_sample=300,
-    batch_size=None,
-    parallel_mode="auto",
-    parallel_workers=None,
-    parallel_min_tasks=16,
-    enable_input_compaction=True,
-    prune_collapse_floor=0.6,
-    prune_eval_interval=1,
-    prune_attr_sample_adaptive=False,
-    prune_attr_sample_min=512,
-    prune_attr_sample_max=2048,
-    prune_threshold_start=0.02,
-    prune_threshold_end=0.03,
-    prune_max_drop_ratio_per_round=1.0,
-    prune_threshold_backoff=0.7,
-    prune_adaptive_threshold=False,
-    prune_adaptive_step=0.0,
-    prune_adaptive_acc_drop_tol=0.02,
-    prune_adaptive_min_edges_gain=1,
-    prune_adaptive_low_gain_patience=4,
-    heavy_ft_early_stop_patience=0,
-    heavy_ft_early_stop_min_delta=1e-4,
-    collect_timing=True,
-    verbose=True,
+    config: AppConfig,
 ):
     """执行 symkan 主符号化流水线。
 
@@ -210,55 +189,57 @@ def symbolize_pipeline(
     Args:
         model: 待符号化的 KAN/symkan 模型。
         dataset: 由 ``build_dataset`` 构建的数据字典。
-        target_edges: 目标边数。
-        max_prune_rounds: 最大剪枝轮数。
-        lib: 统一函数库。
-        lib_hidden: 隐藏层函数库。
-        lib_output: 输出层函数库。
-        weight_simple: 函数复杂度偏好权重。
-        finetune_steps: 每轮剪枝后的短微调步数。
-        finetune_lr: 每轮剪枝后的短微调学习率。
-        affine_finetune_steps: 末端强化微调总步数。
-        affine_finetune_lr_schedule: 强化微调学习率序列。
-        layerwise_finetune_steps: 每层符号化后微调步数。
-        layerwise_finetune_lr: 层间微调学习率。
-        layerwise_finetune_lamb: 层间微调稀疏正则权重。
-        layerwise_use_validation: 是否启用验证集驱动的层间微调早停。
-        layerwise_validation_ratio: 当无显式 val split 时，从 train 切分验证集的比例。
-        layerwise_validation_seed: 层间微调验证集切分随机种子。
-        layerwise_early_stop_patience: 层间微调早停耐心轮数。
-        layerwise_early_stop_min_delta: 层间微调 R² 最小改进阈值。
-        layerwise_eval_interval: 层间微调每隔多少步评估一次验证 R²。
-        layerwise_validation_n_sample: 层间微调验证 R² 评估样本数上限。
-        batch_size: 批大小；为空时自动使用默认值。
-        parallel_mode: 并行模式配置，当前实现会强制回退到串行。
-        parallel_workers: 期望 worker 数。
-        parallel_min_tasks: 启用并行的最小任务阈值。
-        enable_input_compaction: 是否在符号化前执行输入压缩。
-        prune_collapse_floor: 精度崩塌保护底线，当模型精度低于初始精度乘以该系数时回滚并中止剪枝；
-            设为 0.0 可完全关闭该保护，适用于消融实验中预期模型从稠密状态起步的情形。
-        prune_eval_interval: 剪枝评估间隔。
-        prune_attr_sample_adaptive: 是否启用归因采样分级。
-        prune_attr_sample_min: 归因最小采样数。
-        prune_attr_sample_max: 归因最大采样数。
-        prune_threshold_start: 渐进剪枝阈值起点。
-        prune_threshold_end: 渐进剪枝阈值终点。
-        prune_max_drop_ratio_per_round: 单轮允许的最大边数降幅比例。
-        prune_threshold_backoff: 超降幅时的阈值回退倍数。
-        prune_adaptive_threshold: 是否启用自适应阈值控制。
-        prune_adaptive_step: 自适应阈值基础步长；小于等于 0 时自动估计。
-        prune_adaptive_acc_drop_tol: 自适应判定中的单轮允许精度回落。
-        prune_adaptive_min_edges_gain: 自适应判定中的单轮最小有效剪枝收益。
-        prune_adaptive_low_gain_patience: 连续低收益轮数达到该值时提前停止剪枝。
-        heavy_ft_early_stop_patience: 强化微调早停耐心轮数。
-        heavy_ft_early_stop_min_delta: 早停最小改进阈值。
-        collect_timing: 是否收集详细耗时统计。
-        verbose: 是否打印详细日志。
+        config: 统一运行配置对象；实际使用 ``config.symbolize``。
 
     Returns:
         dict: 包含模型、表达式、边数、精度、轨迹、统计与耗时信息。
     """
     register_custom_functions()
+
+    symbolize_config = config.symbolize
+    target_edges = symbolize_config.target_edges
+    max_prune_rounds = symbolize_config.max_prune_rounds
+    lib = symbolize_config.lib
+    lib_hidden = symbolize_config.lib_hidden
+    lib_output = symbolize_config.lib_output
+    weight_simple = symbolize_config.weight_simple
+    finetune_steps = symbolize_config.finetune_steps
+    finetune_lr = symbolize_config.finetune_lr
+    affine_finetune_steps = symbolize_config.affine_finetune_steps
+    affine_finetune_lr_schedule = symbolize_config.affine_finetune_lr_schedule
+    layerwise_finetune_steps = symbolize_config.layerwise_finetune_steps
+    layerwise_finetune_lr = symbolize_config.layerwise_finetune_lr
+    layerwise_finetune_lamb = symbolize_config.layerwise_finetune_lamb
+    layerwise_use_validation = symbolize_config.layerwise_use_validation
+    layerwise_validation_ratio = symbolize_config.layerwise_validation_ratio
+    layerwise_validation_seed = symbolize_config.layerwise_validation_seed
+    layerwise_early_stop_patience = symbolize_config.layerwise_early_stop_patience
+    layerwise_early_stop_min_delta = symbolize_config.layerwise_early_stop_min_delta
+    layerwise_eval_interval = symbolize_config.layerwise_eval_interval
+    layerwise_validation_n_sample = symbolize_config.layerwise_validation_n_sample
+    batch_size = symbolize_config.batch_size
+    parallel_mode = symbolize_config.parallel_mode
+    parallel_workers = symbolize_config.parallel_workers
+    parallel_min_tasks = symbolize_config.parallel_min_tasks
+    enable_input_compaction = symbolize_config.enable_input_compaction
+    prune_collapse_floor = symbolize_config.prune_collapse_floor
+    prune_eval_interval = symbolize_config.prune_eval_interval
+    prune_attr_sample_adaptive = symbolize_config.prune_attr_sample_adaptive
+    prune_attr_sample_min = symbolize_config.prune_attr_sample_min
+    prune_attr_sample_max = symbolize_config.prune_attr_sample_max
+    prune_threshold_start = symbolize_config.prune_threshold_start
+    prune_threshold_end = symbolize_config.prune_threshold_end
+    prune_max_drop_ratio_per_round = symbolize_config.prune_max_drop_ratio_per_round
+    prune_threshold_backoff = symbolize_config.prune_threshold_backoff
+    prune_adaptive_threshold = symbolize_config.prune_adaptive_threshold
+    prune_adaptive_step = symbolize_config.prune_adaptive_step
+    prune_adaptive_acc_drop_tol = symbolize_config.prune_adaptive_acc_drop_tol
+    prune_adaptive_min_edges_gain = symbolize_config.prune_adaptive_min_edges_gain
+    prune_adaptive_low_gain_patience = symbolize_config.prune_adaptive_low_gain_patience
+    heavy_ft_early_stop_patience = symbolize_config.heavy_ft_early_stop_patience
+    heavy_ft_early_stop_min_delta = symbolize_config.heavy_ft_early_stop_min_delta
+    collect_timing = symbolize_config.collect_timing
+    verbose = symbolize_config.verbose
 
     if batch_size is None:
         batch_size = default_batch_size()
@@ -345,9 +326,10 @@ def symbolize_pipeline(
 
         if n_after != n_before:
             t_fit = time.perf_counter()
-            safe_fit(
-                work,
-                dataset,
+            _, prune_fit_error = _fit_or_error(
+                f"prune_round_{rd}_fit",
+                model=work,
+                dataset=dataset,
                 opt="Adam",
                 steps=finetune_steps,
                 lr=finetune_lr,
@@ -357,6 +339,11 @@ def symbolize_pipeline(
                 singularity_avoiding=True,
                 log=max(1, finetune_steps // 5),
             )
+            if prune_fit_error is not None:
+                work.load_state_dict(snap_prune_state)
+                if collect_timing:
+                    timing["abort_reason"] = prune_fit_error
+                break
             if collect_timing:
                 timing_fit.append({"stage": "prune_round", "round": int(rd), "seconds": float(time.perf_counter() - t_fit)})
 
@@ -470,9 +457,10 @@ def symbolize_pipeline(
             finetune_dataset = dataset
 
         t_pre = time.perf_counter()
-        safe_fit(
-            work,
-            finetune_dataset,
+        _fit_or_raise(
+            "pre_symbolic_fit",
+            model=work,
+            dataset=finetune_dataset,
             opt="Adam",
             steps=100,
             lr=0.005,
@@ -568,20 +556,20 @@ def symbolize_pipeline(
     }
 
 
-def symbolize_pipeline_report(model, dataset, **kwargs):
+def symbolize_pipeline_report(model, dataset, config: AppConfig):
     """返回 ``symbolize_pipeline`` 的结构化报告版本。
 
     Args:
         model: 待符号化模型。
         dataset: 数据集字典。
-        **kwargs: 传递给 ``symbolize_pipeline`` 的其余参数。
+        config: 统一运行配置对象。
 
     Returns:
         SymbolizeResult: 结构化结果对象。
     """
     from symkan.core.types import SymbolizeResult
 
-    result = symbolize_pipeline(model, dataset, **kwargs)
+    result = symbolize_pipeline(model, dataset, config)
     return SymbolizeResult(
         model=result.get("model"),
         formulas=result.get("formulas"),

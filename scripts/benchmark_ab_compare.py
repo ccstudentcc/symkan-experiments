@@ -12,11 +12,13 @@ from scripts.project_paths import (
     DEFAULT_BENCHMARK_AB_DIR,
     LEGACY_BENCHMARK_AB_DIR,
     resolve_preferred_dir,
+    resolve_named_child,
+    validate_child_name,
 )
 
 
 def _read_runs(root: Path, variant: str) -> pd.DataFrame:
-    path = root / variant / "symkanbenchmark_runs.csv"
+    path = resolve_named_child(root, variant, kind="variant name") / "symkanbenchmark_runs.csv"
     if not path.exists():
         raise FileNotFoundError(f"missing file: {path}")
     df = pd.read_csv(path)
@@ -110,7 +112,7 @@ def _trace_effective_rounds(root: Path, variant: str, seeds: List[int]) -> pd.Da
         )
 
     for idx, seed in enumerate(seeds, start=1):
-        p = root / variant / f"run_{idx:02d}_seed{seed}" / "symbolize_trace.csv"
+        p = resolve_named_child(root, variant, kind="variant name") / f"run_{idx:02d}_seed{seed}" / "symbolize_trace.csv"
         if not p.exists():
             continue
 
@@ -177,8 +179,8 @@ def main() -> None:
         "final_n_edge",
     ]
 
-    baseline_name = args.baseline.strip()
-    variant_names = [v.strip() for v in args.variants.split(",") if v.strip()]
+    baseline_name = validate_child_name(args.baseline, kind="baseline name")
+    variant_names = [validate_child_name(v, kind="variant name") for v in args.variants.split(",") if v.strip()]
 
     baseline_df = _read_runs(root, baseline_name)
     seeds = [int(v) for v in baseline_df["stage_seed"].tolist()]

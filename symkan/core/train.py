@@ -4,9 +4,23 @@
 """
 
 import os
-from typing import Optional
+from typing import Any
 
 from .types import FitReport
+
+
+class SafeFitError(RuntimeError):
+    """Raised when a guarded fit operation fails in strict mode."""
+
+
+def format_fit_failure(report: FitReport, context: str = "safe_fit") -> str:
+    """Format a structured fit failure into a readable error message."""
+
+    error_type = report.error_type or "FitError"
+    error_message = report.error_message or "unknown fit failure"
+    if report.fallback_used:
+        return f"{context} failed after {report.fallback_used} ({error_type}: {error_message})"
+    return f"{context} failed ({error_type}: {error_message})"
 
 
 def _ensure_model_history_path(model):
@@ -22,6 +36,73 @@ def _ensure_model_history_path(model):
     return True
 
 
+def _build_fit_kwargs(
+    dataset,
+    opt: str,
+    steps: int,
+    lr: float,
+    lamb: float,
+    lamb_l1: float,
+    lamb_entropy: float,
+    batch: int,
+    update_grid: bool,
+    singularity_avoiding: bool,
+    log: int,
+) -> dict[str, Any]:
+    kw: dict[str, Any] = dict(
+        dataset=dataset,
+        opt=opt,
+        steps=steps,
+        lr=lr,
+        lamb=lamb,
+        lamb_l1=lamb_l1,
+        lamb_entropy=lamb_entropy,
+        batch=batch,
+        update_grid=update_grid,
+        singularity_avoiding=singularity_avoiding,
+        log=log,
+    )
+    if batch == -1:
+        kw.pop("batch")
+    return kw
+
+
+def _run_fit(model, kw: dict[str, Any]) -> FitReport:
+    try:
+        result = model.fit(**kw)
+        return FitReport(success=True, result=result)
+    except Exception as exc:
+        error = exc
+
+    if "history.txt" in str(error):
+        try:
+            _ensure_model_history_path(model)
+            result = model.fit(**kw)
+            return FitReport(success=True, result=result, fallback_used="history_path_retry")
+        except Exception as retry_exc:
+            error = retry_exc
+
+    if kw.get("update_grid", False):
+        retry_kw = dict(kw)
+        retry_kw["update_grid"] = False
+        try:
+            result = model.fit(**retry_kw)
+            return FitReport(success=True, result=result, fallback_used="grid_update_disabled")
+        except Exception as retry_exc:
+            return FitReport(
+                success=False,
+                error_type=type(retry_exc).__name__,
+                error_message=str(retry_exc),
+                fallback_used="grid_update_disabled",
+            )
+
+    return FitReport(
+        success=False,
+        error_type=type(error).__name__,
+        error_message=str(error),
+    )
+
+
 def safe_fit(
     model,
     dataset,
@@ -35,6 +116,8 @@ def safe_fit(
     update_grid: bool = False,
     singularity_avoiding: bool = True,
     log: int = 10,
+    raise_on_failure: bool = False,
+    context: str = "safe_fit",
 ):
     """带自动降级与容错的训练封装。
 
@@ -51,11 +134,14 @@ def safe_fit(
         update_grid: 是否更新 grid。
         singularity_avoiding: 是否启用奇异点规避。
         log: 日志间隔。
+        raise_on_failure: 为 ``True`` 时，失败直接抛出 ``SafeFitError``。
+        context: 失败消息中的上下文名称。
 
     Returns:
         dict: 训练过程结果字典（失败时返回空字典）。
     """
-    kw = dict(
+    _ensure_model_history_path(model)
+    kw = _build_fit_kwargs(
         dataset=dataset,
         opt=opt,
         steps=steps,
@@ -68,30 +154,15 @@ def safe_fit(
         singularity_avoiding=singularity_avoiding,
         log=log,
     )
-    if batch == -1:
-        kw.pop("batch")
+    report = _run_fit(model, kw)
+    if report.success:
+        return report.result
 
-    _ensure_model_history_path(model)
-
-    try:
-        return model.fit(**kw)
-    except Exception as e:
-        if "history.txt" in str(e):
-            try:
-                _ensure_model_history_path(model)
-                return model.fit(**kw)
-            except Exception as e_retry:
-                e = e_retry
-        if update_grid:
-            print(f"  [safe_fit] grid update 失败 ({e})，关闭 update_grid 重试")
-            kw["update_grid"] = False
-            try:
-                return model.fit(**kw)
-            except Exception as e2:
-                print(f"  [safe_fit] 仍失败 ({e2})，跳过")
-                return {}
-        print(f"  [safe_fit] 训练失败 ({e})，跳过")
-        return {}
+    message = format_fit_failure(report, context=context)
+    if raise_on_failure:
+        raise SafeFitError(message)
+    print(f"  [safe_fit] {message}，跳过")
+    return {}
 
 
 def safe_fit_report(
@@ -127,7 +198,8 @@ def safe_fit_report(
     Returns:
         FitReport: 结构化结果，便于区分成功/失败/降级。
     """
-    kw = dict(
+    _ensure_model_history_path(model)
+    kw = _build_fit_kwargs(
         dataset=dataset,
         opt=opt,
         steps=steps,
@@ -140,38 +212,4 @@ def safe_fit_report(
         singularity_avoiding=singularity_avoiding,
         log=log,
     )
-    if batch == -1:
-        kw.pop("batch")
-
-    _ensure_model_history_path(model)
-
-    try:
-        result = model.fit(**kw)
-        return FitReport(success=True, result=result)
-    except Exception as e:
-        if "history.txt" in str(e):
-            try:
-                _ensure_model_history_path(model)
-                result = model.fit(**kw)
-                return FitReport(success=True, result=result, fallback_used="history_path_retry")
-            except Exception as e_retry:
-                e = e_retry
-
-        if update_grid:
-            kw["update_grid"] = False
-            try:
-                result = model.fit(**kw)
-                return FitReport(success=True, result=result, fallback_used="grid_update_disabled")
-            except Exception as e2:
-                return FitReport(
-                    success=False,
-                    error_type=type(e2).__name__,
-                    error_message=str(e2),
-                    fallback_used="grid_update_disabled",
-                )
-
-        return FitReport(
-            success=False,
-            error_type=type(e).__name__,
-            error_message=str(e),
-        )
+    return _run_fit(model, kw)

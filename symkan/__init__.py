@@ -1,3 +1,3 @@
 """symkan: layered API for symbolic KAN workflows."""
 
-__all__ = ["core", "eval", "io", "pruning", "symbolic", "tuning", "config"]
+__all__ = ["config", "core", "eval", "io", "pruning", "symbolic", "tuning"]

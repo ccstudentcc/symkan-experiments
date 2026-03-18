@@ -2,6 +2,9 @@
 
 import copy
 import io
+import uuid
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Optional
 
 import torch
@@ -10,6 +13,44 @@ from kan import KAN as _KAN
 from kan.Symbolic_KANLayer import SYMBOLIC_LIB as _SYM_LIB
 
 from symkan.core.runtime import get_device, resolve_device
+
+
+DEFAULT_CLONE_CKPT_PREFIX = "_safe_copy_temp"
+_CKPT_SUFFIXES = ("_config.yml", "_state", "_cache_data")
+
+
+def _load_tensor_artifact(path: str, device: torch.device):
+    try:
+        return torch.load(path, map_location=device, weights_only=True)
+    except TypeError:
+        return torch.load(path, map_location=device)
+
+
+def _cleanup_ckpt_artifacts(prefix: Path) -> None:
+    for suffix in _CKPT_SUFFIXES:
+        artifact = Path(f"{prefix}{suffix}")
+        try:
+            artifact.unlink()
+        except FileNotFoundError:
+            continue
+
+
+@contextmanager
+def _checkpoint_prefix(path: str = DEFAULT_CLONE_CKPT_PREFIX):
+    if path != DEFAULT_CLONE_CKPT_PREFIX:
+        prefix = Path(path)
+        prefix.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            yield prefix
+        finally:
+            _cleanup_ckpt_artifacts(prefix)
+        return
+
+    prefix = Path.cwd() / f"symkan-clone-{uuid.uuid4().hex}"
+    try:
+        yield prefix
+    finally:
+        _cleanup_ckpt_artifacts(prefix)
 
 
 def clone_model_in_memory(model, device: Optional[str] = None):
@@ -37,7 +78,7 @@ def clone_model_in_memory(model, device: Optional[str] = None):
     return model_load.to(dev)
 
 
-def clone_model_via_ckpt(model, path: str = "_safe_copy_temp", device: Optional[str] = None):
+def clone_model_via_ckpt(model, path: str = DEFAULT_CLONE_CKPT_PREFIX, device: Optional[str] = None):
     """通过 ckpt 文件路径深拷贝 KAN 模型。
 
     Args:
@@ -49,61 +90,63 @@ def clone_model_via_ckpt(model, path: str = "_safe_copy_temp", device: Optional[
         Any: 模型副本（迁移到目标设备）。
     """
     dev = resolve_device(device or get_device())
-    model.saveckpt(path)
+    with _checkpoint_prefix(path) as ckpt_prefix:
+        prefix = str(ckpt_prefix)
+        model.saveckpt(prefix)
 
-    with open(f"{path}_config.yml", "r", encoding="utf-8") as f:
-        config = _yaml.safe_load(f)
+        with open(f"{prefix}_config.yml", "r", encoding="utf-8") as f:
+            config = _yaml.safe_load(f)
 
-    state = torch.load(f"{path}_state", map_location=dev)
+        state = _load_tensor_artifact(f"{prefix}_state", dev)
 
-    model_load = _KAN(
-        width=config["width"],
-        grid=config["grid"],
-        k=config["k"],
-        mult_arity=config["mult_arity"],
-        base_fun=config["base_fun_name"],
-        symbolic_enabled=config["symbolic_enabled"],
-        affine_trainable=config["affine_trainable"],
-        grid_eps=config["grid_eps"],
-        grid_range=config["grid_range"],
-        sp_trainable=config["sp_trainable"],
-        sb_trainable=config["sb_trainable"],
-        state_id=config["state_id"],
-        auto_save=config["auto_save"],
-        first_init=False,
-        ckpt_path=config["ckpt_path"],
-        round=config["round"] + 1,
-        device=str(dev),
-    )
+        model_load = _KAN(
+            width=config["width"],
+            grid=config["grid"],
+            k=config["k"],
+            mult_arity=config["mult_arity"],
+            base_fun=config["base_fun_name"],
+            symbolic_enabled=config["symbolic_enabled"],
+            affine_trainable=config["affine_trainable"],
+            grid_eps=config["grid_eps"],
+            grid_range=config["grid_range"],
+            sp_trainable=config["sp_trainable"],
+            sb_trainable=config["sb_trainable"],
+            state_id=config["state_id"],
+            auto_save=config["auto_save"],
+            first_init=False,
+            ckpt_path=config["ckpt_path"],
+            round=config["round"] + 1,
+            device=str(dev),
+        )
 
-    model_load.load_state_dict(state)
-    model_load.cache_data = torch.load(f"{path}_cache_data", map_location=dev)
+        model_load.load_state_dict(state)
+        model_load.cache_data = _load_tensor_artifact(f"{prefix}_cache_data", dev)
 
-    depth = len(model_load.width) - 1
-    for l in range(depth):
-        out_dim = model_load.symbolic_fun[l].out_dim
-        in_dim = model_load.symbolic_fun[l].in_dim
-        funs_name = config[f"symbolic.funs_name.{l}"]
-        for j in range(out_dim):
-            for i in range(in_dim):
-                fn = funs_name[j][i]
-                model_load.symbolic_fun[l].funs_name[j][i] = fn
-                if fn in _SYM_LIB:
-                    model_load.symbolic_fun[l].funs[j][i] = _SYM_LIB[fn][0]
-                    model_load.symbolic_fun[l].funs_sympy[j][i] = _SYM_LIB[fn][1]
-                    model_load.symbolic_fun[l].funs_avoid_singularity[j][i] = _SYM_LIB[fn][3]
+        depth = len(model_load.width) - 1
+        for l in range(depth):
+            out_dim = model_load.symbolic_fun[l].out_dim
+            in_dim = model_load.symbolic_fun[l].in_dim
+            funs_name = config[f"symbolic.funs_name.{l}"]
+            for j in range(out_dim):
+                for i in range(in_dim):
+                    fn = funs_name[j][i]
+                    model_load.symbolic_fun[l].funs_name[j][i] = fn
+                    if fn in _SYM_LIB:
+                        model_load.symbolic_fun[l].funs[j][i] = _SYM_LIB[fn][0]
+                        model_load.symbolic_fun[l].funs_sympy[j][i] = _SYM_LIB[fn][1]
+                        model_load.symbolic_fun[l].funs_avoid_singularity[j][i] = _SYM_LIB[fn][3]
 
-    if hasattr(model, "input_id"):
-        model_load.input_id = model.input_id.clone()
+        if hasattr(model, "input_id") and model.input_id is not None:
+            model_load.input_id = model.input_id.clone()
 
-    return model_load.to(dev)
+        return model_load.to(dev)
 
 
 def clone_model(
     model,
     device: Optional[str] = None,
     use_disk_clone: bool = False,
-    ckpt_path: str = "_safe_copy_temp",
+    ckpt_path: str = DEFAULT_CLONE_CKPT_PREFIX,
 ):
     """统一模型克隆入口。
 

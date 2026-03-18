@@ -10,7 +10,8 @@ from typing import Optional
 import numpy as np
 import torch
 
-from symkan.core.train import safe_fit
+from symkan.core import safe_fit_report
+from symkan.core.train import format_fit_failure
 from symkan.core.runtime import default_batch_size
 
 
@@ -183,10 +184,12 @@ def _layerwise_finetune_with_early_stop(
             "early_stopped": False,
             "best_val_r2": float("nan"),
             "last_val_r2": float("nan"),
+            "fit_failed": False,
+            "fit_error": "",
         }
 
     if (not use_validation) or (val_dataset is None):
-        safe_fit(
+        report = safe_fit_report(
             work,
             fit_dataset,
             opt="Adam",
@@ -198,12 +201,24 @@ def _layerwise_finetune_with_early_stop(
             singularity_avoiding=True,
             log=max(1, steps // 5),
         )
+        if not report.success:
+            return {
+                "steps_requested": steps,
+                "steps_used": 0,
+                "early_stopped": False,
+                "best_val_r2": float("nan"),
+                "last_val_r2": float("nan"),
+                "fit_failed": True,
+                "fit_error": format_fit_failure(report, context="layerwise_finetune"),
+            }
         return {
             "steps_requested": steps,
             "steps_used": steps,
             "early_stopped": False,
             "best_val_r2": float("nan"),
             "last_val_r2": float("nan"),
+            "fit_failed": False,
+            "fit_error": "",
         }
 
     step_chunk = max(1, int(eval_interval))
@@ -219,7 +234,7 @@ def _layerwise_finetune_with_early_stop(
 
     while used_steps < steps:
         chunk = min(step_chunk, steps - used_steps)
-        safe_fit(
+        report = safe_fit_report(
             work,
             fit_dataset,
             opt="Adam",
@@ -231,6 +246,17 @@ def _layerwise_finetune_with_early_stop(
             singularity_avoiding=True,
             log=max(1, int(chunk) // 5),
         )
+        if not report.success:
+            work.load_state_dict(best_state)
+            return {
+                "steps_requested": steps,
+                "steps_used": int(used_steps),
+                "early_stopped": False,
+                "best_val_r2": float(best_r2),
+                "last_val_r2": float(last_r2),
+                "fit_failed": True,
+                "fit_error": format_fit_failure(report, context="layerwise_finetune"),
+            }
         used_steps += int(chunk)
 
         last_r2 = _formula_mean_r2(work, val_dataset, n_sample=validation_n_sample)
@@ -257,6 +283,8 @@ def _layerwise_finetune_with_early_stop(
         "early_stopped": bool(early_stopped),
         "best_val_r2": float(best_r2),
         "last_val_r2": float(last_r2),
+        "fit_failed": False,
+        "fit_error": "",
     }
 
 
@@ -357,6 +385,8 @@ def fast_symbolic(
             "early_stopped": False,
             "best_val_r2": float("nan"),
             "last_val_r2": float("nan"),
+            "fit_failed": False,
+            "fit_error": "",
         }
         if result["fixed"] > 0 and l < depth - 1 and layerwise_finetune_steps > 0:
             ft_info = _layerwise_finetune_with_early_stop(
@@ -380,6 +410,8 @@ def fast_symbolic(
             "layerwise_ft_early_stopped": bool(ft_info["early_stopped"]),
             "layerwise_ft_best_val_r2": float(ft_info["best_val_r2"]),
             "layerwise_ft_last_val_r2": float(ft_info["last_val_r2"]),
+            "layerwise_ft_fit_failed": bool(ft_info["fit_failed"]),
+            "layerwise_ft_fit_error": str(ft_info["fit_error"]),
         })
 
     if verbose and all_records:

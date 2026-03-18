@@ -45,23 +45,30 @@ def save_export_bundle(bundle: dict, path: str = "kan_export_bundle.pkl"):
         str: 导出的文件路径。
     """
     with open(path, "wb") as f:
-        pickle.dump(bundle, f)
+        pickle.dump(bundle, f, protocol=pickle.HIGHEST_PROTOCOL)
     return path
 
 
-def load_export_bundle(path: str = "kan_export_bundle.pkl"):
+def load_export_bundle(path: str = "kan_export_bundle.pkl", *, trusted: bool = False):
     """读取导出的实验 bundle。
 
     Args:
         path: pkl 文件路径。
+        trusted: 仅当该 pickle 文件由当前用户本地生成且来源可信时设为 ``True``。
 
     Returns:
         dict: 反序列化后的导出对象。
 
     Raises:
         FileNotFoundError: 当文件不存在时抛出。
+        ValueError: 当调用方未显式确认该 pickle 文件可信时抛出。
     """
     if not os.path.exists(path):
         raise FileNotFoundError(path)
+    if not trusted:
+        raise ValueError(
+            "load_export_bundle() uses pickle deserialization and is unsafe for untrusted files; "
+            "pass trusted=True only for bundles you created locally and trust."
+        )
     with open(path, "rb") as f:
         return pickle.load(f)

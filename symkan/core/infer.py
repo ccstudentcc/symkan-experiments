@@ -30,6 +30,34 @@ def _pick_device(model, device: Optional[str] = None):
     return _infer_model_device(model)
 
 
+def _label_tensor_to_indices(labels, *, device: torch.device, split: str) -> torch.Tensor:
+    if not torch.is_tensor(labels):
+        tensor = torch.as_tensor(labels, device=device)
+    else:
+        tensor = labels.to(device)
+
+    if tensor.ndim == 1:
+        if tensor.dtype.is_floating_point:
+            rounded = tensor.round()
+            if not torch.allclose(tensor, rounded):
+                raise ValueError(f"{split} 1D labels must be integer class indices")
+            tensor = rounded
+        indices = tensor.to(torch.long)
+        if torch.any(indices < 0):
+            raise ValueError(f"{split} labels must be non-negative class indices")
+        return indices
+
+    if tensor.ndim == 2:
+        if tensor.shape[1] <= 0:
+            raise ValueError(f"{split} 2D labels must have non-zero class dimension")
+        return torch.argmax(tensor, dim=1).to(torch.long)
+
+    raise ValueError(
+        f"{split} labels must be rank-1 class indices or rank-2 one-hot/probability matrix; "
+        f"got rank={tensor.ndim}"
+    )
+
+
 def model_logits(model, X, device: Optional[str] = None):
     """计算模型 logits（NumPy 输入路径）。
 
@@ -114,12 +142,7 @@ def model_acc_ds_fast(model, dataset, split: str = "test", device: Optional[str]
     if label_key not in dataset or dataset[label_key] is None:
         raise ValueError(f"数据集缺少可用 split: {split}")
     pred = torch.argmax(logits, dim=1)
-    y = dataset[label_key]
-    if not torch.is_tensor(y):
-        y = torch.as_tensor(y, dtype=torch.float32, device=pred.device)
-    else:
-        y = y.to(pred.device)
-    y = torch.argmax(y, dim=1)
+    y = _label_tensor_to_indices(dataset[label_key], device=pred.device, split=split)
     return (pred == y).float().mean().item()
 
 
@@ -159,7 +182,24 @@ def model_acc_ds(model, dataset, split: str = "test", device: Optional[str] = No
             y = y.detach().cpu().numpy()
         else:
             y = np.asarray(y)
-        y = np.argmax(y, axis=1)
+        if y.ndim == 1:
+            if np.issubdtype(y.dtype, np.floating):
+                rounded = np.rint(y)
+                if not np.allclose(y, rounded):
+                    raise ValueError(f"{split} 1D labels must be integer class indices")
+                y = rounded
+            y = y.astype(np.int64, copy=False)
+            if np.any(y < 0):
+                raise ValueError(f"{split} labels must be non-negative class indices")
+        elif y.ndim == 2:
+            if y.shape[1] <= 0:
+                raise ValueError(f"{split} 2D labels must have non-zero class dimension")
+            y = np.argmax(y, axis=1)
+        else:
+            raise ValueError(
+                f"{split} labels must be rank-1 class indices or rank-2 one-hot/probability matrix; "
+                f"got rank={y.ndim}"
+            )
         return model_acc(model, x, y, device=device)
 
 

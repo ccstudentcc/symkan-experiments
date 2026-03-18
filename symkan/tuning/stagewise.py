@@ -15,7 +15,9 @@ import torch
 
 from kan import KAN
 
-from symkan.core import get_device, get_n_edge, model_acc_ds, safe_fit
+from symkan.core import get_device, get_n_edge, model_acc_ds, safe_fit_report
+from symkan.config import AppConfig
+from symkan.core.train import format_fit_failure
 from symkan.core.runtime import default_batch_size, resolve_device
 from symkan.io import clone_model
 from symkan.pruning import safe_attribute
@@ -150,6 +152,13 @@ def _safe_attribute_for_prune(model, dataset):
             device = next(model.parameters()).device
             model.feature_score = torch.ones(size, dtype=torch.float32, device=device)
         return str(exc)
+
+
+def _fit_or_error(context: str, **fit_kwargs):
+    report = safe_fit_report(**fit_kwargs)
+    if report.success:
+        return report.result, None
+    return None, format_fit_failure(report, context=context)
 
 
 def _compute_adaptive_lamb(
@@ -303,9 +312,10 @@ def _attempt_prune_with_validation(
         # 先做一次短恢复，尽快判断这轮剪枝是否值得保留，避免把大步数微调浪费在坏剪枝上。
         quick_ft_steps = min(int(post_prune_ft_steps), 20) if post_prune_ft_steps > 0 else 0
         if edges_removed > 0 and quick_ft_steps > 0:
-            safe_fit(
-                model,
-                dataset,
+            _, quick_fit_error = _fit_or_error(
+                "post_prune_quick_fit",
+                model=model,
+                dataset=dataset,
                 opt="Adam",
                 steps=quick_ft_steps,
                 lr=current_lr * 0.5,
@@ -315,6 +325,17 @@ def _attempt_prune_with_validation(
                 singularity_avoiding=True,
                 log=max(1, quick_ft_steps // 5),
             )
+            if quick_fit_error is not None:
+                return {
+                    "model": snapshot,
+                    "success": False,
+                    "edges_removed": 0,
+                    "eval_drop": np.nan,
+                    "threshold": float(threshold),
+                    "eval_split": eval_split,
+                    "rollback": quick_fit_error,
+                    "attribute_warning": attribute_warning,
+                }
 
         eval_after, _ = _safe_eval_acc(model, dataset, preferred_split=eval_split)
         eval_drop = float(eval_before - eval_after)
@@ -322,9 +343,10 @@ def _attempt_prune_with_validation(
         if success:
             remain_ft_steps = max(0, int(post_prune_ft_steps) - quick_ft_steps)
             if remain_ft_steps > 0:
-                safe_fit(
-                    model,
-                    dataset,
+                _, remain_fit_error = _fit_or_error(
+                    "post_prune_recovery_fit",
+                    model=model,
+                    dataset=dataset,
                     opt="Adam",
                     steps=remain_ft_steps,
                     lr=current_lr * 0.5,
@@ -334,6 +356,17 @@ def _attempt_prune_with_validation(
                     singularity_avoiding=True,
                     log=max(1, remain_ft_steps // 5),
                 )
+                if remain_fit_error is not None:
+                    return {
+                        "model": snapshot,
+                        "success": False,
+                        "edges_removed": 0,
+                        "eval_drop": np.nan,
+                        "threshold": float(threshold),
+                        "eval_split": eval_split,
+                        "rollback": remain_fit_error,
+                        "attribute_warning": attribute_warning,
+                    }
             return {
                 "model": model,
                 "success": True,
@@ -368,51 +401,7 @@ def _attempt_prune_with_validation(
         }
 
 
-def stagewise_train(
-    dataset,
-    width,
-    grid=5,
-    k=3,
-    seed=123,
-    lamb_schedule=(0.0, 1e-4, 3e-4),
-    lr_schedule=(0.02, 0.012, 0.006),
-    steps_per_stage=70,
-    batch_size=None,
-    prune_start_stage=1,
-    target_edges=100,
-    prune_edge_threshold_init=0.005,
-    prune_edge_threshold_step=0.005,
-    prune_acc_drop_tol=0.03,
-    post_prune_ft_steps=40,
-    sym_target_edges=50,
-    acc_weight=0.4,
-    keep_topk_models=0,
-    keep_full_snapshots=False,
-    use_disk_clone=False,
-    clone_ckpt_path="_safe_copy_temp",
-    use_validation=False,
-    validation_ratio=0.0,
-    validation_seed=None,
-    validation_min_samples=10,
-    adaptive_threshold=False,
-    threshold_base_step=0.005,
-    threshold_min=0.001,
-    threshold_max=0.1,
-    success_boost=0.5,
-    failure_penalty=0.3,
-    min_gain_threshold=3,
-    max_prune_attempts=20,
-    adaptive_lamb=False,
-    min_lamb_ratio=0.3,
-    max_lamb_ratio=1.5,
-    adaptive_ft=False,
-    min_ft_ratio=0.3,
-    stage_early_stop=False,
-    stage_early_stop_patience=2,
-    stage_early_stop_min_acc_gain=0.002,
-    stage_early_stop_edge_buffer=0,
-    verbose=True,
-):
+def stagewise_train(dataset, config: AppConfig):
     """分阶段训练并自动选择最优快照。
 
     该流程在每个阶段执行拟合，并在满足条件时进行渐进式剪枝、短微调与回滚保护，
@@ -420,52 +409,57 @@ def stagewise_train(
 
     Args:
         dataset: 由 ``build_dataset`` 构建的数据字典。
-        width: KAN 网络宽度配置，例如 ``[in_dim, hidden_dim, out_dim]``。
-        grid: KAN spline grid 数。
-        k: KAN spline 阶数。
-        seed: 随机种子。
-        lamb_schedule: 分阶段稀疏正则序列。
-        lr_schedule: 分阶段学习率序列。
-        steps_per_stage: 每阶段训练步数。
-        batch_size: 批大小；为空时自动使用默认值。
-        prune_start_stage: 从该阶段开始允许剪枝。
-        target_edges: 阶段训练目标边数。
-        prune_edge_threshold_init: 剪枝阈值初值。
-        prune_edge_threshold_step: 剪枝阈值递增步长。
-        prune_acc_drop_tol: 剪枝后允许的精度回落阈值。
-        post_prune_ft_steps: 每次剪枝后的恢复微调步数。
-        sym_target_edges: 选模时使用的符号化目标边数。
-        acc_weight: 选模中精度权重。
-        keep_topk_models: 是否保留 Top-K 完整模型快照。
-        keep_full_snapshots: 是否保留每阶段完整模型对象。
-        use_disk_clone: 是否强制使用磁盘克隆。
-        clone_ckpt_path: 磁盘克隆临时路径前缀。
-        use_validation: 是否启用验证集引导剪枝；默认关闭以保持旧行为。
-        validation_ratio: 训练集切出验证集比例；已有验证集时忽略。
-        validation_seed: 验证集切分随机种子。
-        validation_min_samples: 验证集最少样本数。
-        adaptive_threshold: 是否启用自适应剪枝阈值。
-        threshold_base_step: 自适应阈值基础步长。
-        threshold_min: 自适应阈值下界。
-        threshold_max: 自适应阈值上界。
-        success_boost: 连续成功时的阈值增益系数。
-        failure_penalty: 连续失败时的阈值惩罚系数。
-        min_gain_threshold: 最近剪枝平均收益低于该值时提前停止。
-        max_prune_attempts: 单阶段最多剪枝尝试次数。
-        adaptive_lamb: 是否根据稀疏进度调整 lamb。
-        min_lamb_ratio: lamb 下界倍数。
-        max_lamb_ratio: lamb 上界倍数。
-        adaptive_ft: 是否按稀疏进度缩放剪枝后微调步数。
-        min_ft_ratio: 微调步数下界比例。
-        stage_early_stop: 是否启用阶段级早停。
-        stage_early_stop_patience: 达到目标后连续低收益阶段耐心值。
-        stage_early_stop_min_acc_gain: 阶段级最小有效精度提升阈值。
-        stage_early_stop_edge_buffer: 早停判定时允许的目标边数缓冲。
-        verbose: 是否打印详细日志。
+        config: 统一运行配置对象；实际使用 ``config.stagewise``。
 
     Returns:
         tuple: ``(best_model, result_dict)``，分别是最优模型与阶段训练结果。
     """
+    stage_config = config.stagewise
+    width = stage_config.width
+    if width is None:
+        raise ValueError("config.stagewise.width is required")
+    grid = stage_config.grid
+    k = stage_config.k
+    seed = stage_config.seed
+    lamb_schedule = stage_config.lamb_schedule
+    lr_schedule = stage_config.lr_schedule
+    steps_per_stage = stage_config.steps_per_stage
+    batch_size = stage_config.batch_size
+    prune_start_stage = stage_config.prune_start_stage
+    target_edges = stage_config.target_edges
+    prune_edge_threshold_init = stage_config.prune_edge_threshold_init
+    prune_edge_threshold_step = stage_config.prune_edge_threshold_step
+    prune_acc_drop_tol = stage_config.prune_acc_drop_tol
+    post_prune_ft_steps = stage_config.post_prune_ft_steps
+    sym_target_edges = stage_config.sym_target_edges
+    acc_weight = stage_config.acc_weight
+    keep_topk_models = stage_config.keep_topk_models
+    keep_full_snapshots = stage_config.keep_full_snapshots
+    use_disk_clone = stage_config.use_disk_clone
+    clone_ckpt_path = stage_config.clone_ckpt_path
+    use_validation = stage_config.use_validation
+    validation_ratio = stage_config.validation_ratio
+    validation_seed = stage_config.validation_seed
+    validation_min_samples = stage_config.validation_min_samples
+    adaptive_threshold = stage_config.adaptive_threshold
+    threshold_base_step = stage_config.threshold_base_step
+    threshold_min = stage_config.threshold_min
+    threshold_max = stage_config.threshold_max
+    success_boost = stage_config.success_boost
+    failure_penalty = stage_config.failure_penalty
+    min_gain_threshold = stage_config.min_gain_threshold
+    max_prune_attempts = stage_config.max_prune_attempts
+    adaptive_lamb = stage_config.adaptive_lamb
+    min_lamb_ratio = stage_config.min_lamb_ratio
+    max_lamb_ratio = stage_config.max_lamb_ratio
+    adaptive_ft = stage_config.adaptive_ft
+    min_ft_ratio = stage_config.min_ft_ratio
+    stage_early_stop = stage_config.stage_early_stop
+    stage_early_stop_patience = stage_config.stage_early_stop_patience
+    stage_early_stop_min_acc_gain = stage_config.stage_early_stop_min_acc_gain
+    stage_early_stop_edge_buffer = stage_config.stage_early_stop_edge_buffer
+    verbose = stage_config.verbose
+
     if batch_size is None:
         batch_size = default_batch_size()
 
@@ -498,6 +492,7 @@ def stagewise_train(
     stage_train_total_seconds = 0.0
     stage_prune_total_seconds = 0.0
     stagewise_t0 = time.perf_counter()
+    successful_fit_count = 0
 
     cur_prune_th = prune_edge_threshold_init
     max_acc_seen = 0.0
@@ -522,6 +517,8 @@ def stagewise_train(
         acc_before = model_acc_ds(model, dataset)
         edge_before = get_n_edge(model)
         rollback = ""
+        fit_error = ""
+        fit_success = False
         train_seconds = 0.0
         prune_seconds = 0.0
         stage_lamb = float(lamb)
@@ -537,10 +534,12 @@ def stagewise_train(
         prune_attempts = []
 
         try:
+            state_before_fit = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             fit_t0 = time.perf_counter()
-            res = safe_fit(
-                model,
-                dataset,
+            res, fit_error = _fit_or_error(
+                f"stage_{si}_fit",
+                model=model,
+                dataset=dataset,
                 opt="Adam",
                 steps=steps_per_stage,
                 lr=lr,
@@ -552,8 +551,15 @@ def stagewise_train(
             )
             train_seconds = float(time.perf_counter() - fit_t0)
             stage_train_total_seconds += train_seconds
-            all_train_loss.extend(list(res.get("train_loss", [])))
-            all_test_loss.extend(list(res.get("test_loss", [])))
+            if fit_error is None:
+                fit_success = True
+                successful_fit_count += 1
+                assert res is not None
+                all_train_loss.extend(list(res.get("train_loss", [])))
+                all_test_loss.extend(list(res.get("test_loss", [])))
+            else:
+                model.load_state_dict(state_before_fit)
+                rollback = fit_error
         except Exception as e:
             rollback = f"fit_error: {e}"
             if verbose:
@@ -632,9 +638,10 @@ def stagewise_train(
                     edges_before_prune = get_n_edge(model)
                     model.prune_edge(threshold=cur_prune_th)
 
-                    safe_fit(
-                        model,
-                        dataset,
+                    _, prune_fit_error = _fit_or_error(
+                        f"stage_{si}_post_prune_fit",
+                        model=model,
+                        dataset=dataset,
                         opt="Adam",
                         steps=post_prune_ft_steps,
                         lr=lr * 0.5,
@@ -644,28 +651,45 @@ def stagewise_train(
                         singularity_avoiding=True,
                         log=max(1, post_prune_ft_steps // 5),
                     )
-                    acc_after_prune = model_acc_ds(model, dataset)
-
-                    if acc_after_prune + prune_acc_drop_tol >= acc_before:
-                        prune_accepted = True
-                        cur_prune_th += prune_edge_threshold_step
-                    else:
-                        rollback = f"prune_acc_drop({acc_before:.4f}->{acc_after_prune:.4f})"
+                    if prune_fit_error is not None:
+                        rollback = prune_fit_error
                         model = snap
                         cur_prune_th += prune_edge_threshold_step * 0.3
+                        prune_attempts.append(
+                            {
+                                "attempt": 0,
+                                "threshold": threshold_used,
+                                "success": False,
+                                "edges_removed": 0,
+                                "eval_drop": np.nan,
+                                "eval_split": "test",
+                                "attribute_warning": attr_warning,
+                                "threshold_next": float(cur_prune_th),
+                            }
+                        )
+                    else:
+                        acc_after_prune = model_acc_ds(model, dataset)
 
-                    prune_attempts.append(
-                        {
-                            "attempt": 0,
-                            "threshold": threshold_used,
-                            "success": bool(prune_accepted),
-                            "edges_removed": max(0, int(edges_before_prune - get_n_edge(model))) if _valid_edge_count(edges_before_prune) and _valid_edge_count(get_n_edge(model)) else 0,
-                            "eval_drop": float(acc_before - acc_after_prune),
-                            "eval_split": "test",
-                            "attribute_warning": attr_warning,
-                            "threshold_next": float(cur_prune_th),
-                        }
-                    )
+                        if acc_after_prune + prune_acc_drop_tol >= acc_before:
+                            prune_accepted = True
+                            cur_prune_th += prune_edge_threshold_step
+                        else:
+                            rollback = f"prune_acc_drop({acc_before:.4f}->{acc_after_prune:.4f})"
+                            model = snap
+                            cur_prune_th += prune_edge_threshold_step * 0.3
+
+                        prune_attempts.append(
+                            {
+                                "attempt": 0,
+                                "threshold": threshold_used,
+                                "success": bool(prune_accepted),
+                                "edges_removed": max(0, int(edges_before_prune - get_n_edge(model))) if _valid_edge_count(edges_before_prune) and _valid_edge_count(get_n_edge(model)) else 0,
+                                "eval_drop": float(acc_before - acc_after_prune),
+                                "eval_split": "test",
+                                "attribute_warning": attr_warning,
+                                "threshold_next": float(cur_prune_th),
+                            }
+                        )
                 except Exception as e:
                     rollback = f"prune_error: {e}"
                     model = snap
@@ -719,6 +743,8 @@ def stagewise_train(
                 "prune_accepted": prune_accepted,
                 "prune_attempts": prune_attempts,
                 "prune_attempt_count": len(prune_attempts),
+                "fit_success": bool(fit_success),
+                "fit_error": fit_error,
                 "rollback": rollback,
                 "prune_th": float(cur_prune_th),
                 "sym_score": float(score),
@@ -769,11 +795,14 @@ def stagewise_train(
                 break
 
     final_finetune_seconds = 0.0
+    final_fit_success = False
+    final_fit_error = ""
     try:
         final_fit_t0 = time.perf_counter()
-        final_res = safe_fit(
-            model,
-            dataset,
+        final_res, final_fit_error = _fit_or_error(
+            "final_finetune_fit",
+            model=model,
+            dataset=dataset,
             opt="Adam",
             steps=60,
             lr=0.005,
@@ -784,10 +813,19 @@ def stagewise_train(
             log=10,
         )
         final_finetune_seconds = float(time.perf_counter() - final_fit_t0)
-        all_train_loss.extend(list(final_res.get("train_loss", [])))
-        all_test_loss.extend(list(final_res.get("test_loss", [])))
-    except Exception:
-        pass
+        if final_fit_error is None:
+            final_fit_success = True
+            successful_fit_count += 1
+            assert final_res is not None
+            all_train_loss.extend(list(final_res.get("train_loss", [])))
+            all_test_loss.extend(list(final_res.get("test_loss", [])))
+        else:
+            final_fit_error = str(final_fit_error)
+    except Exception as exc:
+        final_fit_error = f"final_finetune_fit failed ({type(exc).__name__}: {exc})"
+
+    if successful_fit_count <= 0:
+        raise RuntimeError("stagewise_train failed: all guarded fit attempts failed")
 
     final_acc = model_acc_ds(model, dataset)
     final_edges = get_n_edge(model)
@@ -871,6 +909,9 @@ def stagewise_train(
         "stage_train_total_seconds": float(stage_train_total_seconds),
         "stage_prune_total_seconds": float(stage_prune_total_seconds),
         "final_finetune_seconds": float(final_finetune_seconds),
+        "final_fit_success": bool(final_fit_success),
+        "final_fit_error": final_fit_error,
+        "successful_fit_count": int(successful_fit_count),
         "stage_total_seconds": float(time.perf_counter() - stagewise_t0),
     }
     if keep_topk_models and keep_topk_models > 0:
@@ -879,20 +920,19 @@ def stagewise_train(
     return best_model, result
 
 
-def stagewise_train_report(dataset, width, **kwargs):
+def stagewise_train_report(dataset, config: AppConfig):
     """返回 ``stagewise_train`` 的结构化报告版本。
 
     Args:
         dataset: 数据集字典。
-        width: KAN 网络宽度配置。
-        **kwargs: 传递给 ``stagewise_train`` 的其余参数。
+        config: 统一运行配置对象。
 
     Returns:
         tuple: ``(best_model, StagewiseResult)``。
     """
     from symkan.core.types import StagewiseResult
 
-    best_model, result = stagewise_train(dataset, width, **kwargs)
+    best_model, result = stagewise_train(dataset, config)
     sr = StagewiseResult(
         best_model=best_model,
         train_loss=result.get("train_loss", []),

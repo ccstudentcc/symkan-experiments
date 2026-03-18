@@ -6,6 +6,8 @@
 import numpy as np
 import torch
 
+from symkan.core.infer import _infer_model_device
+
 
 def safe_attribute(model, dataset, n_sample: int = 2048):
     """安全执行归因计算并返回特征分数。
@@ -20,7 +22,12 @@ def safe_attribute(model, dataset, n_sample: int = 2048):
     """
     was_training = bool(getattr(model, "training", False))
     model.eval()
+    model_device = _infer_model_device(model)
     x = dataset["train_input"][:n_sample]
+    if not torch.is_tensor(x):
+        x = torch.as_tensor(x, dtype=torch.float32, device=model_device)
+    else:
+        x = x.to(model_device)
 
     def _run_attribute():
         try:
