@@ -194,6 +194,9 @@ def build_dataset(
         dict: 包含 ``train_input/train_label/val_input/val_label/test_input/test_label``
         的张量字典。
     """
+    if validation_ratio < 0 or validation_ratio >= 1:
+        raise ValueError(f"validation_ratio must be in [0, 1); got {validation_ratio}")
+
     dev = resolve_device(_resolve_device(device))
     train_input = torch.as_tensor(Xtr, dtype=torch.float32, device=dev)
     test_input = torch.as_tensor(Xte, dtype=torch.float32, device=dev)

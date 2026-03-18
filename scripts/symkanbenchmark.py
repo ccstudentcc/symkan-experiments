@@ -11,55 +11,190 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import numpy as np
-import pandas as pd
-import torch
-from scipy.special import softmax as scipy_softmax
-from sklearn.datasets import fetch_openml
-
-from kan import KAN
-from symkan.core import (
-    build_dataset,
-    get_device,
-    get_n_edge,
-    model_acc,
-    model_acc_ds,
-    model_acc_ds_fast,
-    model_logits,
-    safe_fit,
-    set_device,
-)
-from symkan.config import AppConfig, ConfigError, load_config
-from symkan.core.runtime import default_batch_size, resolve_device
-from symkan.eval import compute_multiclass_roc_auc, validate_formula_numerically
-from symkan.io import save_export_bundle, save_stage_logs, save_symbolic_summary
-from symkan.pruning import safe_attribute
-from symkan.symbolic import (
-    EXPRESSIVE_LIB,
-    FAST_LIB,
-    LIB_HIDDEN,
-    LIB_OUTPUT,
-    collect_all_formulas,
-    format_expr,
-    symbolize_pipeline,
-)
-from symkan.symbolic.pipeline import symbolize_pipeline_report
-from symkan.tuning import stagewise_train_report
 from scripts.project_paths import (
     DEFAULT_BENCHMARK_RUNS_DIR,
     LEGACY_BENCHMARK_RUNS_DIR,
     resolve_preferred_dir,
 )
 
-try:
-    import psutil
-except Exception:
-    psutil = None
+_UNSET = object()
 
-try:
-    import symkan.eval.metrics as eval_metrics_module
-except Exception:
-    eval_metrics_module = None
+np = None
+pd = None
+torch = None
+ValidationError = None
+scipy_softmax = None
+fetch_openml = None
+KAN = None
+build_dataset = None
+get_device = None
+get_n_edge = None
+model_acc = None
+model_acc_ds = None
+model_acc_ds_fast = None
+model_logits = None
+safe_fit = None
+set_device = None
+AppConfig = None
+ConfigError = None
+load_config = None
+validate_app_config = None
+default_batch_size = None
+resolve_device = None
+compute_multiclass_roc_auc = None
+validate_formula_numerically = None
+save_export_bundle = None
+save_stage_logs = None
+save_symbolic_summary = None
+safe_attribute = None
+EXPRESSIVE_LIB = None
+FAST_LIB = None
+LIB_HIDDEN = None
+LIB_OUTPUT = None
+collect_all_formulas = None
+format_expr = None
+symbolize_pipeline = None
+symbolize_pipeline_report = None
+stagewise_train_report = None
+psutil = _UNSET
+eval_metrics_module = _UNSET
+
+
+def _ensure_config_deps() -> None:
+    global ValidationError
+    global AppConfig, ConfigError, load_config, validate_app_config
+
+    if ValidationError is None:
+        from pydantic import ValidationError as _ValidationError
+
+        ValidationError = _ValidationError
+
+    if AppConfig is None:
+        from symkan.config import (
+            AppConfig as _AppConfig,
+            ConfigError as _ConfigError,
+            load_config as _load_config,
+            validate_app_config as _validate_app_config,
+        )
+
+        AppConfig = _AppConfig
+        ConfigError = _ConfigError
+        load_config = _load_config
+        validate_app_config = _validate_app_config
+
+
+def _ensure_runtime_deps() -> None:
+    global np, pd, torch, scipy_softmax, fetch_openml
+    global KAN, build_dataset, get_device, get_n_edge, model_acc, model_acc_ds, model_acc_ds_fast
+    global model_logits, safe_fit, set_device, default_batch_size, resolve_device
+    global compute_multiclass_roc_auc, validate_formula_numerically
+    global save_export_bundle, save_stage_logs, save_symbolic_summary, safe_attribute
+    global EXPRESSIVE_LIB, FAST_LIB, LIB_HIDDEN, LIB_OUTPUT, collect_all_formulas, format_expr
+    global symbolize_pipeline, symbolize_pipeline_report, stagewise_train_report
+    global psutil, eval_metrics_module
+
+    _ensure_config_deps()
+
+    if np is None:
+        import numpy as _np
+
+        np = _np
+    if pd is None:
+        import pandas as _pd
+
+        pd = _pd
+    if torch is None:
+        import torch as _torch
+
+        torch = _torch
+    if scipy_softmax is None:
+        from scipy.special import softmax as _scipy_softmax
+
+        scipy_softmax = _scipy_softmax
+    if fetch_openml is None:
+        from sklearn.datasets import fetch_openml as _fetch_openml
+
+        fetch_openml = _fetch_openml
+
+    if KAN is None:
+        from kan import KAN as _KAN
+        from symkan.core import (
+            build_dataset as _build_dataset,
+            get_device as _get_device,
+            get_n_edge as _get_n_edge,
+            model_acc as _model_acc,
+            model_acc_ds as _model_acc_ds,
+            model_acc_ds_fast as _model_acc_ds_fast,
+            model_logits as _model_logits,
+            safe_fit as _safe_fit,
+            set_device as _set_device,
+        )
+        from symkan.core.runtime import default_batch_size as _default_batch_size, resolve_device as _resolve_device
+        from symkan.eval import (
+            compute_multiclass_roc_auc as _compute_multiclass_roc_auc,
+            validate_formula_numerically as _validate_formula_numerically,
+        )
+        from symkan.io import (
+            save_export_bundle as _save_export_bundle,
+            save_stage_logs as _save_stage_logs,
+            save_symbolic_summary as _save_symbolic_summary,
+        )
+        from symkan.pruning import safe_attribute as _safe_attribute
+        from symkan.symbolic import (
+            EXPRESSIVE_LIB as _EXPRESSIVE_LIB,
+            FAST_LIB as _FAST_LIB,
+            LIB_HIDDEN as _LIB_HIDDEN,
+            LIB_OUTPUT as _LIB_OUTPUT,
+            collect_all_formulas as _collect_all_formulas,
+            format_expr as _format_expr,
+            symbolize_pipeline as _symbolize_pipeline,
+        )
+        from symkan.symbolic.pipeline import symbolize_pipeline_report as _symbolize_pipeline_report
+        from symkan.tuning import stagewise_train_report as _stagewise_train_report
+
+        KAN = _KAN
+        build_dataset = _build_dataset
+        get_device = _get_device
+        get_n_edge = _get_n_edge
+        model_acc = _model_acc
+        model_acc_ds = _model_acc_ds
+        model_acc_ds_fast = _model_acc_ds_fast
+        model_logits = _model_logits
+        safe_fit = _safe_fit
+        set_device = _set_device
+        default_batch_size = _default_batch_size
+        resolve_device = _resolve_device
+        compute_multiclass_roc_auc = _compute_multiclass_roc_auc
+        validate_formula_numerically = _validate_formula_numerically
+        save_export_bundle = _save_export_bundle
+        save_stage_logs = _save_stage_logs
+        save_symbolic_summary = _save_symbolic_summary
+        safe_attribute = _safe_attribute
+        EXPRESSIVE_LIB = _EXPRESSIVE_LIB
+        FAST_LIB = _FAST_LIB
+        LIB_HIDDEN = _LIB_HIDDEN
+        LIB_OUTPUT = _LIB_OUTPUT
+        collect_all_formulas = _collect_all_formulas
+        format_expr = _format_expr
+        symbolize_pipeline = _symbolize_pipeline
+        symbolize_pipeline_report = _symbolize_pipeline_report
+        stagewise_train_report = _stagewise_train_report
+
+    if psutil is _UNSET:
+        try:
+            import psutil as _psutil
+        except Exception:
+            psutil = None
+        else:
+            psutil = _psutil
+
+    if eval_metrics_module is _UNSET:
+        try:
+            import symkan.eval.metrics as _eval_metrics_module
+        except Exception:
+            eval_metrics_module = None
+        else:
+            eval_metrics_module = _eval_metrics_module
 
 
 DEFAULT_TASKS = ("full", "eval-bench", "parallel-bench")
@@ -153,6 +288,7 @@ def maybe_silent(enabled: bool):
 
 
 def set_global_seed(seed: int) -> None:
+    _ensure_runtime_deps()
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -189,6 +325,7 @@ def _validate_autofetch_targets(config: AppConfig, repo_root: Path, missing_file
 
 
 def to_jsonable(value: Any) -> Any:
+    _ensure_runtime_deps()
     if isinstance(value, (np.floating, np.integer)):
         return value.item()
     if isinstance(value, np.ndarray):
@@ -210,6 +347,94 @@ def write_json(path: Path, payload: Dict[str, Any]) -> None:
     path.write_text(json.dumps(to_jsonable(payload), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _build_experiment_metrics(
+    *,
+    config: AppConfig,
+    run_dir: Path,
+    run_index: int,
+    total_runs: int,
+    stage_seed: int,
+    batch_size: int,
+    base_model,
+    base_acc: float,
+    keep_idx,
+    enhanced_model,
+    enhanced_acc: float,
+    stage_result: Dict[str, Any],
+    symbolize_result: Dict[str, Any],
+    valid_exprs: List[dict],
+    expr_complexity_mean: float,
+    auc_macro: float,
+    val_df,
+    stage_total_seconds: float,
+    stage_train_total_seconds: float,
+    stage_prune_total_seconds: float,
+    stage_final_finetune_seconds: float,
+    export_wall_time: float,
+) -> Dict[str, Any]:
+    timing = symbolize_result.get("timing", {}) or {}
+    input_n_edge = int(symbolize_result.get("input_n_edge", get_n_edge(enhanced_model)))
+    pipeline_warnings = timing.get("pipeline_warnings", [])
+    warning_count = len(pipeline_warnings) if isinstance(pipeline_warnings, list) else 0
+
+    return {
+        "run_index": run_index,
+        "total_runs": total_runs,
+        "stage_seed": stage_seed,
+        "device": get_device(),
+        "batch_size": batch_size,
+        "lib_preset": config.library.lib_preset,
+        "base_acc": base_acc,
+        "base_n_edge": int(get_n_edge(base_model)),
+        "selected_input_dim": int(len(keep_idx)),
+        "enhanced_acc": enhanced_acc,
+        "enhanced_n_edge": int(get_n_edge(enhanced_model)),
+        "selected_stage": stage_result.get("selected_stage"),
+        "selected_score": float(stage_result.get("selected_score", float("nan"))),
+        "final_acc": float(symbolize_result.get("final_acc", float("nan"))),
+        "final_n_edge": int(symbolize_result.get("final_n_edge", -1)),
+        "effective_target_edges": int(symbolize_result.get("effective_target_edges", -1)),
+        "effective_input_dim": int(symbolize_result.get("effective_input_dim", -1)),
+        "valid_expression_count": int(len(valid_exprs)),
+        "expr_complexity_mean": expr_complexity_mean,
+        "macro_auc": auc_macro,
+        "validation_mean_r2": float(val_df["r2"].mean()) if val_df is not None and len(val_df) > 0 else float("nan"),
+        "validation_negative_r2_count": int((val_df["r2"] < 0).sum()) if val_df is not None and len(val_df) > 0 else 0,
+        "stage_total_seconds": stage_total_seconds,
+        "stage_train_total_seconds": stage_train_total_seconds,
+        "stage_prune_total_seconds": stage_prune_total_seconds,
+        "stage_final_finetune_seconds": stage_final_finetune_seconds,
+        "symbolic_total_seconds": float(timing.get("symbolic_total_seconds", float("nan"))),
+        "symbolic_abort_stage": timing.get("abort_stage"),
+        "symbolic_abort_reason": timing.get("abort_reason"),
+        "symbolic_abort_error_type": timing.get("abort_error_type"),
+        "symbolic_warning_count": int(warning_count),
+        "export_wall_time_s": export_wall_time,
+        "pre_symbolic_n_edge": input_n_edge,
+        "pre_symbolic_too_dense": input_n_edge > int(config.stagewise.target_edges) * 2,
+        "stagewise_enabled": bool(not config.workflow.disable_stagewise_train),
+        "input_compaction_enabled": bool(config.symbolize.enable_input_compaction),
+        "input_compaction_fallback": bool(timing.get("input_compaction_fallback", False)),
+        "input_compaction_reason": timing.get("input_compaction_reason"),
+        "input_compaction_error_type": timing.get("input_compaction_error_type"),
+        "layerwise_finetune_steps": int(config.symbolize.layerwise_finetune_steps),
+        "layerwise_finetune_lr": float(config.symbolize.layerwise_finetune_lr),
+        "layerwise_finetune_lamb": float(config.symbolize.layerwise_finetune_lamb),
+        "layerwise_use_validation": bool(config.symbolize.layerwise_use_validation),
+        "layerwise_validation_ratio": float(config.symbolize.layerwise_validation_ratio),
+        "layerwise_validation_seed": (
+            config.symbolize.layerwise_validation_seed
+            if config.symbolize.layerwise_validation_seed is not None
+            else config.runtime.global_seed
+        ),
+        "layerwise_early_stop_patience": int(config.symbolize.layerwise_early_stop_patience),
+        "layerwise_early_stop_min_delta": float(config.symbolize.layerwise_early_stop_min_delta),
+        "layerwise_eval_interval": int(config.symbolize.layerwise_eval_interval),
+        "layerwise_validation_n_sample": int(config.symbolize.layerwise_validation_n_sample),
+        "output_dir": str(run_dir),
+    }
+
+
 def _select_classes(x: np.ndarray, y: np.ndarray, classes: List[int]) -> tuple[np.ndarray, np.ndarray]:
     mask = np.zeros_like(y, dtype=bool)
     for cls in classes:
@@ -224,6 +449,7 @@ def _onehot_from_labels(y: np.ndarray, classes: List[int]) -> np.ndarray:
 
 
 def _fetch_mnist_via_keras(classes: List[int]) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    _ensure_runtime_deps()
     from tensorflow import keras  # type: ignore
 
     (x_train, y_train), (x_test, y_test) = keras.datasets.mnist.load_data()
@@ -239,6 +465,7 @@ def _fetch_mnist_via_keras(classes: List[int]) -> tuple[np.ndarray, np.ndarray, 
 
 
 def _fetch_mnist_via_openml(classes: List[int]) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    _ensure_runtime_deps()
     mnist = fetch_openml("mnist_784", version=1, as_frame=False)
     x = mnist.data.astype(np.float32) / 255.0
     y = mnist.target.astype(np.int64)
@@ -273,6 +500,7 @@ def _fetch_mnist_with_fallback(classes: List[int]) -> tuple[tuple[np.ndarray, np
 
 
 def ensure_numpy_dataset_files(config: AppConfig, repo_root: Path) -> None:
+    _ensure_runtime_deps()
     # Backward-compat: if user kept the old root-level *.npy files and didn't
     # override the new default paths, transparently use the legacy locations.
     legacy_pairs = [
@@ -328,6 +556,7 @@ def ensure_numpy_dataset_files(config: AppConfig, repo_root: Path) -> None:
 
 
 def load_data(config: AppConfig, repo_root: Path) -> Dict[str, Any]:
+    _ensure_runtime_deps()
     ensure_numpy_dataset_files(config, repo_root)
     x_train = np.load(resolve_path(config.data.x_train, repo_root)).astype(np.float32)
     x_test = np.load(resolve_path(config.data.x_test, repo_root)).astype(np.float32)
@@ -390,6 +619,7 @@ def resolve_parallel_modes(raw: str) -> List[Dict[str, Any]]:
 
 
 def resolve_library(lib_preset: str) -> Dict[str, Any]:
+    _ensure_runtime_deps()
     if lib_preset == "layered":
         return {"lib": None, "lib_hidden": LIB_HIDDEN, "lib_output": LIB_OUTPUT, "label": "layered"}
     if lib_preset == "fast":
@@ -397,6 +627,32 @@ def resolve_library(lib_preset: str) -> Dict[str, Any]:
     if lib_preset in {"expressive", "full"}:
         return {"lib": EXPRESSIVE_LIB, "lib_hidden": None, "lib_output": None, "label": lib_preset}
     raise ValueError(f"unknown lib preset: {lib_preset}")
+
+
+def _validated_model_update(model, update: Dict[str, Any]):
+    _ensure_config_deps()
+    payload = model.model_dump(mode="python")
+    payload.update(update)
+    try:
+        return type(model).model_validate(payload)
+    except ValidationError as exc:
+        details = []
+        for item in exc.errors():
+            loc = ".".join(str(part) for part in item.get("loc", ())) or "<root>"
+            msg = item.get("msg", "validation error")
+            value = item.get("input", "<missing>")
+            details.append(f"{loc}: {msg} (input={value!r})")
+        raise ConfigError(
+            f"invalid {type(model).__name__} override:\n- " + "\n- ".join(details)
+        ) from exc
+
+
+def _validated_app_config_update(config: AppConfig, **sections: Any) -> AppConfig:
+    _ensure_config_deps()
+    payload = config.model_dump(mode="python")
+    for name, section in sections.items():
+        payload[name] = section.model_dump(mode="python") if hasattr(section, "model_dump") else section
+    return validate_app_config(payload)
 
 
 def build_runtime_app_config(
@@ -437,11 +693,10 @@ def build_runtime_app_config(
             }
         )
 
-    return config.model_copy(
-        update={
-            "stagewise": config.stagewise.model_copy(update=stage_update),
-            "symbolize": config.symbolize.model_copy(update=symbolize_update),
-        }
+    return _validated_app_config_update(
+        config,
+        stagewise=_validated_model_update(config.stagewise, stage_update),
+        symbolize=_validated_model_update(config.symbolize, symbolize_update),
     )
 
 
@@ -498,21 +753,22 @@ def apply_benchmark_overrides(config: AppConfig, args: BenchmarkRunnerConfig) ->
 
     updates: dict[str, Any] = {}
     if runtime_update:
-        updates["runtime"] = config.runtime.model_copy(update=runtime_update)
+        updates["runtime"] = _validated_model_update(config.runtime, runtime_update)
     if library_update:
-        updates["library"] = config.library.model_copy(update=library_update)
+        updates["library"] = _validated_model_update(config.library, library_update)
     if workflow_update:
-        updates["workflow"] = config.workflow.model_copy(update=workflow_update)
+        updates["workflow"] = _validated_model_update(config.workflow, workflow_update)
     if evaluation_update:
-        updates["evaluation"] = config.evaluation.model_copy(update=evaluation_update)
+        updates["evaluation"] = _validated_model_update(config.evaluation, evaluation_update)
     if symbolize_update:
-        updates["symbolize"] = config.symbolize.model_copy(update=symbolize_update)
+        updates["symbolize"] = _validated_model_update(config.symbolize, symbolize_update)
     if not updates:
         return config
-    return config.model_copy(update=updates)
+    return _validated_app_config_update(config, **updates)
 
 
 def load_benchmark_app_config(config_path: Optional[str], args: BenchmarkRunnerConfig) -> AppConfig:
+    _ensure_config_deps()
     default_config_path = Path(__file__).resolve().parents[1] / "configs" / "symkanbenchmark.default.yaml"
     base_config = load_config(config_path) if config_path else load_config(default_config_path)
     return apply_benchmark_overrides(base_config, args)
@@ -524,6 +780,7 @@ def build_formula_summary(
     roc_data: Dict[int, Dict[str, Any]],
     n_classes: int,
 ) -> pd.DataFrame:
+    _ensure_runtime_deps()
     all_formulas = collect_all_formulas(formulas)
     valid_idx = {item["index"] for item in valid_exprs}
     rows = []
@@ -551,6 +808,7 @@ def build_formula_summary(
 
 
 def benchmark_callable(name: str, fn, repeat: int = 3, warmup: int = 1) -> Dict[str, Any]:
+    _ensure_runtime_deps()
     for _ in range(max(0, warmup)):
         fn()
 
@@ -593,12 +851,14 @@ def benchmark_callable(name: str, fn, repeat: int = 3, warmup: int = 1) -> Dict[
 
 
 def rss_mb() -> float:
+    _ensure_runtime_deps()
     if psutil is None:
         return float("nan")
     return float(psutil.Process().memory_info().rss / (1024 ** 2))
 
 
 def safe_nanmean(values: List[float]) -> float:
+    _ensure_runtime_deps()
     arr = np.asarray(values, dtype=float)
     if arr.size == 0 or not np.isfinite(arr).any():
         return float("nan")
@@ -606,6 +866,7 @@ def safe_nanmean(values: List[float]) -> float:
 
 
 def export_multi_round_reports(multi_round_raw: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
+    _ensure_runtime_deps()
     multi_round_summary = (
         multi_round_raw.groupby("name", as_index=False)
         .agg(
@@ -682,6 +943,7 @@ def export_multi_round_reports(multi_round_raw: pd.DataFrame, output_dir: Path) 
 
 
 def run_eval_benchmarks(context: Dict[str, Any], config: BenchmarkRunnerConfig, output_dir: Path) -> Dict[str, Any]:
+    _ensure_runtime_deps()
     enhanced_model = context["enhanced_model"]
     export_model = context["export_model"]
     export_formulas = context["export_formulas"]
@@ -800,6 +1062,7 @@ def run_eval_benchmarks(context: Dict[str, Any], config: BenchmarkRunnerConfig, 
 
 
 def run_parallel_benchmark(context: Dict[str, Any], config: BenchmarkRunnerConfig, output_dir: Path) -> pd.DataFrame:
+    _ensure_runtime_deps()
     enhanced_model = context["enhanced_model"]
     dataset_enhanced = context["dataset_enhanced"]
     batch_size = context["batch_size"]
@@ -812,8 +1075,9 @@ def run_parallel_benchmark(context: Dict[str, Any], config: BenchmarkRunnerConfi
     rows: List[Dict[str, Any]] = []
 
     for cfg in resolve_parallel_modes(config.parallel_modes):
-        quick_symbolize_config = base_symbolize_config.model_copy(
-            update={
+        quick_symbolize_config = _validated_model_update(
+            base_symbolize_config,
+            {
                 "target_edges": target_quick,
                 "max_prune_rounds": config.parallel_max_prune_rounds,
                 "finetune_steps": config.parallel_finetune_steps,
@@ -828,10 +1092,12 @@ def run_parallel_benchmark(context: Dict[str, Any], config: BenchmarkRunnerConfi
                 "parallel_mode": cfg["parallel_mode"],
                 "parallel_workers": cfg["parallel_workers"],
                 "verbose": False,
-            }
+                "batch_size": batch_size,
+            },
         )
-        quick_app_config = context["app_config"].model_copy(
-            update={"symbolize": quick_symbolize_config.model_copy(update={"batch_size": batch_size})}
+        quick_app_config = _validated_app_config_update(
+            context["app_config"],
+            symbolize=quick_symbolize_config,
         )
         t0 = time.perf_counter()
         with maybe_silent(silent):
@@ -870,6 +1136,7 @@ def run_single_experiment(
     total_runs: int,
     stage_seed: int,
 ) -> Dict[str, Any]:
+    _ensure_runtime_deps()
     run_dir = ensure_dir(Path(runner.output_dir) / f"run_{run_index:02d}_seed{stage_seed}")
 
     set_global_seed(config.runtime.global_seed)
@@ -1075,55 +1342,30 @@ def run_single_experiment(
             path=str(run_dir / "symkanbenchmark_bundle.pkl"),
         )
 
-    metrics = {
-        "run_index": run_index,
-        "total_runs": total_runs,
-        "stage_seed": stage_seed,
-        "device": get_device(),
-        "batch_size": batch_size,
-        "lib_preset": config.library.lib_preset,
-        "base_acc": base_acc,
-        "base_n_edge": int(get_n_edge(base_model)),
-        "selected_input_dim": int(len(keep_idx)),
-        "enhanced_acc": enhanced_acc,
-        "enhanced_n_edge": int(get_n_edge(enhanced_model)),
-        "selected_stage": stage_result.get("selected_stage"),
-        "selected_score": float(stage_result.get("selected_score", float("nan"))),
-        "final_acc": float(symbolize_result.get("final_acc", float("nan"))),
-        "final_n_edge": int(symbolize_result.get("final_n_edge", -1)),
-        "effective_target_edges": int(symbolize_result.get("effective_target_edges", -1)),
-        "effective_input_dim": int(symbolize_result.get("effective_input_dim", -1)),
-        "valid_expression_count": int(len(valid_exprs)),
-        "expr_complexity_mean": expr_complexity_mean,
-        "macro_auc": auc_macro,
-        "validation_mean_r2": float(val_df["r2"].mean()) if val_df is not None and len(val_df) > 0 else float("nan"),
-        "validation_negative_r2_count": int((val_df["r2"] < 0).sum()) if val_df is not None and len(val_df) > 0 else 0,
-        "stage_total_seconds": stage_total_seconds,
-        "stage_train_total_seconds": stage_train_total_seconds,
-        "stage_prune_total_seconds": stage_prune_total_seconds,
-        "stage_final_finetune_seconds": stage_final_finetune_seconds,
-        "symbolic_total_seconds": float(symbolize_result.get("timing", {}).get("symbolic_total_seconds", float("nan"))),
-        "export_wall_time_s": export_wall_time,
-        "pre_symbolic_n_edge": int(symbolize_result.get("input_n_edge", get_n_edge(enhanced_model))),
-        "pre_symbolic_too_dense": int(symbolize_result.get("input_n_edge", get_n_edge(enhanced_model))) > int(config.stagewise.target_edges) * 2,
-        "stagewise_enabled": bool(not config.workflow.disable_stagewise_train),
-        "input_compaction_enabled": bool(config.symbolize.enable_input_compaction),
-        "layerwise_finetune_steps": int(config.symbolize.layerwise_finetune_steps),
-        "layerwise_finetune_lr": float(config.symbolize.layerwise_finetune_lr),
-        "layerwise_finetune_lamb": float(config.symbolize.layerwise_finetune_lamb),
-        "layerwise_use_validation": bool(config.symbolize.layerwise_use_validation),
-        "layerwise_validation_ratio": float(config.symbolize.layerwise_validation_ratio),
-        "layerwise_validation_seed": (
-            config.symbolize.layerwise_validation_seed
-            if config.symbolize.layerwise_validation_seed is not None
-            else config.runtime.global_seed
-        ),
-        "layerwise_early_stop_patience": int(config.symbolize.layerwise_early_stop_patience),
-        "layerwise_early_stop_min_delta": float(config.symbolize.layerwise_early_stop_min_delta),
-        "layerwise_eval_interval": int(config.symbolize.layerwise_eval_interval),
-        "layerwise_validation_n_sample": int(config.symbolize.layerwise_validation_n_sample),
-        "output_dir": str(run_dir),
-    }
+    metrics = _build_experiment_metrics(
+        config=config,
+        run_dir=run_dir,
+        run_index=run_index,
+        total_runs=total_runs,
+        stage_seed=stage_seed,
+        batch_size=batch_size,
+        base_model=base_model,
+        base_acc=base_acc,
+        keep_idx=keep_idx,
+        enhanced_model=enhanced_model,
+        enhanced_acc=enhanced_acc,
+        stage_result=stage_result,
+        symbolize_result=symbolize_result,
+        valid_exprs=valid_exprs,
+        expr_complexity_mean=expr_complexity_mean,
+        auc_macro=auc_macro,
+        val_df=val_df,
+        stage_total_seconds=stage_total_seconds,
+        stage_train_total_seconds=stage_train_total_seconds,
+        stage_prune_total_seconds=stage_prune_total_seconds,
+        stage_final_finetune_seconds=stage_final_finetune_seconds,
+        export_wall_time=export_wall_time,
+    )
     write_json(run_dir / "metrics.json", {"metrics": metrics, "roc": roc_rows})
 
     return {
@@ -1144,7 +1386,7 @@ def run_single_experiment(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Notebook-aligned symkan benchmark runner.")
     parser.add_argument("--config", default=None, help="AppConfig YAML 路径；脚本会先 load_config() 再应用显式覆盖")
-    parser.add_argument("--tasks", default="all", help="full,eval-bench,parallel-bench 或 all")
+    parser.add_argument("--tasks", default="all", help="full,eval-bench,parallel-bench 或 all；其中 parallel-bench 当前是 correctness-first 的 requested-mode 对照")
     parser.add_argument("--output-dir", default=DEFAULT_BENCHMARK_RUNS_DIR, help="输出目录")
     parser.add_argument("--stagewise-seeds", default="42", help="逗号分隔的 stagewise 种子列表")
     parser.add_argument("--save-bundle", action="store_true", help="额外导出 pkl bundle")
@@ -1175,7 +1417,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bench-warmup", type=int, default=1)
     parser.add_argument("--eval-rounds", type=int, default=3)
 
-    parser.add_argument("--parallel-modes", default=",".join(DEFAULT_PARALLEL_MODES))
+    parser.add_argument(
+        "--parallel-modes",
+        default=",".join(DEFAULT_PARALLEL_MODES),
+        help="parallel-bench 的请求模式标签集合；当前实现会在 symbol search 上保守回落到串行，实际 worker 数见输出列 parallel_workers_effective",
+    )
     parser.add_argument("--parallel-target-min", type=int, default=40)
     parser.add_argument("--parallel-target-max", type=int, default=80)
     parser.add_argument("--parallel-max-prune-rounds", type=int, default=8)
@@ -1202,6 +1448,7 @@ def parse_benchmark_cli_config(argv: Optional[List[str]] = None) -> BenchmarkRun
 
 
 def run_benchmark(runner: BenchmarkRunnerConfig) -> None:
+    _ensure_runtime_deps()
     tasks = resolve_tasks(runner.tasks)
     stagewise_seeds = parse_csv_ints(runner.stagewise_seeds)
     repo_root = Path(__file__).resolve().parents[1]

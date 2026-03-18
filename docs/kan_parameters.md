@@ -176,6 +176,8 @@ $$
 
 当前并行主要作用于 `suggest_symbolic` 阶段。由于 `fix_symbolic` 会修改模型状态，其余部分并不适合直接并行化。
 
+补充说明：当前工程实现为了正确性，实际会把 worker 数保守回落到 1；`parallel_mode` 更适合作为 requested mode 标签保存在 benchmark 输出中，而不是“已经生效的真实并行度”。
+
 ### 7.5 低风险提速参数
 
 - `prune_eval_interval = 2`
@@ -246,6 +248,8 @@ $$
 - `heavy_ft_early_stop_min_delta = 5e-4`
 
 该组参数主要用于速度专题对照，而非常规主实验设置。
+
+当前输出更适合解读为“requested mode 与实际 effective workers 的对照”；若 `benchmark_symbolic_parallel_quick.csv` 中 `parallel_workers_effective=1`，说明这轮仍以串行执行保证正确性。
 
 对应并行专题 CSV 默认导出到 `outputs/notebooks/benchmark_symbolic_parallel_quick.csv`。
 

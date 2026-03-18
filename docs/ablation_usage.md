@@ -57,7 +57,9 @@
 python -m scripts.ablation_runner --quiet
 ```
 
-也可以用 YAML 固定每个变体共享的 `AppConfig`：
+这条命令若不传 `--config`，`ablation_runner` 本身不会加载 `configs/ablation_runner.default.yaml`；它会把每个变体委托给 `scripts.symkanbenchmark`，而后者再回退到默认的 `configs/symkanbenchmark.default.yaml`。
+
+若希望显式固定所有变体共享的 `AppConfig`，建议传入：
 
 ```bash
 python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml
@@ -79,7 +81,7 @@ python -m scripts.ablation_runner --aggregate-only --output-dir outputs/benchmar
 ### 3.3 LayerwiseFT 专项分析
 
 ```bash
-python analyze_layerwiseft.py --ablation-dir outputs/benchmark_ablation --seeds 42,52,62
+python -m scripts.analyze_layerwiseft --ablation-dir outputs/benchmark_ablation --seeds 42,52,62
 ```
 
 默认输出目录为：
@@ -89,7 +91,7 @@ python analyze_layerwiseft.py --ablation-dir outputs/benchmark_ablation --seeds 
 ### 3.4 改进版 LayerwiseFT 比较
 
 ```bash
-python compare_layerwiseft_improved.py --ablation-dir outputs/benchmark_ablation --seeds 42,52,62 --quiet
+python -m scripts.compare_layerwiseft_improved --ablation-dir outputs/benchmark_ablation --seeds 42,52,62 --quiet
 ```
 
 默认输出包括：
@@ -103,7 +105,7 @@ python compare_layerwiseft_improved.py --ablation-dir outputs/benchmark_ablation
 若 `layerwiseft_esreg` 已存在，可跳过重新训练：
 
 ```bash
-python compare_layerwiseft_improved.py --ablation-dir outputs/benchmark_ablation --seeds 42,52,62 --skip-run
+python -m scripts.compare_layerwiseft_improved --ablation-dir outputs/benchmark_ablation --seeds 42,52,62 --skip-run
 ```
 
 ## 4. 参数说明
@@ -130,8 +132,9 @@ python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml 
 推荐实践是：
 
 - 用一份 `AppConfig` YAML 固定所有变体共享的算法参数。
-- 在 `ablation_runner` 层只保留变体矩阵、输出目录、Python 路径和聚合控制。
-- 各变体只保留最小的 benchmark CLI 覆盖，例如 `--no-input-compaction` 或 `--layerwise-finetune-steps 0`。
+- `ablation_runner` 自身不解析算法配置细节；它只是把这份 YAML 透传给每次 `scripts.symkanbenchmark` 调用。
+- 在 `ablation_runner` 层主要保留变体矩阵、共享 YAML、输出目录、Python 路径、seed 列表与日志控制（`--quiet / --verbose`）。
+- 各变体只保留少量 benchmark CLI 覆盖；其中 `wostagewise` 实际会打包 `--disable-stagewise-train`、`--prune-collapse-floor 0.0` 与 `--symbolic-prune-adaptive-acc-drop-tol 0.7` 三项覆盖，而不只是单个 flag。
 
 这样可以保证不同变体共享同一套基础实验设定，而不是在多个子命令里重复拷贝 `AppConfig` 字段。
 
@@ -173,6 +176,12 @@ python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml 
 - `--layerwise-validation-n-sample 300`
 
 说明：这里的 60 步是 `compare_layerwiseft_improved.py` 为了可比性设置的实验技术默认值，不等同项目推荐基线。
+
+配置来源补充说明：
+
+- `analyze_layerwiseft.py` 是纯读取已有结果的离线分析脚本，不消费 `AppConfig`。
+- `compare_layerwiseft_improved.py` 当前不会读取单独的 `AppConfig` YAML；它运行新变体时会基于 `scripts.symkanbenchmark` 的默认配置来源（即 `configs/symkanbenchmark.default.yaml`），再叠加少量 layerwise 相关 CLI 覆盖与 `--global-seed`。
+- 因此，如果你希望改进版 LayerwiseFT 建立在自定义主配置之上，当前更稳妥的做法是先手动运行一组自定义 `scripts.symkanbenchmark` 结果，再按输出目录做后续比较。
 
 ## 5. 输出目录与结果文件
 

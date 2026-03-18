@@ -63,12 +63,15 @@
 
 ```bash
 python -m scripts.symkanbenchmark \
+  --config configs/symkanbenchmark.default.yaml \
   --tasks full \
   --stagewise-seeds 42,52,62 \
   --global-seed 123 \
   --output-dir outputs/benchmark_ablation/full \
   --quiet
 ```
+
+若省略 `--config`，当前实现也会回退到同一份 `configs/symkanbenchmark.default.yaml`；这里显式写出，是为了让基线配置来源更清楚。
 
 基线流程包括：
 
@@ -86,7 +89,7 @@ python -m scripts.symkanbenchmark \
 
 1. 保持数据构建、特征筛选与 `symbolize_pipeline` 不变。
 2. 训练预算按阶段训练总步数进行对齐。
-3. 同时设置 `--prune-collapse-floor 0.0` 与较宽松的 `--symbolic-prune-adaptive-acc-drop-tol`，以避免稠密入口导致剪枝阶段直接回滚。
+3. 同时设置 `--prune-collapse-floor 0.0` 与较宽松的 `--symbolic-prune-adaptive-acc-drop-tol 0.7`，以避免稠密入口导致剪枝阶段直接回滚。
 
 ### 4.2 `w/o Progressive Pruning`
 
@@ -117,7 +120,7 @@ python -m scripts.symkanbenchmark \
 | variant_id | 变体名 | Stagewise | Progressive Pruning | Input Compaction | Layerwise FT | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
 | V0 | Full Pipeline | on | on | on | on | 基线 |
-| V1 | w/o Stagewise Train | off | on | on | on | 需同时设置 `--prune-collapse-floor 0.0` |
+| V1 | w/o Stagewise Train | off | on | on | on | `--disable-stagewise-train` + `--prune-collapse-floor 0.0` + `--symbolic-prune-adaptive-acc-drop-tol 0.7` |
 | V2 | w/o Progressive Pruning | on | off | on | on | `--max-prune-rounds 0` |
 | V3 | w/o Input Compaction | on | on | off | on | `--no-input-compaction` |
 | V4 | w/o Layerwise Finetune | on | on | on | off | `--layerwise-finetune-steps 0` |

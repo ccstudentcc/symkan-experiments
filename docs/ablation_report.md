@@ -30,8 +30,8 @@
 
 | 变体 ID | 变体名称 | 关闭的模块 | 关键 CLI 开关 |
 | --- | --- | --- | --- |
-| V0 | Full Pipeline | —（基线） | 默认配置 |
-| V1 | w/o Stagewise Train | 分阶段训练 | `--disable-stagewise-train --prune-collapse-floor 0.0` |
+| V0 | Full Pipeline | —（基线） | 共享基础 `AppConfig` 上无额外变体级 CLI 覆盖 |
+| V1 | w/o Stagewise Train | 分阶段训练 | `--disable-stagewise-train --prune-collapse-floor 0.0 --symbolic-prune-adaptive-acc-drop-tol 0.7` |
 | V2 | w/o Progressive Pruning | 渐进剪枝 | `--max-prune-rounds 0` |
 | V3 | w/o Input Compaction | 输入压缩 | `--no-input-compaction` |
 | V4 | w/o Layerwise Finetune | 层间微调 | `--layerwise-finetune-steps 0` |

@@ -49,6 +49,31 @@ def test_load_config_expands_env_as_scalar_without_yaml_injection(monkeypatch: p
         assert config.symbolize.target_edges == 47
 
 
+def test_load_config_rejects_env_placeholder_in_mapping_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    with local_temp_dir() as temp_dir:
+        config_path = temp_dir / "app.yaml"
+        config_path.write_text(
+            "runtime:\n"
+            "  device: cpu\n"
+            "${SYMKAN_SECTION}:\n"
+            "  target_edges: 47\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("SYMKAN_SECTION", "symbolize")
+
+        with pytest.raises(ConfigError, match="mapping keys"):
+            load_config(config_path)
+
+
+def test_load_config_rejects_empty_yaml_file() -> None:
+    with local_temp_dir() as temp_dir:
+        config_path = temp_dir / "empty.yaml"
+        config_path.write_text("", encoding="utf-8")
+
+        with pytest.raises(ConfigError, match="config file is empty"):
+            load_config(config_path)
+
+
 def test_ensure_numpy_dataset_files_rejects_autofetch_outside_data_dir() -> None:
     with local_temp_dir() as temp_dir:
         repo_root = temp_dir / "repo"

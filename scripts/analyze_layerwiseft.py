@@ -20,8 +20,8 @@ H4  层间微调带来跨 seed 方差，而非系统性收益
 
 用法
 ----
-  python analyze_layerwiseft.py [--ablation-dir outputs/benchmark_ablation] [--seeds 42,52,62]
-  python analyze_layerwiseft.py --ablation-dir my_runs --out-dir analysis_out
+  python -m scripts.analyze_layerwiseft [--ablation-dir outputs/benchmark_ablation] [--seeds 42,52,62]
+  python -m scripts.analyze_layerwiseft --ablation-dir my_runs --out-dir analysis_out
 """
 
 from __future__ import annotations
@@ -32,14 +32,27 @@ import math
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-import numpy as np
-import pandas as pd
-
 from scripts.project_paths import (
     DEFAULT_BENCHMARK_ABLATION_DIR,
     LEGACY_BENCHMARK_ABLATION_DIR,
     resolve_preferred_dir,
 )
+
+
+np = None
+pd = None
+
+
+def _ensure_analysis_deps() -> None:
+    global np, pd
+    if np is None:
+        import numpy as _np
+
+        np = _np
+    if pd is None:
+        import pandas as _pd
+
+        pd = _pd
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +78,7 @@ def _run_dirs(variant_dir: Path, seeds: List[int]) -> List[Tuple[int, Path]]:
 
 
 def _load_formula_validation(run_dir: Path) -> pd.DataFrame:
+    _ensure_analysis_deps()
     p = run_dir / "formula_validation.csv"
     if not p.exists():
         return pd.DataFrame()
@@ -72,6 +86,7 @@ def _load_formula_validation(run_dir: Path) -> pd.DataFrame:
 
 
 def _load_symbolic_summary(run_dir: Path) -> pd.DataFrame:
+    _ensure_analysis_deps()
     p = run_dir / "kan_symbolic_summary.csv"
     if not p.exists():
         return pd.DataFrame()
@@ -93,6 +108,7 @@ def _load_metrics(run_dir: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 def build_run_level_df(variant_dir: Path, variant: str, seeds: List[int]) -> pd.DataFrame:
+    _ensure_analysis_deps()
     """返回运行级别的指标 DataFrame（一行一 seed）。"""
     rows = []
     for seed, run_dir in _run_dirs(variant_dir, seeds):
@@ -119,6 +135,7 @@ def build_run_level_df(variant_dir: Path, variant: str, seeds: List[int]) -> pd.
 
 
 def build_class_level_df(variant_dir: Path, variant: str, seeds: List[int]) -> pd.DataFrame:
+    _ensure_analysis_deps()
     """返回类级别 R²/复杂度/AUC 的 DataFrame（一行一 (seed, class) 组合）。"""
     rows = []
     for seed, run_dir in _run_dirs(variant_dir, seeds):
@@ -145,6 +162,7 @@ def build_class_level_df(variant_dir: Path, variant: str, seeds: List[int]) -> p
 
 
 def aggregate_class(df: pd.DataFrame) -> pd.DataFrame:
+    _ensure_analysis_deps()
     """跨 seed 聚合类级指标，输出 mean ± std。"""
     rows = []
     for cls, grp in df.groupby("class"):
@@ -166,6 +184,7 @@ def aggregate_class(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def aggregate_run(df: pd.DataFrame) -> dict:
+    _ensure_analysis_deps()
     """对运行级 DataFrame 做 mean/std 汇总。"""
     cols = ["final_acc", "macro_auc", "symbolic_total_seconds", "formula_r2_mean", "formula_r2_neg_count"]
     summary = {}
@@ -186,6 +205,7 @@ def test_hypotheses(
     full_cls: pd.DataFrame,
     woft_cls: pd.DataFrame,
 ) -> str:
+    _ensure_analysis_deps()
     """
     对四个假设做定量支撑检验，返回文字报告字符串。
 
@@ -316,6 +336,7 @@ def main() -> None:
         help="输出 CSV 目录，为空则写入 ablation-dir 下的 layerwiseft_analysis/"
     )
     args = parser.parse_args()
+    _ensure_analysis_deps()
 
     repo_root = Path(__file__).resolve().parents[1]
     root = resolve_preferred_dir(

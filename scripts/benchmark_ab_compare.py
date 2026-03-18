@@ -4,10 +4,6 @@ import argparse
 from pathlib import Path
 from typing import Dict, List
 
-import numpy as np
-import pandas as pd
-from pandas.errors import EmptyDataError
-
 from scripts.project_paths import (
     DEFAULT_BENCHMARK_AB_DIR,
     LEGACY_BENCHMARK_AB_DIR,
@@ -17,7 +13,27 @@ from scripts.project_paths import (
 )
 
 
+np = None
+pd = None
+EmptyDataError = None
+
+
+def _ensure_analysis_deps() -> None:
+    global np, pd, EmptyDataError
+    if np is None:
+        import numpy as _np
+
+        np = _np
+    if pd is None:
+        import pandas as _pd
+        from pandas.errors import EmptyDataError as _EmptyDataError
+
+        pd = _pd
+        EmptyDataError = _EmptyDataError
+
+
 def _read_runs(root: Path, variant: str) -> pd.DataFrame:
+    _ensure_analysis_deps()
     path = resolve_named_child(root, variant, kind="variant name") / "symkanbenchmark_runs.csv"
     if not path.exists():
         raise FileNotFoundError(f"missing file: {path}")
@@ -28,6 +44,7 @@ def _read_runs(root: Path, variant: str) -> pd.DataFrame:
 
 
 def _variant_summary(df: pd.DataFrame, variant: str, metrics: List[str]) -> pd.DataFrame:
+    _ensure_analysis_deps()
     rows = []
     for m in metrics:
         s = df[m]
@@ -52,6 +69,7 @@ def _pairwise_delta(
     cur_name: str,
     metrics: List[str],
 ) -> pd.DataFrame:
+    _ensure_analysis_deps()
     b = base_df.set_index("stage_seed")
     c = cur_df.set_index("stage_seed")
     merged = b.join(c, lsuffix="_base", rsuffix="_cur", how="inner")
@@ -82,6 +100,7 @@ def _seedwise_delta(
     cur_name: str,
     metrics: List[str],
 ) -> pd.DataFrame:
+    _ensure_analysis_deps()
     b = base_df.set_index("stage_seed")
     c = cur_df.set_index("stage_seed")
     merged = b.join(c, lsuffix="_base", rsuffix="_cur", how="inner")
@@ -96,6 +115,7 @@ def _seedwise_delta(
 
 
 def _trace_effective_rounds(root: Path, variant: str, seeds: List[int]) -> pd.DataFrame:
+    _ensure_analysis_deps()
     rows = []
 
     def _append_empty_row(stage_seed: int) -> None:
@@ -154,6 +174,7 @@ def main() -> None:
         help="output directory",
     )
     args = parser.parse_args()
+    _ensure_analysis_deps()
 
     repo_root = Path(__file__).resolve().parents[1]
     root = resolve_preferred_dir(

@@ -78,11 +78,12 @@ KAN 每条边学到的是**单变量光滑函数**。训练收敛后，可以直
 
 `symkan` 不重写 KAN 核心（`pykan.MultKAN`），而是在其上提供**工程化管控层**：
 
+- `symkan.config`：统一配置对象、YAML 加载与校验边界。
 - `stagewise_train`：分阶段训练、验证集驱动选模与快照回滚。
 - `symbolize_pipeline`：渐进剪枝、逐层符号化与微调。
 - 导出接口：用于生成结构化日志与结果文件。
 
-需要特别区分的是：`symkan` 是库层，提供训练、符号化、评估与导出能力；benchmark / ablation 的 CLI、YAML 配置与批量复现入口属于工具层脚本，不属于 `symkan` 包 API。
+需要特别区分的是：`symkan` 是库层，提供配置、训练、符号化、评估与导出能力；benchmark / ablation 的 CLI、YAML 配置与批量复现入口属于工具层脚本，不属于 `symkan` 包 API。
 
 核心变换链（简化）：
 
@@ -343,7 +344,27 @@ $$
 
 ## 6. API 参考
 
-### 6.1 `symkan.core`
+### 6.1 `symkan.config`
+
+| API | 说明 | 关键参数 | 返回 |
+| --- | --- | --- | --- |
+| `load_config(path)` | 从 YAML 加载 `AppConfig` | `path` | `AppConfig` |
+| `validate_app_config(values)` | 校验配置字典并返回统一配置对象 | `dict` | `AppConfig` |
+| `AppConfig` | 顶层运行配置对象 | `runtime`, `data`, `stagewise`, `symbolize` 等 | 配置实例 |
+| `StagewiseConfig` / `SymbolizeConfig` | 主要子配置模型 | 各阶段字段 | 配置实例 |
+
+这一层的作用不是“给脚本凑参数”，而是统一整个项目的配置边界：
+
+- notebook / Python 调用可直接构造 `AppConfig`
+- CLI 会先 `load_config()` 得到 `AppConfig`
+- 库层最终统一消费 `AppConfig`
+
+当前还包含两个重要安全边界：
+
+- `${ENV_VAR}` / `${ENV_VAR:-default}` 只会在 YAML 解析后的标量字符串上展开。
+- 空 YAML、非法字段和越界数值会在配置加载阶段直接报错，而不是静默回退到默认值。
+
+### 6.2 `symkan.core`
 
 | API | 说明 | 关键参数 | 返回 |
 | --- | --- | --- | --- |
@@ -366,7 +387,7 @@ $$
 
 `safe_fit` 默认兼容旧接口：若训练失败，会打印错误并返回空字典；若调用方希望在失败时立即中止，可传 `raise_on_failure=True`。对需要显式区分成功、失败和降级重试的场景，优先使用 `safe_fit_report`。当前 `stagewise_train`、`symbolize_pipeline` 和逐层微调等关键路径内部都基于结构化报告处理 fit 失败，因此会回滚或中止，而不是继续沿用失败状态。
 
-### 6.2 `symkan.tuning`
+### 6.3 `symkan.tuning`
 
 | API | 说明 | 关键参数 | 返回 |
 | --- | --- | --- | --- |
@@ -374,14 +395,14 @@ $$
 | `stagewise_train_report(...)` | 结构化返回版本 | 同上 | `StagewiseResult` |
 | `sym_readiness_score(...)` | 精度与稀疏度折中打分 | `acc_weight`, `sym_target_edges` | `float` |
 
-### 6.3 `symkan.pruning`
+### 6.4 `symkan.pruning`
 
 | API | 说明 | 关键参数 | 返回 |
 | --- | --- | --- | --- |
 | `safe_attribute(model, dataset, n_sample)` | 安全归因封装（含 inference_mode 回退） | `n_sample` | `np.ndarray` |
 | `safe_attribute_report(...)` | 结构化版本 | `n_sample` | `AttributeReport` |
 
-### 6.4 `symkan.symbolic`
+### 6.5 `symkan.symbolic`
 
 | API | 说明 | 关键参数 | 返回 |
 | --- | --- | --- | --- |
@@ -391,7 +412,7 @@ $$
 
 预设函数库：`LIB_HIDDEN`, `LIB_OUTPUT`, `FAST_LIB`, `EXPRESSIVE_LIB`, `FULL_LIB`。
 
-### 6.5 `symkan.eval`
+### 6.6 `symkan.eval`
 
 | API | 说明 | 关键参数 | 返回 |
 | --- | --- | --- | --- |
@@ -399,7 +420,7 @@ $$
 | `compute_multiclass_roc_auc(y_true_onehot, y_score)` | 多分类 ROC/AUC 计算 | - | `dict` |
 | `plot_roc_curves(roc_data, ...)` | ROC 曲线绘图 | `class_labels`, `title` | `None` |
 
-### 6.6 `symkan.io`
+### 6.7 `symkan.io`
 
 | API | 说明 | 关键参数 | 返回 |
 | --- | --- | --- | --- |
@@ -498,7 +519,14 @@ sym_res = symbolize_pipeline(
 
 `symkanbenchmark.py` 是面向批量复现的 CLI 脚本，封装了 Notebook 主流程，用于在同一组参数下批量运行多 seed 并稳定导出 CSV。
 
-当前 benchmark / ablation 工具已改为优先读取 `AppConfig` YAML；脚本 CLI 只保留任务调度和少量显式嵌套覆盖。需要调整训练、剪枝或符号化细节时，优先改 `configs/*.yaml` 或直接构造 `AppConfig`。
+当前 benchmark / ablation 工具已改为优先读取 `AppConfig` YAML；脚本 CLI 只保留任务调度和一小组显式白名单覆盖。需要调整训练、剪枝或符号化细节时，优先改 `configs/*.yaml` 或直接构造 `AppConfig`。
+
+当前配置来源口径可概括为：
+
+- `scripts.symkanbenchmark`：显式传入 `--config` 时读取对应 YAML；省略时默认加载 `configs/symkanbenchmark.default.yaml`；随后只对白名单字段做覆盖，覆盖点分布在 `runtime / library / workflow / evaluation / symbolize`。
+- `scripts.ablation_runner`：`--config` 只作为共享 `AppConfig` 透传给每次 benchmark 子运行；若省略，则各变体最终仍回退到 `configs/symkanbenchmark.default.yaml`。
+- `scripts.compare_layerwiseft_improved`：当前没有独立的 `AppConfig` YAML 入口；它基于 benchmark 默认配置来源，再叠加少量 layerwise 与 `global_seed` 相关 CLI 覆盖。
+- `stagewise.validation_seed` 与 `symbolize.layerwise_validation_seed` 可在 YAML 中显式给定；若留空，运行时会继承 `runtime.global_seed`。
 
 三组核心实验设计：
 
@@ -512,35 +540,35 @@ sym_res = symbolize_pipeline(
 # baseline
 python -m scripts.symkanbenchmark \
     --tasks full --stagewise-seeds 42,52,62 \
-    --config configs/symkanbenchmark.default.yaml \
+    --config configs/benchmark_ab/baseline.yaml \
     --output-dir outputs/benchmark_ab/baseline --quiet
 
 # adaptive
 python -m scripts.symkanbenchmark \
     --tasks full --stagewise-seeds 42,52,62 \
-    --config configs/symkanbenchmark.default.yaml \
+    --config configs/benchmark_ab/adaptive.yaml \
     --output-dir outputs/benchmark_ab/adaptive --quiet
 
 # adaptive_auto
 python -m scripts.symkanbenchmark \
     --tasks full --stagewise-seeds 42,52,62 \
-    --config configs/symkanbenchmark.default.yaml \
+    --config configs/benchmark_ab/adaptive_auto.yaml \
     --output-dir outputs/benchmark_ab/adaptive_auto --quiet
 ```
 
-建议先从 `configs/symkanbenchmark.default.yaml` 复制出你自己的 variant 配置文件，再分别调整 `stagewise.*` / `symbolize.*` 字段。
+仓库现在已提供 `configs/benchmark_ab/baseline.yaml`、`configs/benchmark_ab/adaptive.yaml` 与 `configs/benchmark_ab/adaptive_auto.yaml` 三份模板。若需扩展，可从它们继续复制并调整 `stagewise.*` / `symbolize.*` 字段。不要把三个变体都指向同一份 YAML，否则只会得到“不同目录、相同配置”的伪对照。
 
 自动生成对比表：
 
 ```bash
-python benchmark_ab_compare.py \
+python -m scripts.benchmark_ab_compare \
     --root outputs/benchmark_ab \
     --baseline baseline \
     --variants adaptive,adaptive_auto \
     --output outputs/benchmark_ab/comparison
 ```
 
-输出文件说明：`variant_summary.csv`（均值统计）、`pairwise_delta_summary.csv`（胜负计数与中位数差值）、`seedwise_delta.csv`（逐 seed 差值）、`trace_summary.csv`（剪枝轨迹统计）。
+输出文件说明：`variant_summary.csv`（均值统计）、`pairwise_delta_summary.csv`（胜负计数与中位数差值）、`seedwise_delta.csv`（逐 seed 差值）、`trace_summary.csv`（剪枝轨迹统计）、`comparison_summary.md`（便于论文或汇报复用的摘要）。
 
 当前 3 个 seeds（42/52/62）上的结果如下：
 
@@ -551,7 +579,10 @@ python benchmark_ab_compare.py \
 
 ### 8.5 LayerwiseFT 改进版
 
-如需启用 LayerwiseFT，可采用带早停和轻正则的短步数设置，而非旧版的长步数无约束微调：
+如需启用 LayerwiseFT，可采用带早停和轻正则的短步数设置，而非旧版的长步数无约束微调。这里要区分两种口径：
+
+- 技术默认值：`configs/*.yaml` / schema 当前保留 `layerwise_finetune_steps=60` 与验证集早停参数，便于对照实验复现。
+- 项目推荐基线：对典型 2 层 KAN，通常显式传入 `--layerwise-finetune-steps 0`，把 LayerwiseFT 视为按需开启的实验开关。
 
 - 参考起点：`--layerwise-finetune-steps 60 --layerwise-use-validation --layerwise-finetune-lamb 1e-5 --layerwise-early-stop-patience 2`
 - 适用场景：你愿意用更多时间换取极小的分类指标提升。
@@ -596,7 +627,7 @@ python benchmark_ab_compare.py \
 | CLI 参数 | 对应 Python 参数 | 说明 |
 | --- | --- | --- |
 | `--layerwise-finetune-steps 0` | `symbolize.layerwise_finetune_steps=0` | 关闭或缩短 layerwise 微调 |
-| 更细的 layerwise 参数 | `symbolize.*` | 如 `layerwise_finetune_lr`、`layerwise_use_validation`、`layerwise_early_stop_*` 建议直接写入 `AppConfig` YAML |
+| 更细的 layerwise 参数 | `symbolize.*` | 如 `layerwise_finetune_lr`、`layerwise_use_validation`、`layerwise_early_stop_*` 建议直接写入 `AppConfig` YAML；CLI 仅保留少量白名单覆盖 |
 
 ## 9. 补充说明
 

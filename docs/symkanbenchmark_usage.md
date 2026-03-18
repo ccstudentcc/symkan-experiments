@@ -47,23 +47,39 @@ python -m scripts.symkanbenchmark --tasks all --verbose
 python -m scripts.symkanbenchmark --config configs/symkanbenchmark.default.yaml --quiet
 ```
 
+若未显式传入 `--config`，脚本当前会默认读取：
+
+```bash
+configs/symkanbenchmark.default.yaml
+```
+
 约定如下：
 
 - `AppConfig` YAML 管算法运行逻辑：训练参数、设备、数据路径、符号化策略等。
 - 环境变量管敏感项或环境差异：支持 `${ENV_VAR}` 和 `${ENV_VAR:-default}`，且只会在 YAML 解析后的标量字符串上展开，避免把环境变量内容当成新的配置结构。
 - CSV 管输入数据与结果产物：例如 `symkanbenchmark_runs.csv`、`kan_stage_logs.csv`、`kan_symbolic_summary.csv`。
 
-命令行参数不再由 `load_config()` 自动合并进配置对象；脚本只对少量嵌套字段做显式覆盖，因此适合“固定主配置 + 少量局部覆盖”的工作流。
+命令行参数不再由 `load_config()` 自动合并进配置对象；脚本会先 `load_config()` 得到 `AppConfig`，再仅对白名单字段做显式且重新校验的覆盖。当前覆盖点分布在 `runtime / library / workflow / evaluation / symbolize` 五段，因此适合“固定主配置 + 少量局部覆盖”的工作流。
 
 ## 配置分层原则
 
 当前项目采用三层口径：
 
 1. notebook / Python 调用：直接构造 `AppConfig` 并传给核心函数。
-2. CLI：先 `load_config()` 得到 `AppConfig`，再做少量显式嵌套覆盖。
+2. CLI：先 `load_config()` 得到 `AppConfig`，再做一小组显式白名单覆盖。
 3. 核心编排：统一只认 `AppConfig`，而不是 `argparse.Namespace` 或脚本私有配置模型。
 
 `symkanbenchmark.py` 现在直接把 `AppConfig` 传给 `stagewise_train` / `symbolize_pipeline`。也就是说，YAML、CLI 和 notebook 最终都收敛到同一份库层配置对象。
+
+还需注意一层运行期注入：
+
+- `stagewise.width`、`stagewise.grid`、`stagewise.k`、`stagewise.seed`、`stagewise.batch_size`
+- `stagewise.validation_seed` 若在 YAML 中留空，则运行时继承 `runtime.global_seed`
+- `symbolize.batch_size`
+- `symbolize.layerwise_validation_seed` 若在 YAML 中留空，则运行时继承 `runtime.global_seed`
+- 当 `symbolize.lib / lib_hidden / lib_output` 都未显式指定时，由 `library.lib_preset` 派生对应函数库
+
+这些字段由脚本在运行时基于数据形状、seed、batch size 和函数库预设补入，不要求在 YAML 中手工硬编码。
 
 ### 1.2 主实验
 
@@ -82,7 +98,7 @@ python -m scripts.symkanbenchmark --tasks full --quiet
 说明：
 
 - 当前脚本把算法参数统一收敛到 `AppConfig` YAML。
-- CLI 主要保留任务调度、输出目录、seed 列表和少量显式嵌套覆盖。
+- CLI 主要保留任务调度、输出目录、seed 列表和一小组显式白名单覆盖。
 - 更细的训练/剪枝/符号化参数，推荐直接修改 `configs/symkanbenchmark.default.yaml` 或你自己的 `AppConfig` 文件。
 
 ### 1.3 多 seed 运行
@@ -110,6 +126,8 @@ python -m scripts.symkanbenchmark --tasks eval-bench
 ```bash
 python -m scripts.symkanbenchmark --tasks parallel-bench --parallel-modes auto,off,thread4,thread8
 ```
+
+说明：当前 `parallel-bench` 仍是 correctness-first 的 requested-mode 对照。脚本会保留 `auto/off/threadN` 这些请求标签做横向记录，但 `suggest_symbolic` 的实际 worker 数会保守回落到 1；可在输出列 `parallel_workers_effective` 中确认。
 
 - 组合任务：
 
@@ -146,7 +164,7 @@ outputs/benchmark_runs/
 2. `kan_stage_logs.csv`：阶段训练是否频繁回滚。
 3. `symbolize_trace.csv`：剪枝节奏是否过猛。
 4. `formula_validation.csv`：R² 与数值稳定性。
-5. `benchmark_symbolic_parallel_quick.csv`：并行加速是否真实有效。
+5. `benchmark_symbolic_parallel_quick.csv`：requested mode 标签与实际 `parallel_workers_effective` 的对照结果。
 
 ## 4. 参数速查
 
@@ -164,7 +182,7 @@ outputs/benchmark_runs/
 口径说明如下：
 
 1. 算法参数的正式默认值以 `AppConfig` 模型和示例 YAML 为准。
-2. CLI 主要承担任务调度和少量显式嵌套覆盖，不再承载整套研究参数。
+2. CLI 主要承担任务调度和一小组显式白名单覆盖，不再承载整套研究参数。
 3. 对典型 2 层 KAN（`[in, hidden, class]`），项目层设定通常仍将 `layerwise_finetune_steps` 视为按需开关。
 
 逐层符号化属于有损替换；`fix_symbolic` 选定函数族后无法回退。在 2 层 KAN 中，LayerwiseFT 仅有一次层间补偿窗口，因此其改进版更接近风险控制选项，而非默认增益模块。
@@ -173,7 +191,7 @@ outputs/benchmark_runs/
 
 - `--tasks full`：只跑主实验链路。
 - `--tasks eval-bench`：只跑评估性能专题（会复用主流程上下文）。
-- `--tasks parallel-bench`：只跑并行策略对照。
+- `--tasks parallel-bench`：只跑 requested-mode 对照；当前实现会把实际 worker 数保守回落到 1。
 - `--tasks all`：一次跑完 full + eval-bench + parallel-bench。
 - `--stagewise-seeds 42,52,62`：指定一组 stagewise 随机种子并逐个运行。
 - `--output-dir outputs/benchmark_runs_alt`：指定输出根目录，避免和已有实验互相覆盖。
@@ -208,7 +226,7 @@ outputs/benchmark_runs/
 
 ### 4.5 并行 benchmark 参数
 
-- `--parallel-modes auto,off,thread4`：并行策略候选集合（用于横向测速）。
+- `--parallel-modes auto,off,thread4`：requested mode 候选集合；当前主要用于记录标签与串行基线对照，而不是验证真实多 worker 提速。
 - `--parallel-target-min 40`：并行实验中的最小目标边数。
 - `--parallel-target-max 80`：并行实验中的最大目标边数。
 - `--parallel-max-prune-rounds 8`：并行实验允许的最大剪枝轮数。
@@ -254,7 +272,7 @@ outputs/benchmark_runs/
 python -m scripts.symkanbenchmark \
   --tasks full \
   --stagewise-seeds 42,52,62 \
-  --config configs/symkanbenchmark.default.yaml \
+  --config <VARIANT_APP_CONFIG> \
   --output-dir <OUT_DIR> \
   <EXTRA_FLAGS> \
   --quiet
@@ -264,32 +282,31 @@ python -m scripts.symkanbenchmark \
 
 ```bash
 # baseline
-python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/symkanbenchmark.default.yaml --output-dir outputs/benchmark_ab/baseline --quiet
+python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/baseline.yaml --output-dir outputs/benchmark_ab/baseline --quiet
 
 # adaptive
-# 先复制 configs/symkanbenchmark.default.yaml 到你自己的变体 YAML，再调整 stagewise/symbolize 字段
-python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/symkanbenchmark.default.yaml --output-dir outputs/benchmark_ab/adaptive --quiet
+python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/adaptive.yaml --output-dir outputs/benchmark_ab/adaptive --quiet
 
 # adaptive_auto
-# 同样建议为 adaptive_auto 单独准备一份 AppConfig YAML
-python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/symkanbenchmark.default.yaml --output-dir outputs/benchmark_ab/adaptive_auto --quiet
+python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/adaptive_auto.yaml --output-dir outputs/benchmark_ab/adaptive_auto --quiet
 ```
 
 ### 6.2 配置建议
 
 这一组实验不再推荐通过长 CLI 逐项传参。
 
-- `baseline`、`adaptive`、`adaptive_auto` 的差异应直接体现在各自复制出来的 `AppConfig` YAML 中。
-- 当前仓库只内置 `configs/symkanbenchmark.default.yaml`；建议从它复制出你自己的 variant 配置文件。
-- benchmark CLI 主要保留 `--config`、`--output-dir`、`--stagewise-seeds` 和少量显式覆盖项。
+- `baseline`、`adaptive`、`adaptive_auto` 的差异应直接体现在各自的 `AppConfig` YAML 中。
+- 当前仓库已内置 `configs/benchmark_ab/baseline.yaml`、`configs/benchmark_ab/adaptive.yaml` 与 `configs/benchmark_ab/adaptive_auto.yaml` 三份模板；若需扩展，再从它们复制出你自己的 variant 配置文件。
+- benchmark CLI 主要保留 `--config`、`--output-dir`、`--stagewise-seeds` 和一小组显式白名单覆盖项。
 - 需要复现实验时，优先保留完整 YAML，而不是把研究参数重新散落回命令行。
+- 不建议把三个变体都指向同一份 YAML；否则只会得到不同输出目录下的同配置结果，而不是有效对照。
 
 ### 6.3 结果自动汇总
 
 结果汇总可使用 [benchmark_ab_compare.py](../benchmark_ab_compare.py)：
 
 ```bash
-python benchmark_ab_compare.py --root outputs/benchmark_ab --baseline baseline --variants adaptive,adaptive_auto --output outputs/benchmark_ab/comparison
+python -m scripts.benchmark_ab_compare --root outputs/benchmark_ab --baseline baseline --variants adaptive,adaptive_auto --output outputs/benchmark_ab/comparison
 ```
 
 输出：
@@ -299,6 +316,7 @@ python benchmark_ab_compare.py --root outputs/benchmark_ab --baseline baseline -
 - [outputs/benchmark_ab/comparison/seedwise_delta.csv](../outputs/benchmark_ab/comparison/seedwise_delta.csv)
 - [outputs/benchmark_ab/comparison/trace_seedwise.csv](../outputs/benchmark_ab/comparison/trace_seedwise.csv)
 - [outputs/benchmark_ab/comparison/trace_summary.csv](../outputs/benchmark_ab/comparison/trace_summary.csv)
+- [outputs/benchmark_ab/comparison/comparison_summary.md](../outputs/benchmark_ab/comparison/comparison_summary.md)
 
 ### 6.4 当前统计结果（seed: 42/52/62）
 

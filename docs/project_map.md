@@ -10,7 +10,7 @@
 
 ## 概述
 
-该仓库围绕 KAN 的符号化流程组织。`symkan/` 提供工程化库接口，根目录脚本负责批量实验与分析，`docs/` 提供方法、参数和实验结论的说明。
+该仓库围绕 KAN 的符号化流程组织。`symkan/` 提供工程化库接口，其中既包括算法执行模块，也包括统一配置入口；根目录脚本负责批量实验与分析，`docs/` 提供方法、参数和实验结论的说明。
 
 ## 仓库组成
 
@@ -18,6 +18,7 @@
 
 该目录是仓库的核心实现层，也是主要复用逻辑所在。
 
+- `symkan/config/`：统一配置层，负责 `AppConfig`、子配置 schema、YAML 加载、环境变量占位符展开与配置校验；脚本与库层最终都收敛到这一层。
 - `symkan/core/`：设备、数据集、训练基础接口、结构化类型；dataset 构建同时兼容 1D 类别索引和 2D one-hot/概率标签。
 - `symkan/tuning/`：`stagewise_train` 和相关自适应控制逻辑。
 - `symkan/symbolic/`：函数库、输入压缩、逐层符号化、主流水线。
@@ -25,7 +26,7 @@
 - `symkan/eval/`：ROC/AUC 和公式数值验证。
 - `symkan/io/`：结果导出、bundle 读写；bundle 读取仅面向显式信任的本地 pickle 文件。
 
-该目录是理解项目主流程的主要代码入口。
+因此，`symkan/` 不只是“算法核心层”，也是“统一配置口径”的实现层。理解项目主流程时，通常应把 `symkan/config/` 与 `symkan/tuning/`、`symkan/symbolic/` 一起看，而不是只看训练和符号化模块。
 
 ### 2. `kan/`
 
@@ -48,8 +49,9 @@
 
 这些脚本当前统一采用“`AppConfig` + 脚本编排参数”的模式：
 
-- `symkanbenchmark.py` 先用 `symkan.config.load_config()` 读取 `AppConfig`。
-- `ablation_runner.py` 复用同一份 `AppConfig`，只在脚本层组织 variants / output-dir / seeds。
+- `symkanbenchmark.py` 先用 `symkan.config.load_config()` 读取 `AppConfig`；若省略 `--config`，会回退到 `configs/symkanbenchmark.default.yaml`，再只对白名单字段做显式覆盖。
+- `ablation_runner.py` 可把一份共享 `AppConfig` 透传给各变体；若省略 `--config`，每次委托运行最终仍回退到 `symkanbenchmark.py` 的默认配置来源。脚本层还负责组织 variants / output-dir / seeds / quiet / verbose。
+- `compare_layerwiseft_improved.py` 当前没有单独的 `AppConfig` YAML 入口；它基于 benchmark 默认配置来源，再叠加少量 layerwise / seed 相关 CLI 覆盖。
 - 更底层的训练/符号化逻辑继续直接依赖 `symkan.config.AppConfig`。
 
 ### 4. `docs/`
@@ -120,13 +122,15 @@
 
 如需进一步阅读代码，可优先从以下入口开始：
 
+- `symkan/config/loader.py`
+- `symkan/config/schema.py`
 - `symkan/core/__init__.py`
 - `symkan/tuning/stagewise.py`
 - `symkan/symbolic/pipeline.py`
 - `symkan/eval/metrics.py`
 - `symkanbenchmark.py`
 
-这些位置决定了数据流、结果落盘方式以及实验脚本与公共库之间的接口关系。
+这些位置共同决定了配置流、数据流、结果落盘方式以及实验脚本与公共库之间的接口关系。
 
 ## 当前可引用的主要结论
 

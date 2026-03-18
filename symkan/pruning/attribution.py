@@ -51,9 +51,13 @@ def safe_attribute(model, dataset, n_sample: int = 2048):
     finally:
         model.train(was_training)
 
-    score = model.feature_score.detach().cpu().numpy() if hasattr(model, "feature_score") else None
+    feature_score = getattr(model, "feature_score", None)
+    score = feature_score.detach().cpu().numpy() if feature_score is not None else None
     if score is None:
-        score = np.ones(model.width_in[0])
+        raise RuntimeError(
+            "attribute() finished without populating feature_score; "
+            "cannot continue with implicit uniform feature ranking"
+        )
     return score
 
 

@@ -7,8 +7,6 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-import pandas as pd
-
 from scripts.project_paths import (
     DEFAULT_BENCHMARK_ABLATION_DIR,
     LEGACY_BENCHMARK_ABLATION_DIR,
@@ -16,6 +14,17 @@ from scripts.project_paths import (
     resolve_named_child,
     validate_child_name,
 )
+
+
+pd = None
+
+
+def _ensure_analysis_deps() -> None:
+    global pd
+    if pd is None:
+        import pandas as _pd
+
+        pd = _pd
 
 
 VARIANT_FULL = "full"
@@ -90,6 +99,7 @@ def find_runs(variant_dir: Path, seeds: List[int]) -> List[Tuple[int, Path]]:
 
 
 def load_variant_frame(ablation_root: Path, variant: str, seeds: List[int]) -> pd.DataFrame:
+    _ensure_analysis_deps()
     variant_dir = resolve_named_child(ablation_root, variant, kind="variant name")
     if not variant_dir.exists():
         raise FileNotFoundError(f"variant directory not found: {variant_dir}")
@@ -133,6 +143,7 @@ def load_variant_frame(ablation_root: Path, variant: str, seeds: List[int]) -> p
 
 
 def summarize(df: pd.DataFrame) -> pd.DataFrame:
+    _ensure_analysis_deps()
     metric_cols = [
         "final_acc",
         "macro_auc",
@@ -158,6 +169,7 @@ def summarize(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def pairwise_delta(summary_df: pd.DataFrame, left: str, right: str) -> pd.DataFrame:
+    _ensure_analysis_deps()
     l = summary_df.loc[summary_df["variant"] == left]
     r = summary_df.loc[summary_df["variant"] == right]
     if len(l) != 1 or len(r) != 1:
@@ -211,6 +223,7 @@ def main() -> None:
     parser.add_argument("--layerwise-eval-interval", type=int, default=20)
     parser.add_argument("--layerwise-validation-n-sample", type=int, default=300)
     args = parser.parse_args()
+    _ensure_analysis_deps()
     args.new_variant = validate_child_name(args.new_variant, kind="variant name")
 
     repo_root = Path(__file__).resolve().parents[1]

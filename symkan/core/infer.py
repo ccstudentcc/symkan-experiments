@@ -69,11 +69,16 @@ def model_logits(model, X, device: Optional[str] = None):
     Returns:
         numpy.ndarray: logits 数组。
     """
+    was_training = bool(getattr(model, "training", False))
     model.eval()
     dev = _pick_device(model, device)
-    with torch.no_grad():
-        x = torch.as_tensor(X, dtype=torch.float32, device=dev)
-        return model(x).detach().cpu().numpy()
+    try:
+        with torch.no_grad():
+            x = torch.as_tensor(X, dtype=torch.float32, device=dev)
+            return model(x).detach().cpu().numpy()
+    finally:
+        if hasattr(model, "train"):
+            model.train(was_training)
 
 
 def model_logits_ds(model, dataset, split: str = "test", device: Optional[str] = None):
@@ -91,19 +96,24 @@ def model_logits_ds(model, dataset, split: str = "test", device: Optional[str] =
     Raises:
         ValueError: 当请求的 split 不存在或为空时抛出。
     """
+    was_training = bool(getattr(model, "training", False))
     model.eval()
     dev = _pick_device(model, device)
-    input_key = f"{split}_input"
-    if input_key not in dataset or dataset[input_key] is None:
-        raise ValueError(f"数据集缺少可用 split: {split}")
-    x = dataset[input_key]
-    if not torch.is_tensor(x):
-        x = torch.as_tensor(x, dtype=torch.float32, device=dev)
-    else:
-        x = x.to(dev)
-    with torch.inference_mode():
-        logits = model(x)
-    return logits
+    try:
+        input_key = f"{split}_input"
+        if input_key not in dataset or dataset[input_key] is None:
+            raise ValueError(f"数据集缺少可用 split: {split}")
+        x = dataset[input_key]
+        if not torch.is_tensor(x):
+            x = torch.as_tensor(x, dtype=torch.float32, device=dev)
+        else:
+            x = x.to(dev)
+        with torch.inference_mode():
+            logits = model(x)
+        return logits
+    finally:
+        if hasattr(model, "train"):
+            model.train(was_training)
 
 
 def model_acc(model, X, y_cls, device: Optional[str] = None):

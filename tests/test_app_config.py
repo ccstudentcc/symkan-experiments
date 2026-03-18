@@ -101,6 +101,23 @@ def test_load_config_rejects_invalid_nested_field() -> None:
         load_config(config_path)
 
 
+@pytest.mark.parametrize(
+    ("payload", "error_match"),
+    [
+        ({"stagewise": {"validation_ratio": 1.0}}, "stagewise.validation_ratio"),
+        ({"symbolize": {"layerwise_validation_ratio": -0.1}}, "symbolize.layerwise_validation_ratio"),
+        ({"data": {"mnist_classes": []}}, "mnist_classes"),
+        ({"evaluation": {"validate_n_sample": 0}}, "evaluation.validate_n_sample"),
+    ],
+)
+def test_validate_app_config_rejects_invalid_boundary_values(
+    payload: dict[str, object],
+    error_match: str,
+) -> None:
+    with pytest.raises(ConfigError, match=error_match):
+        validate_app_config(payload)
+
+
 def test_template_yaml_loads() -> None:
     template_path = Path("symkan/config/template.yaml")
     config = load_config(template_path)
@@ -144,6 +161,13 @@ def test_benchmark_cli_overrides_are_applied_to_nested_app_config() -> None:
     assert config.symbolize.layerwise_eval_interval == 10
     assert config.symbolize.layerwise_validation_n_sample == 128
     assert config.symbolize.enable_input_compaction is False
+
+
+def test_benchmark_cli_overrides_are_revalidated() -> None:
+    runner = make_runner(layerwise_validation_ratio=1.0)
+
+    with pytest.raises(ConfigError, match="layerwise_validation_ratio"):
+        load_benchmark_app_config(None, runner)
 
 
 def test_benchmark_without_config_uses_checked_in_runner_defaults() -> None:

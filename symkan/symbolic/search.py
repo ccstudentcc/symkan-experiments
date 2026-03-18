@@ -49,7 +49,9 @@ def layerwise_symbolic(work, dataset, layer_idx, lib, weight_simple=0.0, verbose
     fixed_count = 0
     low_r2_count = 0
     active_count = 0
+    failed_count = 0
     r2_records = []
+    failed_records = []
 
     l = layer_idx
     n_in = work.width_in[l]
@@ -79,6 +81,16 @@ def layerwise_symbolic(work, dataset, layer_idx, lib, weight_simple=0.0, verbose
                     if verbose:
                         print(f"    ⚠ 低R² fix ({l},{i},{j}) → {name}  R²={r2:.4f}")
             except Exception as e:
+                failed_count += 1
+                failed_records.append(
+                    {
+                        "layer": int(l),
+                        "i": int(i),
+                        "j": int(j),
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                    }
+                )
                 if verbose:
                     print(f"    ({l},{i},{j}) suggest 失败: {e}")
 
@@ -89,7 +101,9 @@ def layerwise_symbolic(work, dataset, layer_idx, lib, weight_simple=0.0, verbose
         "active": active_count,
         "fixed": fixed_count,
         "low_r2": low_r2_count,
+        "failed": failed_count,
         "r2_records": r2_records,
+        "failed_records": failed_records,
     }
 
 
@@ -345,7 +359,9 @@ def fast_symbolic(
     total_fixed = 0
     total_active = 0
     total_low_r2 = 0
+    total_failed = 0
     layer_times = []
+    all_failed_records = []
     fit_dataset, val_dataset = _build_layerwise_ft_datasets(
         dataset,
         use_validation=bool(layerwise_use_validation),
@@ -375,9 +391,11 @@ def fast_symbolic(
             }
         )
         all_records.extend(result["r2_records"])
+        all_failed_records.extend(result["failed_records"])
         total_fixed += result["fixed"]
         total_active += result["active"]
         total_low_r2 += result["low_r2"]
+        total_failed += result["failed"]
 
         ft_info = {
             "steps_requested": int(layerwise_finetune_steps),
@@ -422,7 +440,9 @@ def fast_symbolic(
         "active": total_active,
         "fixed": total_fixed,
         "low_r2": total_low_r2,
+        "failed": total_failed,
         "r2_records": all_records,
+        "failed_records": all_failed_records,
         "layer_times": layer_times,
         "parallel_workers": int(suggest_workers),
     }

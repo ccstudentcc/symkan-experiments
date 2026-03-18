@@ -19,7 +19,7 @@
 - 参数很多，但缺少统一口径，不知道哪些是技术默认值，哪些是项目层研究设定。
 - 单次 seed 看起来很好，换个 seed 结论就变。
 
-本仓库的基本思路是先统一数据结构、输出格式和实验入口，再在此基础上组织训练、剪枝、符号化和评估流程。核心模块 `symkan/` 提供训练、符号化、评估和导出接口；根目录脚本负责批量实验、A/B 对比和消融分析。
+本仓库的基本思路是先统一配置对象、数据结构、输出格式和实验入口，再在此基础上组织训练、剪枝、符号化和评估流程。核心模块 `symkan/` 提供配置、训练、符号化、评估和导出接口；根目录脚本负责批量实验、A/B 对比和消融分析。
 
 ## 文档路径
 
@@ -28,6 +28,7 @@
 - 项目结构：读 [docs/project_map.md](docs/project_map.md)。
 - 最小示例：读 [docs/symkan_usage.md](docs/symkan_usage.md) 第 4 节。
 - 实验复现：读 [docs/symkanbenchmark_usage.md](docs/symkanbenchmark_usage.md)。
+- 完整复跑手册：读 [docs/full_experiment_runbook.md](docs/full_experiment_runbook.md)。
 - 设计依据：读 [docs/design.md](docs/design.md)。
 - 单因素消融：读 [docs/ablation_usage.md](docs/ablation_usage.md)。
 - 结果报告：读 [docs/ablation_report.md](docs/ablation_report.md) 和 [docs/layerwiseft_improved_report.md](docs/layerwiseft_improved_report.md)。
@@ -53,6 +54,11 @@ python -m scripts.symkanbenchmark --config configs/symkanbenchmark.default.yaml 
 python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml
 ```
 
+补充口径：
+
+- `scripts.symkanbenchmark` 若省略 `--config`，会默认读取 `configs/symkanbenchmark.default.yaml`。
+- `scripts.ablation_runner` 不会在省略 `--config` 时自动选中 `configs/ablation_runner.default.yaml`；它只会把显式传入的 YAML 透传给每次 benchmark 运行。若省略该参数，各变体最终仍回退到 `scripts.symkanbenchmark` 的默认配置来源。
+
 推荐约定：
 
 - YAML：运行配置、实验参数、输出目录、设备、seed 等。
@@ -64,8 +70,8 @@ python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml
 当前项目的分层方式是：
 
 - Notebook / 库调用：统一优先构造 `symkan.config.AppConfig`，由其承载 `stagewise` / `symbolize` 子配置。
-- CLI / 批量实验：优先使用 `AppConfig` YAML，并仅在脚本层做显式嵌套覆盖。
-- 核心编排逻辑：统一依赖工具层的结构化 `Config` 对象。
+- CLI / 批量实验：优先使用 `AppConfig` YAML，并仅在脚本层做一小组显式白名单覆盖。
+- 核心编排逻辑：统一依赖 `symkan.config.AppConfig`，而不是脚本私有 `argparse.Namespace` 或另一套配置模型。
 - 底层库逻辑：统一依赖 `symkan.config.AppConfig`，而 `StagewiseConfig` / `SymbolizeConfig` 作为其嵌套子配置存在。
 
 运行结果通常写入以下位置：
@@ -88,7 +94,7 @@ python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml
 ```text
 symkan-experiments/
 ├─ data/                        # 数据集与本地缓存
-├─ symkan/                      # 工程化核心库：训练、符号化、评估、导出
+├─ symkan/                      # 工程化核心库：配置、训练、符号化、评估、导出
 ├─ kan/                         # 本地 pykan 相关实现与兼容层
 ├─ docs/                        # 面向读者的说明文档与实验报告
 ├─ outputs/                     # 脚本运行产物与实验归档
@@ -118,9 +124,11 @@ symkan-experiments/
 
 对应模块分工：
 
+- `symkan.config`：`AppConfig`、YAML 加载、环境变量占位符展开与配置校验。
 - `symkan.core`：设备、数据集、训练基础接口。
 - `symkan.tuning`：分阶段训练、选模、自适应节奏控制。
 - `symkan.symbolic`：函数库、输入压缩、逐层符号化主流程。
+- `symkan.pruning`：归因、剪枝辅助逻辑与安全包装。
 - `symkan.eval`：ROC/AUC、公式数值验证。
 - `symkan.io`：CSV / bundle 导出。
 
@@ -133,7 +141,7 @@ symkan-experiments/
 - `stagewise_train` 默认开启。
 - 渐进剪枝默认开启，其主要作用在于复杂度控制。
 - 输入压缩默认开启，以控制符号化成本。
-- 对典型 2 层 KAN，`LayerwiseFT` 的默认设置为关闭，即显式传入 `--layerwise-finetune-steps 0`。
+- 对典型 2 层 KAN，项目推荐基线通常显式传入 `--layerwise-finetune-steps 0`；而 `configs/*.yaml` / schema 中保留的 `60` 属于技术默认值，主要服务于对照实验与兼容配置。
 
 相关依据见：
 
@@ -141,12 +149,23 @@ symkan-experiments/
 - [docs/ablation_report.md](docs/ablation_report.md)
 - [docs/layerwiseft_improved_report.md](docs/layerwiseft_improved_report.md)
 
+## 验证命令
+
+推荐在项目环境中于仓库根目录执行：
+
+```bash
+python -m pytest
+```
+
+该写法与文档中的 `python -m scripts.*` 入口保持一致，也更不依赖调用器如何设置 `sys.path`。
+
 ## 文档导航
 
 - [docs/index.md](docs/index.md)：文档总入口。
 - [docs/project_map.md](docs/project_map.md)：项目地图与阅读路线。
 - [docs/symkan_usage.md](docs/symkan_usage.md)：核心库使用说明。
 - [docs/symkanbenchmark_usage.md](docs/symkanbenchmark_usage.md)：批量实验脚本说明。
+- [docs/full_experiment_runbook.md](docs/full_experiment_runbook.md)：完整实验复跑步骤与输出清单。
 - [docs/design.md](docs/design.md)：架构设计、边界和项目层默认设定。
 - [docs/kan_parameters.md](docs/kan_parameters.md)：`notebooks/kan.ipynb` 参数解释。
 - [docs/ablation_usage.md](docs/ablation_usage.md)：消融脚本使用说明。

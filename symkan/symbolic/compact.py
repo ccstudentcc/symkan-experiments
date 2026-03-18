@@ -9,12 +9,17 @@ import torch
 def select_dataset_inputs(dataset, input_idx):
     """按输入索引子集裁切数据集。"""
     idx = torch.as_tensor(input_idx, dtype=torch.long, device=dataset["train_input"].device)
-    return {
+    selected = {
         "train_input": dataset["train_input"].index_select(1, idx),
         "train_label": dataset["train_label"],
         "test_input": dataset["test_input"].index_select(1, idx.to(dataset["test_input"].device)),
         "test_label": dataset["test_label"],
     }
+    if "val_input" in dataset and dataset["val_input"] is not None:
+        val_idx = idx.to(dataset["val_input"].device)
+        selected["val_input"] = dataset["val_input"].index_select(1, val_idx)
+        selected["val_label"] = dataset.get("val_label")
+    return selected
 
 
 def first_layer_active_inputs(work):

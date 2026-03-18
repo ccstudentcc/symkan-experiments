@@ -4,16 +4,29 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
-
-import numpy as np
-import pandas as pd
+from typing import Any, Dict, List, Optional
 
 from scripts.project_paths import (
     DEFAULT_BENCHMARK_ABLATION_DIR,
     LEGACY_BENCHMARK_ABLATION_DIR,
     resolve_preferred_dir,
 )
+
+
+np = None
+pd = None
+
+
+def _ensure_analysis_deps() -> None:
+    global np, pd
+    if np is None:
+        import numpy as _np
+
+        np = _np
+    if pd is None:
+        import pandas as _pd
+
+        pd = _pd
 
 
 VARIANT_SPECS: Dict[str, Dict[str, Any]] = {
@@ -58,13 +71,14 @@ def ensure_dir(path: Path) -> Path:
     return path
 
 
-def normalize_optional_path(raw: str | None) -> str | None:
+def normalize_optional_path(raw: Optional[str]) -> Optional[str]:
     if raw is None:
         return None
     return str(Path(raw).resolve())
 
 
 def _format_mean_std(mean: float, std: float, ndigits: int = 4) -> str:
+    _ensure_analysis_deps()
     if not np.isfinite(mean):
         return "nan"
     if not np.isfinite(std):
@@ -73,6 +87,7 @@ def _format_mean_std(mean: float, std: float, ndigits: int = 4) -> str:
 
 
 def _load_expr_complexity_mean(run_dir: Path) -> float:
+    _ensure_analysis_deps()
     csv_path = run_dir / "kan_symbolic_summary.csv"
     if not csv_path.exists():
         return float("nan")
@@ -122,6 +137,7 @@ def run_variant(
 
 
 def collect_variant_results(variant_dir: Path, variant_key: str) -> pd.DataFrame:
+    _ensure_analysis_deps()
     runs_csv = variant_dir / "symkanbenchmark_runs.csv"
     if not runs_csv.exists():
         raise FileNotFoundError(f"missing result file: {runs_csv}")
@@ -141,6 +157,7 @@ def collect_variant_results(variant_dir: Path, variant_key: str) -> pd.DataFrame
 
 
 def summarize_results(raw_df: pd.DataFrame) -> pd.DataFrame:
+    _ensure_analysis_deps()
     metric_cols = [
         "pre_symbolic_too_dense",
         "effective_target_edges",
@@ -199,7 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_ablation_cli_config(argv: List[str] | None = None) -> argparse.Namespace:
+def parse_ablation_cli_config(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = build_parser()
     namespace = parser.parse_args(argv)
     if namespace.quiet:
@@ -208,6 +225,7 @@ def parse_ablation_cli_config(argv: List[str] | None = None) -> argparse.Namespa
 
 
 def run_ablation(config: argparse.Namespace) -> None:
+    _ensure_analysis_deps()
     repo_root = Path(__file__).resolve().parents[1]
     output_root = resolve_preferred_dir(
         str(config.output_dir),

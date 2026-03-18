@@ -5,6 +5,7 @@
 """
 
 import time
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -33,6 +34,41 @@ def _fit_or_error(context: str, **fit_kwargs):
     if report.success:
         return report.result, None
     return None, format_fit_failure(report, context=context)
+
+
+def _set_abort_reason(
+    timing: dict[str, object],
+    *,
+    stage: str,
+    reason: str,
+    error_type: Optional[str] = None,
+) -> None:
+    timing["abort_stage"] = stage
+    timing["abort_reason"] = str(reason)
+    if error_type is not None:
+        timing["abort_error_type"] = error_type
+
+
+def _append_pipeline_warning(
+    warnings_list: list[dict[str, object]],
+    *,
+    code: str,
+    stage: str,
+    message: str,
+    error_type: Optional[str] = None,
+    **extra: object,
+) -> None:
+    warning: dict[str, object] = {
+        "code": code,
+        "stage": stage,
+        "message": str(message),
+    }
+    if error_type is not None:
+        warning["error_type"] = error_type
+    for key, value in extra.items():
+        if value is not None:
+            warning[key] = value
+    warnings_list.append(warning)
 
 
 def _count_effective_edges(work):
@@ -252,10 +288,13 @@ def symbolize_pipeline(
     timing_prune_rounds = []
     timing_symbolic_layers = []
     timing_fit = []
+    timing_pipeline_warnings = []
     timing: dict[str, object] = {
         "prune_rounds": timing_prune_rounds,
         "symbolic_layers": timing_symbolic_layers,
         "fit": timing_fit,
+        "pipeline_warnings": timing_pipeline_warnings,
+        "input_compaction_fallback": False,
     }
     if np.isfinite(n_edge_input) and n_edge_input > target_edges * 1.5:
         # 保留旧版的宽松目标边数策略，避免极宽模型在早期轮次直接卡死。
@@ -296,8 +335,24 @@ def symbolize_pipeline(
                 )
             safe_attribute(work, dataset, n_sample=int(attr_n_sample))
             work.prune_edge(threshold=th)
-        except Exception:
+        except Exception as exc:
             work.load_state_dict(snap_prune_state)
+            _set_abort_reason(
+                timing,
+                stage="prune_round",
+                reason=str(exc),
+                error_type=type(exc).__name__,
+            )
+            _append_pipeline_warning(
+                timing_pipeline_warnings,
+                code="prune_round_failed",
+                stage="prune_round",
+                message=str(exc),
+                error_type=type(exc).__name__,
+                round=int(rd),
+                threshold=float(th),
+                attr_n_sample=int(attr_n_sample),
+            )
             break
 
         n_after = get_n_edge(work)
@@ -316,8 +371,24 @@ def symbolize_pipeline(
                 if np.isfinite(n_before) and np.isfinite(n_after) and float(n_before) > 0:
                     drop_ratio = max(0.0, (float(n_before) - float(n_after)) / float(n_before))
                 th = safer_th
-            except Exception:
+            except Exception as exc:
                 work.load_state_dict(snap_prune_state)
+                _set_abort_reason(
+                    timing,
+                    stage="prune_round_backoff",
+                    reason=str(exc),
+                    error_type=type(exc).__name__,
+                )
+                _append_pipeline_warning(
+                    timing_pipeline_warnings,
+                    code="prune_round_backoff_failed",
+                    stage="prune_round_backoff",
+                    message=str(exc),
+                    error_type=type(exc).__name__,
+                    round=int(rd),
+                    threshold=float(safer_th),
+                    attr_n_sample=int(attr_n_sample),
+                )
                 break
 
         if n_after == 0:
@@ -341,8 +412,21 @@ def symbolize_pipeline(
             )
             if prune_fit_error is not None:
                 work.load_state_dict(snap_prune_state)
-                if collect_timing:
-                    timing["abort_reason"] = prune_fit_error
+                _set_abort_reason(
+                    timing,
+                    stage="prune_round_fit",
+                    reason=prune_fit_error,
+                    error_type="RuntimeError",
+                )
+                _append_pipeline_warning(
+                    timing_pipeline_warnings,
+                    code="prune_round_fit_failed",
+                    stage="prune_round_fit",
+                    message=prune_fit_error,
+                    error_type="RuntimeError",
+                    round=int(rd),
+                    threshold=float(th),
+                )
                 break
             if collect_timing:
                 timing_fit.append({"stage": "prune_round", "round": int(rd), "seconds": float(time.perf_counter() - t_fit)})
@@ -452,9 +536,19 @@ def symbolize_pipeline(
             elif not enable_input_compaction:
                 if verbose:
                     print("[symbolize_pipeline] 跳过输入压缩")
-        except Exception:
+        except Exception as exc:
             compact_state = None
             finetune_dataset = dataset
+            timing["input_compaction_fallback"] = True
+            timing["input_compaction_reason"] = str(exc)
+            timing["input_compaction_error_type"] = type(exc).__name__
+            _append_pipeline_warning(
+                timing_pipeline_warnings,
+                code="input_compaction_fallback",
+                stage="input_compaction",
+                message=str(exc),
+                error_type=type(exc).__name__,
+            )
 
         t_pre = time.perf_counter()
         _fit_or_raise(
@@ -501,7 +595,9 @@ def symbolize_pipeline(
             "total": sym_result["active"],
             "fixed": sym_result["fixed"],
             "low_r2": sym_result["low_r2"],
+            "failed": sym_result.get("failed", 0),
             "r2_records": sym_result["r2_records"],
+            "failed_records": sym_result.get("failed_records", []),
             "layer_times": sym_result.get("layer_times", []),
             "parallel_workers": sym_result.get("parallel_workers", 1),
         }
@@ -527,7 +623,8 @@ def symbolize_pipeline(
         if compact_state is not None:
             work.input_id = compact_state["original_input_id"]
     else:
-        sym_stats = {"total": 0, "fixed": 0, "low_r2": 0, "r2_records": []}
+        sym_stats = {"total": 0, "fixed": 0, "low_r2": 0, "failed": 0, "r2_records": [], "failed_records": []}
+    sym_stats["pipeline_warnings"] = list(timing_pipeline_warnings)
 
     formulas = None
     if hasattr(work, "symbolic_formula"):

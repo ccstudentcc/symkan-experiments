@@ -1,0 +1,119 @@
+# Reconstructed from the original benchmark_ab adaptive run.
+# Relative to baseline, this variant enables validation-driven
+# stagewise control together with adaptive threshold/lamb/ft.
+
+runtime:
+  device: auto
+  global_seed: 123
+  baseline_seed: 123
+  batch_size: 0
+  quiet: false
+  verbose: false
+
+data:
+  x_train: data/X_train.npy
+  x_test: data/X_test.npy
+  y_train: data/Y_train_cat.npy
+  y_test: data/Y_test_cat.npy
+  auto_fetch_mnist: true
+  # Default safety boundary: auto-fetch only writes under repo data/.
+  # Set true only when you intentionally want to write missing files outside data/.
+  allow_auto_fetch_outside_data_dir: false
+  mnist_classes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+model:
+  inner_dim: 16
+  grid: 5
+  k: 3
+  baseline_steps: 150
+  baseline_lr: 0.02
+  baseline_lamb: 0.0001
+  baseline_log: 12
+  top_k: 120
+
+library:
+  lib_preset: layered
+
+workflow:
+  disable_stagewise_train: false
+  e2e_steps: 0
+  e2e_lr: 0.0
+  e2e_lamb: -1.0
+
+evaluation:
+  validate_n_sample: 500
+
+stagewise:
+  lamb_schedule: [0.0, 0.0, 0.00002, 0.00005, 0.0001, 0.0002, 0.0003, 0.0005, 0.0007, 0.001]
+  lr_schedule: [0.02, 0.015, 0.012, 0.01, 0.008, 0.006, 0.005, 0.004, 0.003, 0.002]
+  steps_per_stage: 60
+  prune_start_stage: 3
+  target_edges: 120
+  prune_edge_threshold_init: 0.003
+  prune_edge_threshold_step: 0.003
+  prune_acc_drop_tol: 0.04
+  post_prune_ft_steps: 50
+  sym_target_edges: 50
+  acc_weight: 0.5
+  use_validation: true
+  validation_ratio: 0.15
+  validation_seed: 123
+  adaptive_threshold: true
+  threshold_base_step: 0.005
+  threshold_min: 0.001
+  threshold_max: 0.1
+  success_boost: 0.5
+  failure_penalty: 0.3
+  min_gain_threshold: 3
+  max_prune_attempts: 20
+  adaptive_lamb: true
+  min_lamb_ratio: 0.3
+  max_lamb_ratio: 1.5
+  adaptive_ft: true
+  min_ft_ratio: 0.3
+  stage_early_stop: false
+  stage_early_stop_patience: 2
+  stage_early_stop_min_acc_gain: 0.002
+  stage_early_stop_edge_buffer: 0
+
+symbolize:
+  target_edges: 90
+  max_prune_rounds: 30
+  weight_simple: 0.1
+  finetune_steps: 50
+  finetune_lr: 0.0005
+  # Technical default for comparison workflows; project-level recommendation
+  # for typical 2-layer KAN often sets this to 0.
+  layerwise_finetune_steps: 60
+  layerwise_finetune_lr: 0.005
+  layerwise_finetune_lamb: 0.00001
+  layerwise_use_validation: true
+  layerwise_validation_ratio: 0.15
+  layerwise_validation_seed: null
+  layerwise_early_stop_patience: 2
+  layerwise_early_stop_min_delta: 0.001
+  layerwise_eval_interval: 20
+  layerwise_validation_n_sample: 300
+  affine_finetune_steps: 200
+  affine_finetune_lr_schedule: [0.003, 0.001, 0.0005, 0.0002]
+  parallel_mode: auto
+  parallel_workers: null
+  parallel_min_tasks: 16
+  enable_input_compaction: true
+  prune_collapse_floor: 0.6
+  prune_eval_interval: 2
+  prune_attr_sample_adaptive: true
+  prune_attr_sample_min: 768
+  prune_attr_sample_max: 2048
+  prune_threshold_start: 0.02
+  prune_threshold_end: 0.03
+  prune_max_drop_ratio_per_round: 1.0
+  prune_threshold_backoff: 0.7
+  prune_adaptive_threshold: true
+  prune_adaptive_step: 0.0
+  prune_adaptive_acc_drop_tol: 0.02
+  prune_adaptive_min_edges_gain: 1
+  prune_adaptive_low_gain_patience: 4
+  heavy_ft_early_stop_patience: 2
+  heavy_ft_early_stop_min_delta: 0.0005
+  collect_timing: true

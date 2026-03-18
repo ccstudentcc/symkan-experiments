@@ -21,8 +21,10 @@
 
 ### `symkan/`
 
-该层作为仓库的公共库层，负责组织训练、符号化、评估和导出接口。
+该层作为仓库的公共库层，负责组织配置、训练、符号化、评估和导出接口。
 
+- `symkan.config`
+  负责 `AppConfig`、YAML 加载、环境变量占位符展开、Pydantic 校验与 `load_config()`；环境变量只会在 YAML 解析后的标量字符串上展开。
 - `symkan.core`
   负责设备管理、数据集构建、训练基础函数、结构化类型；`build_dataset` 统一接受 1D 类别索引或 2D one-hot/概率标签，并在样本数、标签 rank 与类别维度不合法时直接报错。
 - `symkan.tuning`
@@ -40,8 +42,6 @@
 
 工具脚本保留 CLI 编排职责，但算法运行参数统一通过 `symkan.config.AppConfig` 加载。
 
-- `symkan/config`
-  负责 `AppConfig`、YAML 加载、环境变量占位符展开、Pydantic 校验与 `load_config()`；环境变量只会在 YAML 解析后的标量字符串上展开。
 - `scripts/`
   负责 benchmark / ablation 的调度参数、输出目录和实验矩阵控制。
 
@@ -70,8 +70,9 @@
 4. `validate_formula_numerically` 验证导出公式与模型输出的一致性。
 5. 导出 `metrics.json`、`kan_stage_logs.csv`、`symbolize_trace.csv`、`formula_validation.csv` 等结果。
 
-关键数据结构只有三类：
+关键数据结构可概括为四类：
 
+- `symkan.config.AppConfig`
 - `dataset` 字典
 - KAN 模型实例
 - 结构化结果对象或结果字典
@@ -82,6 +83,7 @@
 
 外部调用与实验脚本宜优先依赖以下入口：
 
+- `symkan.config`（含 `AppConfig`、`load_config()`、校验入口）
 - `symkan.core`
 - `symkan.tuning.stagewise_train`
 - `symkan.symbolic.symbolize_pipeline`
@@ -145,8 +147,8 @@
 当前实现遵循以下分层：
 
 - notebook / Python 调用层：优先显式构造 `symkan.config.AppConfig`，便于演示和单元测试。
-- 脚本入口层：支持 `--config <yaml>`，先 `load_config()` 得到 `AppConfig`，再对少量字段做显式嵌套覆盖。
-- 实验编排层：脚本先 `load_config()` 得到 `AppConfig`，再做显式嵌套覆盖与批量调度。
+- 脚本入口层：支持 `--config <yaml>`，先 `load_config()` 得到 `AppConfig`，再对一小组白名单字段做显式覆盖。
+- 实验编排层：脚本先 `load_config()` 得到 `AppConfig`，再做白名单覆盖与批量调度。
 - 底层能力层：统一依赖 `symkan.config.AppConfig`，其中嵌套 `StagewiseConfig` / `SymbolizeConfig`；数据层继续使用 `DatasetBundle`。
 
 这样做的目的是让核心逻辑不关心参数来源，同时避免 YAML 路径和 CLI 路径出现两套不同校验或默认值逻辑。
