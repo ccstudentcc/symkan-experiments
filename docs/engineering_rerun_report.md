@@ -9,13 +9,16 @@
 5. 本轮输出目录：`outputs/rerun_v2_engine_safe_20260318_rerun/`。
 6. 对照目录（上一轮工程归档）：`outputs/rerun_v2_engine_safe_20260318/`。
 7. 命令默认执行环境：`PowerShell`（Windows）。
-8. 测试设备与运行时环境：
+8. 入口口径：常规 CLI 使用 `python -m scripts.*`；本报告复测链路使用 `scripts/run_engineering_rerun.ps1` 作为编排封装入口。
+9. 输出口径：项目默认输出目录为 `outputs/benchmark_*`；本报告使用工程归档输出目录 `outputs/rerun_v2_engine_safe_20260318_rerun/`。
+10. 跨版本字段映射：仅将 `export_wall_time_s` 语义映射到 `symbolize_wall_time_s`；`run_total_wall_time_s` 为工程版新增字段，历史版无同名可比项。
+11. 测试设备与运行时环境：
    - 操作系统：Windows 11 专业版 `23H2`（OS Build `22631.5472`）
    - Python：`Miniconda` 的 `kan` 环境，解释器路径 `C:\Users\chenpeng\miniconda3\envs\kan\python.exe`（`3.9.25`）
    - CPU：`12th Gen Intel(R) Core(TM) i5-12500H`
    - 内存：`16 GB`
    - 深度学习运行时：`PyTorch 2.1.2+cpu`（本轮复测按 CPU 路径执行）
-9. 执行命令（PowerShell）：
+12. 执行命令（PowerShell）：
 
 ```powershell
 # 运行目录：仓库根目录（symkan-experiments/）
@@ -76,6 +79,7 @@
 
 1. Legacy 使用 `export_wall_time_s`，其语义对应工程版 `symbolize_wall_time_s`。
 2. Legacy 不含 `run_total_wall_time_s`，该指标无法做一一对应比较。
+3. 为避免跨版本误读，本文仅在上述语义映射成立时进行对照，不将新增字段强行并入同名比较。
 
 | 指标 | 本轮 rerun | 历史参考版 | 差值 | 相对变化 |
 | --- | ---: | ---: | ---: | ---: |

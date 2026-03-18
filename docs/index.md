@@ -2,6 +2,13 @@
 
 本文档用于说明 `docs/` 目录的知识结构、阅读路径与文档间依赖关系，可作为项目文档系统的统一入口。
 
+## 0. 统一口径速查
+
+1. 入口口径：常规 CLI 使用 `python -m scripts.*`；工程版复测可使用 `scripts/run_engineering_rerun.ps1` 作为编排封装入口。
+2. 输出口径：项目默认输出为 `outputs/benchmark_*`；手册示例输出为 `outputs/rerun/*`；工程归档输出为 `outputs/rerun_v2_engine_safe_<date>/*`。
+3. 配置来源口径：自动默认来源仅 `configs/symkanbenchmark.default.yaml`；`configs/ablation_runner.default.yaml` 与 `configs/benchmark_ab/*.yaml` 均为显式模板，需通过 `--config` 传入。
+4. 跨版本指标口径：仅将 `export_wall_time_s` 语义映射到 `symbolize_wall_time_s`；`run_total_wall_time_s` 为工程版新增字段，历史版无同名可比项。
+
 ## 1. 建议起始阅读路径
 
 对于首次接触本仓库的读者，建议按如下顺序建立整体认知：

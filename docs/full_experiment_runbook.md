@@ -31,9 +31,10 @@
 
 说明：
 
-1. 命令统一推荐使用 `python -m scripts.*` 入口，不建议使用仓库根目录兼容 shim。
-2. 下文默认输出目录为 `outputs/rerun/`，用于避免覆盖既有 `outputs/benchmark_runs/`、`outputs/benchmark_ab/`、`outputs/benchmark_ablation/`。
-3. 若需沿用默认目录，可将文中 `outputs/rerun/...` 替换为项目默认路径。
+1. 常规 CLI 入口统一推荐使用 `python -m scripts.*`，不建议使用仓库根目录兼容 shim。
+2. 工程版一键复测可使用 `scripts/run_engineering_rerun.ps1`，它是脚本编排封装入口，不属于 shim 入口。
+3. 本文采用“手册示例输出”口径，默认写为 `outputs/rerun/`，用于避免覆盖既有 `outputs/benchmark_runs/`、`outputs/benchmark_ab/`、`outputs/benchmark_ablation/`。
+4. 若需沿用“项目默认输出”口径，可将文中 `outputs/rerun/...` 替换为 `outputs/benchmark_*` 对应路径。
 
 路径命名建议：
 
@@ -86,11 +87,11 @@ python -m scripts.benchmark_ab_compare --help
 
 ### 2.3 配置文件
 
-当前仓库内置的配置模板与默认来源有：
+当前仓库内置的配置模板与来源口径如下：
 
-- 自动默认来源：
+- 自动默认来源（仅一项）：
   - `configs/symkanbenchmark.default.yaml`
-- 需显式传入的共享/变体模板：
+- 显式模板（需通过 `--config` 传入）：
   - `configs/ablation_runner.default.yaml`
   - `configs/benchmark_ab/baseline.yaml`
   - `configs/benchmark_ab/adaptive.yaml`

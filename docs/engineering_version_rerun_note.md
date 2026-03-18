@@ -16,6 +16,7 @@
 1. 训练与剪枝守护策略存在实质差异，尤其体现在失败边界判定与回滚机制。
 2. 工程版扩展了耗时指标体系，新增 `run_total_wall_time_s`、`symbolize_wall_time_s` 等字段，统计口径较历史版本更细。
 3. 配置管理方式由分散参数传递转为 `AppConfig` 统一入口，CLI 仅承担受控覆盖，实验可重复性语义发生变化。
+4. 跨版本耗时字段并非完全同名：跨代对照时仅允许将 `export_wall_time_s` 语义映射到 `symbolize_wall_time_s`；`run_total_wall_time_s` 为工程版新增字段，历史版无同名可比项。
 
 因此，工程版与历史版间出现时延差异属于方法学差异下的预期现象，不宜直接解释为模型性能退化。
 
@@ -27,6 +28,11 @@
 4. 同日复跑归档目录：`outputs/rerun_v2_engine_safe_20260318_rerun/`
 5. 复跑脚本：`scripts/run_engineering_rerun.ps1`，支持 `-PythonExe` 与 `-OutRoot` 参数。
 6. 命令默认执行环境：`PowerShell`（Windows）。
+
+入口与输出口径补充：
+
+1. 常规 CLI 入口使用 `python -m scripts.*`；工程版复测可使用 `scripts/run_engineering_rerun.ps1` 作为编排封装入口。
+2. 项目默认输出目录为 `outputs/benchmark_*`；本文讨论的工程归档输出目录为 `outputs/rerun_v2_engine_safe_<date>/*`。
 
 本轮工程版复测环境（用于口径说明）：
 

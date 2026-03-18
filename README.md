@@ -59,8 +59,9 @@ python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml
 
 补充口径：
 
-- `scripts.symkanbenchmark` 若省略 `--config`，会默认读取 `configs/symkanbenchmark.default.yaml`。
-- `scripts.ablation_runner` 不会在省略 `--config` 时自动选中 `configs/ablation_runner.default.yaml`；它只会把显式传入的 YAML 透传给每次 benchmark 运行。若省略该参数，各变体最终仍回退到 `scripts.symkanbenchmark` 的默认配置来源。
+- 自动默认来源：`scripts.symkanbenchmark` 省略 `--config` 时，会读取 `configs/symkanbenchmark.default.yaml`。
+- 显式模板：`configs/ablation_runner.default.yaml` 与 `configs/benchmark_ab/*.yaml` 都需要通过 `--config` 指定，不属于自动默认回退来源。
+- `scripts.ablation_runner` 省略 `--config` 时，不会自动选中 `configs/ablation_runner.default.yaml`；各变体最终仍回退到 `scripts.symkanbenchmark` 的自动默认来源。
 
 推荐约定：
 
@@ -77,7 +78,13 @@ python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml
 - 核心编排逻辑：统一依赖 `symkan.config.AppConfig`，而不是脚本私有 `argparse.Namespace` 或另一套配置模型。
 - 底层库逻辑：统一依赖 `symkan.config.AppConfig`，而 `StagewiseConfig` / `SymbolizeConfig` 作为其嵌套子配置存在。
 
-运行结果通常写入以下位置：
+输出目录口径：
+
+- 项目默认输出：`outputs/benchmark_*`（脚本默认行为）。
+- 手册示例输出：`outputs/rerun/*`（用于演示完整复跑，避免覆盖默认目录）。
+- 工程归档输出：`outputs/rerun_v2_engine_safe_<date>/*`（用于工程版复测归档）。
+
+运行结果通常写入以下位置（项目默认输出）：
 
 - `outputs/benchmark_runs/symkanbenchmark_runs.csv`：多 seed 主表。
 - `outputs/benchmark_runs/run_01_seed42/kan_stage_logs.csv`：阶段训练日志。
