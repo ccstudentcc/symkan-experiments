@@ -27,6 +27,14 @@
 
 本文系统说明当前仓库 `notebooks/kan.ipynb` 所采用的实验参数，不覆盖旧版接口或未启用配置。重点关注参数所属阶段、作用对象及其在完整流程中的功能定位。
 
+补充口径：
+
+1. notebook 单元中仍保留一部分历史参数写法，以便复用论文阶段的交互式实验习惯。
+2. 当前 notebook 的参数转换职责位于 `symkan.config.notebook`；`symkan.notebook_compat` 仅负责把函数式 notebook 调用接到现有运行时实现上。
+3. notebook 的公开参数名应优先使用 `symkan` 内部 canonical 名字，也就是与 `AppConfig` 各 section 字段对齐的命名。
+4. 少量历史 alias 仍作为兼容兜底保留，但不属于推荐写法；若同时传入 canonical 名字与对应 alias，会直接报错。
+5. 本文以 `2026-03-19` 重跑后的 notebook 状态为准。
+
 ## 2. 主流程与参数位置
 
 当前 notebook 流程可抽象为六个阶段：
@@ -62,21 +70,33 @@
 
 该部分对应 notebook 中 baseline 训练阶段。
 
-- `inner_dim = 16`
-- `width_base = [input_dim, inner_dim, n_classes]`
+- `baseline_inner_dim = 32`
+- `width_base = [input_dim, baseline_inner_dim, n_classes]`
 - `grid = 5`
 - `k = 3`
 - `seed = 123`
 
+当前 notebook 将 baseline 预训练与后续 enhanced/symbolic 结构解耦：
+
+1. baseline 允许使用更宽的 hidden dim，以提高分类上限与归因质量。
+2. enhanced 模型仍保留更保守的 hidden dim，以控制后续阶段训练与符号化成本。
+
 训练参数如下：
 
-- `steps = 150`
-- `lr = 0.02`
-- `lamb = 1e-4`
-- `update_grid = True`
-- `log = 12`
+1. Phase 1（主收敛阶段）
+   `steps = 260`
+   `lr = 0.015`
+   `lamb = 5e-5`
+   `update_grid = True`
+   `log = 20`
+2. Phase 2（固定 grid 的细化阶段）
+   `steps = 140`
+   `lr = 0.006`
+   `lamb = 1e-5`
+   `update_grid = False`
+   `log = 20`
 
-该阶段的目标并非追求 baseline 极限性能，而是获得可稳定支持归因计算的参考模型。
+该阶段仍以“获得可稳定支持归因计算的参考模型”为核心目标，但相比旧版单阶段 baseline，会更偏向抬高预训练精度上限。
 
 ## 5. 输入筛选参数
 
@@ -100,7 +120,8 @@
 
 ### 6.1 结构与调度参数
 
-- `width = [sel_dim, 16, n_classes]`
+- `enhanced_inner_dim = 16`
+- `width = [sel_dim, enhanced_inner_dim, n_classes]`
 - `grid = 5`
 - `k = 3`
 - `seed = 42`
@@ -114,7 +135,7 @@
 - `target_edges = 120`
 - `prune_edge_threshold_init = 0.003`
 - `prune_edge_threshold_step = 0.003`
-- `prune_acc_drop_tol = 0.08`
+- `prune_acc_drop_tol = 0.04`
 - `post_prune_ft_steps = 50`
 
 上述参数共同决定阶段训练中的渐进剪枝节奏，其作用在于控制模型稀疏化速度，并为后续符号化维持可接受的精度下界。
@@ -162,11 +183,11 @@ $$
 
 - `finetune_steps = 50`
 - `finetune_lr = 0.0005`
-- `layerwise_finetune_steps = 60`
+- `layerwise_finetune_steps = 0`
 - `affine_finetune_steps = 200`
 - `affine_finetune_lr_schedule = [0.003, 0.001, 0.0005, 0.0002]`
 
-其中 `layerwise_finetune_steps = 60` 为技术默认值。对于典型 2 层 KAN（`[in, hidden, class]`），现有结果支持优先将 `layerwise_finetune_steps` 设为 `0`；改进版 LayerwiseFT（60 步、早停、轻正则）更适合作为按需启用的实验选项。
+当前 notebook 主链路显式使用 `layerwise_finetune_steps = 0`。`60` 仍是 schema/技术默认值，但在典型 2 层 KAN（`[in, hidden, class]`）上，现有结果支持优先关闭 LayerwiseFT；改进版 LayerwiseFT（60 步、早停、轻正则）更适合作为按需启用的实验选项。
 
 ### 7.4 并行参数
 
@@ -218,6 +239,8 @@ $$
 
 其中 `notebook_output_dir = repo_root / 'outputs' / 'notebooks'`，用于避免把结构化结果直接落在 `notebooks/` 目录下。
 
+本轮重跑后，`outputs/notebooks/kan_symbolic_summary.csv` 已更新，可作为当前 notebook 口径下的表达式汇总输出。
+
 ## 9. 性能基准与并行对照参数
 
 ### 9.1 单轮与多轮基准
@@ -252,6 +275,12 @@ $$
 当前输出更适合解读为“requested mode 与实际 effective workers 的对照”。若 `benchmark_symbolic_parallel_quick.csv` 中 `parallel_workers_effective=1`，说明该轮仍以串行执行保证正确性。
 
 对应并行专题 CSV 默认导出到 `outputs/notebooks/benchmark_symbolic_parallel_quick.csv`。
+
+`2026-03-19` 本轮重跑结果中：
+
+1. `auto`、`thread4`、`off` 三组 requested mode 均已写出。
+2. 三组的 `parallel_workers_effective` 都为 `1`，说明当前工程实现仍以 correctness-first 的串行执行为主。
+3. 因此 notebook 中的并行参数更适合用于记录 requested mode，而不应直接解释为真实生效并行度。
 
 ## 10. 调参顺序
 

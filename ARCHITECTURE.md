@@ -24,7 +24,7 @@
 该层作为仓库的公共库层，负责组织配置、训练、符号化、评估和导出接口。
 
 - `symkan.config`
-  负责 `AppConfig`、YAML 加载、环境变量占位符展开、Pydantic 校验与 `load_config()`；环境变量只会在 YAML 解析后的标量字符串上展开。
+  负责 `AppConfig`、YAML 加载、环境变量占位符展开、Pydantic 校验与 `load_config()`；同时通过 `symkan.config.notebook` 承接 notebook 风格 flat kwargs 到 `AppConfig` 的 canonical 化转换。环境变量只会在 YAML 解析后的标量字符串上展开。
 - `symkan.core`
   负责设备管理、数据集构建、训练基础函数、结构化类型；`build_dataset` 统一接受 1D 类别索引或 2D one-hot/概率标签，并在样本数、标签 rank 与类别维度不合法时直接报错。
 - `symkan.tuning`
@@ -147,6 +147,7 @@
 当前实现遵循以下分层：
 
 - notebook / Python 调用层：优先显式构造 `symkan.config.AppConfig`，便于演示和单元测试。
+- notebook 兼容层：若保留旧 notebook 的函数式 flat kwargs，则先经 `symkan.config.notebook` 归一化为 canonical `AppConfig` section 名字；`symkan.notebook_compat` 仅负责薄桥接，不再承载配置转换逻辑。
 - 脚本入口层：支持 `--config <yaml>`，先 `load_config()` 得到 `AppConfig`，再对一小组白名单字段做显式覆盖。
 - 实验编排层：脚本先 `load_config()` 得到 `AppConfig`，再做白名单覆盖与批量调度。
 - 底层能力层：统一依赖 `symkan.config.AppConfig`，其中嵌套 `StagewiseConfig` / `SymbolizeConfig`；数据层继续使用 `DatasetBundle`。

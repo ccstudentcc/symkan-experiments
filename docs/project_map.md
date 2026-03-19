@@ -18,7 +18,7 @@
 
 该目录是仓库的核心实现层，也是主要复用逻辑所在。
 
-- `symkan/config/`：统一配置层，负责 `AppConfig`、子配置 schema、YAML 加载、环境变量占位符展开与配置校验；脚本与库层最终都收敛到这一层。
+- `symkan/config/`：统一配置层，负责 `AppConfig`、子配置 schema、YAML 加载、环境变量占位符展开、配置校验，以及 notebook 函数式参数到 `AppConfig` 的 canonical 化转换；脚本与库层最终都收敛到这一层。
 - `symkan/core/`：设备、数据集、训练基础接口、结构化类型；dataset 构建同时兼容 1D 类别索引和 2D one-hot/概率标签。
 - `symkan/tuning/`：`stagewise_train` 和相关自适应控制逻辑。
 - `symkan/symbolic/`：函数库、输入压缩、逐层符号化、主流水线。
@@ -72,6 +72,11 @@
 
 补充说明：运行 `notebooks/kan.ipynb` 时，会在 `notebooks/` 下自动生成 `model/` 目录，用于存放运行期模型文件；结构化 CSV 则统一写入 `outputs/notebooks/`。
 
+当前 notebook 兼容链路的职责拆分为：
+
+1. `symkan.config.notebook`：负责旧 notebook flat kwargs 的参数转换、canonical 名字归一化与 alias 兜底兼容。
+2. `symkan.notebook_compat`：负责将 notebook 风格调用接到现有 `stagewise_train` / `symbolize_pipeline` 运行时入口。
+
 ## 阅读入口
 
 ### 总览阅读
@@ -124,6 +129,8 @@
 
 - `symkan/config/loader.py`
 - `symkan/config/schema.py`
+- `symkan/config/notebook.py`
+- `symkan/notebook_compat.py`
 - `symkan/core/__init__.py`
 - `symkan/tuning/stagewise.py`
 - `symkan/symbolic/pipeline.py`

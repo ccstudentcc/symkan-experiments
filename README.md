@@ -99,6 +99,8 @@ python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml
 
 最小可运行示例见 [docs/symkan_usage.md](docs/symkan_usage.md)；交互式实验入口位于 [notebooks/kan.ipynb](notebooks/kan.ipynb)。
 
+补充说明：当前 notebook 继续保留论文期/探索期的历史参数写法，但参数归一化职责已收敛到 `symkan.config.notebook`：该层会把函数式 flat kwargs 转为统一的 `AppConfig` section 结构，并优先要求使用 `symkan` 内部 canonical 名字；`symkan.notebook_compat` 只保留轻量执行桥接职责。`2026-03-19` 已在本仓库环境中完成一次重跑，结构化结果写入 `outputs/notebooks/`。
+
 ## 仓库结构
 
 ```text
@@ -134,7 +136,7 @@ symkan-experiments/
 
 对应模块分工：
 
-- `symkan.config`：`AppConfig`、YAML 加载、环境变量占位符展开与配置校验。
+- `symkan.config`：`AppConfig`、YAML 加载、环境变量占位符展开、配置校验，以及 notebook 函数式参数到 `AppConfig` 的 canonical 化转换。
 - `symkan.core`：设备、数据集、训练基础接口。
 - `symkan.tuning`：分阶段训练、选模、自适应节奏控制。
 - `symkan.symbolic`：函数库、输入压缩、逐层符号化主流程。

@@ -79,6 +79,7 @@ KAN 每条边学到的是**单变量光滑函数**。训练收敛后，可以直
 `symkan` 不重写 KAN 核心（`pykan.MultKAN`），而是在其上提供**工程化管控层**：
 
 - `symkan.config`：统一配置对象、YAML 加载与校验边界。
+- `symkan.config.notebook`：旧 notebook 函数式参数到 canonical `AppConfig` 的转换入口。
 - `stagewise_train`：分阶段训练、验证集驱动选模与快照回滚。
 - `symbolize_pipeline`：渐进剪枝、逐层符号化与微调。
 - 导出接口：用于生成结构化日志与结果文件。
@@ -351,12 +352,15 @@ $$
 | --- | --- | --- | --- |
 | `load_config(path)` | 从 YAML 加载 `AppConfig` | `path` | `AppConfig` |
 | `validate_app_config(values)` | 校验配置字典并返回统一配置对象 | `dict` | `AppConfig` |
+| `build_stagewise_notebook_config(...)` | 将 notebook 风格 stagewise kwargs 转成 `AppConfig` | canonical flat kwargs | `AppConfig` |
+| `build_symbolize_notebook_config(...)` | 将 notebook 风格 symbolize kwargs 转成 `AppConfig` | canonical flat kwargs | `AppConfig` |
 | `AppConfig` | 顶层运行配置对象 | `runtime`, `data`, `stagewise`, `symbolize` 等 | 配置实例 |
 | `StagewiseConfig` / `SymbolizeConfig` | 主要子配置模型 | 各阶段字段 | 配置实例 |
 
 这一层的作用不是“给脚本凑参数”，而是统一整个项目的配置边界：
 
 - notebook / Python 调用可直接构造 `AppConfig`
+- 旧 notebook 的 flat kwargs 也会先由 `symkan.config.notebook` 归一化为 canonical `AppConfig`
 - CLI 会先 `load_config()` 得到 `AppConfig`
 - 库层最终统一消费 `AppConfig`
 
@@ -364,6 +368,11 @@ $$
 
 - `${ENV_VAR}` / `${ENV_VAR:-default}` 只会在 YAML 解析后的标量字符串上展开。
 - 空 YAML、非法字段和越界数值会在配置加载阶段直接报错，而不是静默回退到默认值。
+
+关于 notebook 兼容层，还补充两点约束：
+
+- 推荐公开参数名是 `symkan` 内部的 canonical 名字，也就是与 `AppConfig` section 字段对齐的命名。
+- 历史 alias 仅作为兼容兜底保留；若同时传入 canonical 名字与对应 alias，会直接报错而不是静默覆盖。
 
 ### 6.2 `symkan.core`
 

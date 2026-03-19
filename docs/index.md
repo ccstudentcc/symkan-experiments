@@ -42,6 +42,11 @@
 1. [symkan_usage.md](symkan_usage.md)：核心 API、`AppConfig` 与结果字段语义。
 2. [kan_parameters.md](kan_parameters.md)：`notebooks/kan.ipynb` 的参数位置、作用与调节顺序。
 
+补充口径：
+
+1. `symkan.config` 不只负责 YAML；旧 notebook 的函数式参数兼容与 canonical 名字归一化也收敛在该层。
+2. `symkan.notebook_compat` 仅保留 notebook 调用到现有运行时入口的薄桥接职责。
+
 ### 2.3 实验执行与复现
 
 1. [symkanbenchmark_usage.md](symkanbenchmark_usage.md)：主 benchmark CLI 与 A/B 结果口径。
@@ -49,6 +54,7 @@
 3. [full_experiment_runbook.md](full_experiment_runbook.md)：完整复跑操作手册。
 4. [engineering_version_rerun_note.md](engineering_version_rerun_note.md)：历史版与工程版口径分层说明。
 5. [engineering_rerun_report.md](engineering_rerun_report.md)：工程版复测报告及对照分析。
+6. [engineering_release_checklist.md](engineering_release_checklist.md)：工程版发布前检查清单。
 
 ### 2.4 报告与结论解释
 
@@ -63,6 +69,7 @@
 3. 实验复现：`symkanbenchmark_usage -> ablation_usage`
 4. 全流程复跑：`full_experiment_runbook -> symkanbenchmark_usage -> ablation_usage`
 5. 报告撰写：`engineering_version_rerun_note -> engineering_rerun_report -> ablation_report`
+6. 发布前确认：`engineering_release_checklist -> engineering_version_rerun_note -> engineering_rerun_report`
 
 ## 4. 返回项目入口
 
