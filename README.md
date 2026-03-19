@@ -45,7 +45,7 @@
 
 ## 基本运行
 
-运行环境：Python 3.9。
+推荐运行环境：Python 3.9.25。
 
 ```powershell
 # 运行目录：仓库根目录（symkan-experiments/）
