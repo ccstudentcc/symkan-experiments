@@ -1,6 +1,7 @@
-"""symkan 核心运行时与模型基础接口导出模块。
+"""Export module for symkan core runtime and foundational model interfaces.
 
-该模块集中导出设备管理、数据构建、训练封装与基础评估接口。
+This module centralizes exports for device management, dataset construction,
+training wrappers, and basic evaluation helpers.
 """
 
 from .runtime import get_device, set_device

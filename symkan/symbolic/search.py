@@ -1,7 +1,7 @@
-"""symkan 符号候选搜索与逐层拟合原语。
+"""Primitive routines for symbolic candidate search and layer-wise fitting.
 
-从 pipeline.py 迁移。所有搜索操作都在单一模型上顺序执行，
-避免共享模型并行 suggest 导致的状态竞争。
+Migrated from pipeline.py, all search operations run sequentially on a single
+model to avoid shared-state contention in concurrent ``suggest_symbolic`` calls.
 """
 
 from collections import Counter
@@ -16,30 +16,34 @@ from symkan.core.runtime import default_batch_size
 
 
 def _resolve_parallel_workers(parallel_mode="auto", parallel_workers=None):
-    """解析并行配置。
+    """Resolve the requested parallel worker count.
 
-    当前版本出于正确性考虑，始终返回 1（串行），
-    待隔离 worker 模式就绪后可放开。
+    Args:
+        parallel_mode: Requested parallel mode label.
+        parallel_workers: Requested worker count.
+
+    Returns:
+        int: Currently always returns 1 (serial) for correctness until per-worker
+        cloning is available.
     """
-    # NOTE: 旧版允许 thread 模式在共享模型上并行 suggest_symbolic，
-    # 这会导致 pykan 内部状态竞争。在引入 per-worker clone 之前，
-    # 强制串行。
+    # NOTE: Older versions allowed thread mode with shared model suggest_symbolic,
+    # causing internal state races. Until per-worker cloning exists, enforce serial execution.
     return 1
 
 
 def layerwise_symbolic(work, dataset, layer_idx, lib, weight_simple=0.0, verbose=True):
-    """逐层符号候选搜索与 fix。
+    """Perform layer-wise symbolic candidate search and fixing.
 
     Args:
-        work: KAN 模型，会被就地修改。
-        dataset: 数据集字典。
-        layer_idx: 目标层索引。
-        lib: 符号函数库。
-        weight_simple: 简洁性偏好权重。
-        verbose: 是否打印日志。
+        work: KAN model modified in place.
+        dataset: Dataset dictionary.
+        layer_idx: Target layer index.
+        lib: Symbolic function library.
+        weight_simple: Simplicity bias weight.
+        verbose: Whether to emit logging.
 
     Returns:
-        dict: 搜索结果统计。
+        dict: Search statistics.
     """
     work.eval()
     with torch.no_grad():
@@ -69,7 +73,7 @@ def layerwise_symbolic(work, dataset, layer_idx, lib, weight_simple=0.0, verbose
 
             active_count += 1
             try:
-                # suggest_symbolic 会暂时修改模型内部状态，因此这里必须严格串行执行。
+                # suggest_symbolic temporarily mutates the model, so enforce strict serialization here.
                 name, _, r2, _ = work.suggest_symbolic(
                     l, i, j, lib=lib, verbose=False, weight_simple=weight_simple
                 )
@@ -92,7 +96,7 @@ def layerwise_symbolic(work, dataset, layer_idx, lib, weight_simple=0.0, verbose
                     }
                 )
                 if verbose:
-                    print(f"    ({l},{i},{j}) suggest 失败: {e}")
+                    print(f"    ({l},{i},{j}) suggest failed: {e}")
 
     if verbose:
         print(f"  Layer {l}: 活跃={active_count}, fix={fixed_count}")
@@ -108,6 +112,15 @@ def layerwise_symbolic(work, dataset, layer_idx, lib, weight_simple=0.0, verbose
 
 
 def _has_split(dataset, split: str) -> bool:
+    """Check whether a dataset dictionary contains a usable split.
+
+    Args:
+        dataset: Dataset dictionary.
+        split: Split name such as ``train`` or ``val``.
+
+    Returns:
+        bool: ``True`` when both input and label tensors are present.
+    """
     input_key = f"{split}_input"
     label_key = f"{split}_label"
     return (
@@ -119,6 +132,20 @@ def _has_split(dataset, split: str) -> bool:
 
 
 def _build_layerwise_ft_datasets(dataset, use_validation: bool, validation_ratio: float, validation_seed: Optional[int]):
+    """Build fit/validation datasets for layerwise fine-tuning.
+
+    Args:
+        dataset: Original dataset dictionary.
+        use_validation: Whether validation-driven layerwise FT is enabled.
+        validation_ratio: Validation split ratio when no explicit ``val`` split
+            already exists.
+        validation_seed: Random seed for the synthetic validation split.
+
+    Returns:
+        tuple[dict, dict | None]: Dataset used for fitting and optional
+        validation dataset mapped onto the ``test_*`` keys expected by metric
+        helpers.
+    """
     if not bool(use_validation):
         return dataset, None
 
@@ -156,6 +183,16 @@ def _build_layerwise_ft_datasets(dataset, use_validation: bool, validation_ratio
 
 
 def _formula_mean_r2(work, eval_dataset, n_sample: int):
+    """Estimate mean symbolic formula R² on an evaluation dataset.
+
+    Args:
+        work: Symbolized model-like object.
+        eval_dataset: Evaluation dataset dictionary.
+        n_sample: Maximum number of samples used during formula validation.
+
+    Returns:
+        float: Mean R² across valid formulas, or ``nan`` if unavailable.
+    """
     from symkan.eval.metrics import validate_formula_numerically
 
     if eval_dataset is None or not hasattr(work, "symbolic_formula"):
@@ -190,6 +227,27 @@ def _layerwise_finetune_with_early_stop(
     validation_n_sample: int,
     verbose: bool,
 ):
+    """Run layerwise fine-tuning with optional validation-driven early stop.
+
+    Args:
+        work: Model being fine-tuned in place.
+        fit_dataset: Dataset used for optimization.
+        val_dataset: Optional validation dataset for early stopping.
+        total_steps: Maximum fine-tune steps.
+        lr: Fine-tune learning rate.
+        lamb: Fine-tune regularization strength.
+        batch_size: Fit batch size.
+        use_validation: Whether validation-based stopping is enabled.
+        eval_interval: Validation interval in steps.
+        early_stop_patience: Patience measured in validation checks.
+        early_stop_min_delta: Minimum R² improvement treated as progress.
+        validation_n_sample: Sample count used for formula validation.
+        verbose: Whether to print early-stop logs.
+
+    Returns:
+        dict[str, object]: Structured summary of used steps, validation metrics,
+        and possible fit failures.
+    """
     steps = int(total_steps)
     if steps <= 0:
         return {
@@ -325,26 +383,27 @@ def fast_symbolic(
     parallel_min_tasks=16,
     verbose=True,
 ):
-    """逐层符号化主入口。
+    """Main entry point for layer-wise symbolic fitting.
 
-    遍历所有层，依次执行候选搜索与 fix，层间可选微调。
+    Iterates through the layers, performing candidate searches and fixes,
+    with optional fine-tuning between layers.
 
     Args:
-        work: 待符号化模型。
-        dataset: 数据集字典。
-        lib: 统一函数库。
-        weight_simple: 简洁性偏好权重。
-        lib_hidden: 隐藏层函数库。
-        lib_output: 输出层函数库。
-        layerwise_finetune_steps: 每层符号化后的微调步数。
-        batch_size: 批大小。
-        parallel_mode: 并行模式配置。
-        parallel_workers: 期望 worker 数。
-        parallel_min_tasks: 启用并行的最小任务阈值。
-        verbose: 是否打印日志。
+        work: Model to be symbolized.
+        dataset: Dataset dictionary.
+        lib: Shared symbolic function library.
+        weight_simple: Simplicity preference weight.
+        lib_hidden: Hidden-layer library override.
+        lib_output: Output-layer library override.
+        layerwise_finetune_steps: Fine-tune steps after each layer fix.
+        batch_size: Batch size.
+        parallel_mode: Parallel execution mode.
+        parallel_workers: Requested worker count.
+        parallel_min_tasks: Minimum tasks required to enable parallelism.
+        verbose: Whether to log progress.
 
     Returns:
-        dict: 包含逐层 fix 统计、R2 记录和耗时信息的结果。
+        dict: Statistics including fix counts, R² records, and timing per layer.
     """
     from .library import LIB_HIDDEN, LIB_OUTPUT, get_layer_lib, register_custom_functions
     import time

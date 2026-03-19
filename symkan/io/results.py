@@ -1,48 +1,48 @@
-"""symkan 结果导出与实验包读写工具。"""
+"""Result export and experiment bundle utilities for symkan."""
 
 import os
 import pickle
 
 
 def save_symbolic_summary(summary_df, csv_path: str = "kan_symbolic_summary.csv", encoding: str = "utf-8-sig"):
-    """保存符号化汇总表到 CSV。
+    """Save the symbolic summary table to CSV.
 
     Args:
-        summary_df: 汇总结果 DataFrame。
-        csv_path: 导出路径。
-        encoding: 文件编码。
+        summary_df: Summary DataFrame.
+        csv_path: Output path.
+        encoding: File encoding.
 
     Returns:
-        str: 导出的 CSV 路径。
+        str: Path of the exported CSV.
     """
     summary_df.to_csv(csv_path, index=False, encoding=encoding)
     return csv_path
 
 
 def save_stage_logs(stage_df, csv_path: str = "kan_stage_logs.csv", encoding: str = "utf-8-sig"):
-    """保存阶段训练日志到 CSV。
+    """Save stage logs to CSV.
 
     Args:
-        stage_df: 阶段日志 DataFrame。
-        csv_path: 导出路径。
-        encoding: 文件编码。
+        stage_df: Stage log DataFrame.
+        csv_path: Output path.
+        encoding: File encoding.
 
     Returns:
-        str: 导出的 CSV 路径。
+        str: Path of the exported CSV.
     """
     stage_df.to_csv(csv_path, index=False, encoding=encoding)
     return csv_path
 
 
 def save_export_bundle(bundle: dict, path: str = "kan_export_bundle.pkl"):
-    """将实验导出对象序列化为 pkl 文件。
+    """Serialize an experiment bundle to a pickle file.
 
     Args:
-        bundle: 导出对象字典。
-        path: 导出路径。
+        bundle: Export dictionary.
+        path: Destination path.
 
     Returns:
-        str: 导出的文件路径。
+        str: Path to the serialized bundle.
     """
     with open(path, "wb") as f:
         pickle.dump(bundle, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -50,18 +50,18 @@ def save_export_bundle(bundle: dict, path: str = "kan_export_bundle.pkl"):
 
 
 def load_export_bundle(path: str = "kan_export_bundle.pkl", *, trusted: bool = False):
-    """读取导出的实验 bundle。
+    """Deserialize an experiment bundle from disk.
 
     Args:
-        path: pkl 文件路径。
-        trusted: 仅当该 pickle 文件由当前用户本地生成且来源可信时设为 ``True``。
+        path: Path to the pickle file.
+        trusted: Must be True only for locally generated, trusted bundles.
 
     Returns:
-        dict: 反序列化后的导出对象。
+        dict: Deserialized export bundle.
 
     Raises:
-        FileNotFoundError: 当文件不存在时抛出。
-        ValueError: 当调用方未显式确认该 pickle 文件可信时抛出。
+        FileNotFoundError: If the file does not exist.
+        ValueError: If ``trusted`` is False to protect against untrusted pickle.
     """
     if not os.path.exists(path):
         raise FileNotFoundError(path)

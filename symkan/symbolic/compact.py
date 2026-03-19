@@ -1,13 +1,22 @@
-"""symkan 输入压缩工具。
+"""Input compaction utilities for symkan symbolic workflows.
 
-从 pipeline.py 迁移。负责根据掩码识别活跃输入并构建紧凑数据子集。
+Migrated from pipeline.py, these helpers identify active inputs via
+masks and build compact input subsets.
 """
 
 import torch
 
 
 def select_dataset_inputs(dataset, input_idx):
-    """按输入索引子集裁切数据集。"""
+    """Select a subset of dataset inputs by index.
+
+    Args:
+        dataset: Original dataset dictionary.
+        input_idx: Active input indices.
+
+    Returns:
+        dict: Dataset dictionary limited to the selected input subset.
+    """
     idx = torch.as_tensor(input_idx, dtype=torch.long, device=dataset["train_input"].device)
     selected = {
         "train_input": dataset["train_input"].index_select(1, idx),
@@ -23,7 +32,15 @@ def select_dataset_inputs(dataset, input_idx):
 
 
 def first_layer_active_inputs(work):
-    """识别第一层活跃输入索引。"""
+    """Identify active input indices for the first layer.
+
+    Args:
+        work: KAN model whose first layer masks will be inspected.
+
+    Returns:
+        list[int]: Indices of inputs that are active according to activation or
+        symbolic masks.
+    """
     n_in = int(work.width_in[0])
     active = torch.zeros(n_in, dtype=torch.bool)
 
@@ -53,15 +70,16 @@ def first_layer_active_inputs(work):
 
 
 def compact_inputs_for_symbolic(work, dataset):
-    """尝试压缩模型输入维度。
+    """Attempt to compact the model's input dimensions for symbolic search.
 
     Args:
-        work: 待压缩的模型。
-        dataset: 原始数据集字典。
+        work: Model to compact.
+        dataset: Original dataset dictionary.
 
     Returns:
-        dict | None: 成功时返回包含 ``model``、``dataset``、``active_inputs``
-        和 ``original_input_id`` 的字典；若无需压缩则返回 ``None``。
+        dict | None: Returns a dictionary with ``model``, ``dataset``,
+        ``active_inputs``, and ``original_input_id`` if compaction occurred; otherwise
+        ``None`` when no compaction is needed.
     """
     if not hasattr(work, "prune_input"):
         return None
@@ -78,7 +96,8 @@ def compact_inputs_for_symbolic(work, dataset):
     if hasattr(compact_model, "auto_save"):
         compact_model.auto_save = False
 
-    # 压缩后模型只看见子集输入，因此需要重建连续 input_id；原始映射会在外层恢复。
+    # The compacted model only sees a subset of inputs, so rebuild a consecutive
+    # input_id mapping while allowing the outer scope to restore the original mapping.
     original_input_id = compact_model.input_id.detach().clone()
     compact_model.input_id = torch.arange(
         len(active_inputs), dtype=torch.long, device=original_input_id.device

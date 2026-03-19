@@ -1,6 +1,7 @@
-"""symkan 公共类型定义。
+"""Structured common types for symkan internals.
 
-所有跨模块传递的结构化对象在此定义，消除裸字典和魔法字符串键。
+These dataclasses capture the structured objects passed across modules, avoiding
+bare dictionaries and magic-string keys.
 """
 
 from dataclasses import dataclass, field
@@ -17,7 +18,16 @@ from symkan.config import StagewiseConfig, SymbolizeConfig, TrainConfig
 
 @dataclass
 class DatasetBundle:
-    """结构化数据集容器，替代旧版裸字典。"""
+    """Structured dataset container that mirrors the legacy dict contract.
+
+    Attributes:
+        train_input: Training feature tensor.
+        train_label: Training label tensor.
+        test_input: Test feature tensor.
+        test_label: Test label tensor.
+        val_input: Optional validation feature tensor.
+        val_label: Optional validation label tensor.
+    """
 
     train_input: torch.Tensor
     train_label: torch.Tensor
@@ -26,7 +36,7 @@ class DatasetBundle:
     val_input: Optional[torch.Tensor] = None
     val_label: Optional[torch.Tensor] = None
 
-    # ---- 兼容旧 dict 接口 ----
+    # ---- Legacy dict compatibility helpers ----
 
     def __getitem__(self, key: str) -> torch.Tensor:
         _MAP = {
@@ -47,6 +57,14 @@ class DatasetBundle:
 
     @classmethod
     def from_dict(cls, d: dict) -> "DatasetBundle":
+        """Build a ``DatasetBundle`` from a legacy dataset dictionary.
+
+        Args:
+            d: Legacy dataset dictionary.
+
+        Returns:
+            DatasetBundle: Structured dataset wrapper.
+        """
         return cls(
             train_input=d["train_input"],
             train_label=d["train_label"],
@@ -57,6 +75,11 @@ class DatasetBundle:
         )
 
     def to_dict(self) -> dict:
+        """Convert the bundle back to the legacy dataset dictionary shape.
+
+        Returns:
+            dict: Legacy-compatible dataset mapping.
+        """
         return {
             "train_input": self.train_input,
             "train_label": self.train_label,
@@ -77,7 +100,15 @@ class DatasetBundle:
 
 @dataclass
 class FitReport:
-    """safe_fit 结构化返回。"""
+    """Structured result returned by guarded fit helpers.
+
+    Attributes:
+        success: Whether fitting succeeded.
+        result: Raw fit payload returned by the model.
+        fallback_used: Name of the fallback path used, if any.
+        error_type: Exception type name when fitting failed.
+        error_message: Human-readable failure message.
+    """
 
     success: bool
     result: dict = field(default_factory=dict)
@@ -88,7 +119,15 @@ class FitReport:
 
 @dataclass
 class AttributeReport:
-    """safe_attribute 结构化返回。"""
+    """Structured result returned by guarded attribution helpers.
+
+    Attributes:
+        success: Whether attribution succeeded.
+        score: Attribution score array or tensor.
+        fallback_used: Name of the fallback path used, if any.
+        error_type: Exception type name when attribution failed.
+        error_message: Human-readable failure message.
+    """
 
     success: bool
     score: Any = None  # numpy array
@@ -99,7 +138,15 @@ class AttributeReport:
 
 @dataclass
 class StageSnapshot:
-    """单阶段快照信息。"""
+    """Snapshot metadata recorded for a stagewise checkpoint candidate.
+
+    Attributes:
+        stage: Stage identifier.
+        acc: Accuracy measured for the snapshot.
+        n_edges: Edge count measured for the snapshot.
+        score: Symbolic-readiness score for ranking snapshots.
+        model: Optional cloned model payload.
+    """
 
     stage: Union[int, str]
     acc: float
@@ -110,7 +157,32 @@ class StageSnapshot:
 
 @dataclass
 class StagewiseResult:
-    """stagewise_train 结构化返回。"""
+    """Structured result returned by ``stagewise_train_report``.
+
+    Attributes:
+        best_model: Selected best model after stagewise ranking.
+        train_loss: Aggregated training loss history.
+        test_loss: Aggregated test loss history.
+        stage_logs: Per-stage log records.
+        best_acc: Accuracy of the selected snapshot.
+        selected_stage: Identifier of the selected stage.
+        selected_edges: Edge count of the selected snapshot.
+        selected_score: Readiness score of the selected snapshot.
+        best_state_dict: CPU-cloned state dict for the selected model.
+        stage_snapshots: Recorded stage snapshot metadata.
+        topk_models: Optional retained top-k model clones.
+        stage_guard_mode: Guard mode used for pruning recovery.
+        stage_early_stopped: Whether stagewise early stopping triggered.
+        stage_early_stop_reason: Human-readable early-stop reason.
+        stage_timings: Per-stage timing records.
+        stage_train_total_seconds: Total training time across stages.
+        stage_prune_total_seconds: Total pruning time across stages.
+        final_finetune_seconds: Final fine-tune wall time.
+        final_fit_success: Whether final fine-tuning succeeded.
+        final_fit_error: Failure message for final fine-tuning, if any.
+        successful_fit_count: Number of successful guarded fit operations.
+        stage_total_seconds: Total wall time for stagewise training.
+    """
 
     best_model: Any
     train_loss: List[float] = field(default_factory=list)
@@ -136,7 +208,7 @@ class StagewiseResult:
     stage_total_seconds: float = 0.0
 
     def to_legacy_dict(self) -> dict:
-        """转换回旧版 dict 格式以保持向后兼容。"""
+        """Convert the dataclass into a legacy dict for backward compatibility."""
         d = {
             "train_loss": self.train_loss,
             "test_loss": self.test_loss,
@@ -166,7 +238,23 @@ class StagewiseResult:
 
 @dataclass
 class SymbolizeResult:
-    """symbolize_pipeline 结构化返回。"""
+    """Structured result returned by ``symbolize_pipeline_report``.
+
+    Attributes:
+        model: Final symbolized model.
+        formulas: Raw symbolic formula payload.
+        valid_expressions: Filtered valid expressions with metadata.
+        trace: Pruning trace table.
+        sym_stats: Symbolic search statistics.
+        final_n_edge: Effective final edge count.
+        final_n_edge_raw: Raw final edge count reported by the model.
+        final_acc: Final model accuracy after symbolization.
+        effective_target_edges: Effective target used by the pipeline.
+        input_n_edge: Input edge count before symbolic processing.
+        effective_input_indices: Active input indices after compaction.
+        effective_input_dim: Active input dimensionality after compaction.
+        timing: Timing and warning diagnostics.
+    """
 
     model: Any = None
     formulas: Any = None
@@ -183,7 +271,7 @@ class SymbolizeResult:
     timing: Dict[str, Any] = field(default_factory=dict)
 
     def to_legacy_dict(self) -> dict:
-        """转换回旧版 dict 格式以保持向后兼容。"""
+        """Convert the dataclass into a legacy dict for backward compatibility."""
         return {
             "model": self.model,
             "formulas": self.formulas,

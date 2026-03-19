@@ -1,6 +1,7 @@
-"""symkan 符号函数库与表达式处理工具。
+"""Symbolic function library and expression utilities for symkan.
 
-该模块维护符号搜索函数库、表达式复杂度估计以及格式化辅助函数。
+Maintains symbolic search libraries, expression complexity estimation, and
+formatting helpers used throughout symbolic search.
 """
 
 import re as _re
@@ -14,9 +15,7 @@ LIB_HIDDEN = ["x", "x^2", "tanh"]
 LIB_OUTPUT = ["x", "x^2"]
 FAST_LIB = ["x", "x^2", "tanh", "sin", "cos", "exp", "log", "sqrt"]
 
-# 全量符号库：自动对齐 kan 原生 SYMBOLIC_LIB（不含后续 symkan 自定义注册项）
 EXPRESSIVE_LIB = list(_SYM_LIB_REG.keys())
-# 兼容命名别名
 FULL_LIB = EXPRESSIVE_LIB
 
 
@@ -25,10 +24,10 @@ _SAFE_EXPR_PATTERN = _re.compile(r"^[0-9A-Za-z_+\-*/().,^ \t]+$")
 
 
 def register_custom_functions():
-    """注册 symkan 额外符号函数到 pykan 符号库。
+    """Register symkan-specific symbolic functions into the pykan library.
 
-    当前默认注册 ``sigmoid`` 与 ``softplus``，用于扩展符号搜索空间。
-    该函数是幂等的，重复调用不会重复注册。
+    The default extensions are ``sigmoid`` and ``softplus`` to broaden the
+    search space. The function is idempotent and safe to call multiple times.
     """
     global _CUSTOM_REGISTERED
     if _CUSTOM_REGISTERED:
@@ -75,13 +74,13 @@ def _is_nontrivial_expr(expr):
 
 
 def count_expression_complexity(expr):
-    """估计表达式复杂度。
+    """Estimate the complexity of a possible symbolic expression.
 
     Args:
-        expr: 可被 sympy 解析的表达式。
+        expr: Expression string that can be parsed by SymPy.
 
     Returns:
-        int: 表达式复杂度分数，越大表示结构越复杂。
+        int: Complexity score, where larger values indicate more complex structures.
     """
     if not _is_safe_expression_text(expr):
         return 1
@@ -111,13 +110,13 @@ def _to_formula_list(formulas):
 
 
 def collect_valid_formulas(formulas):
-    """提取有效表达式并附带复杂度信息。
+    """Extract valid expressions together with complexity metadata.
 
     Args:
-        formulas: ``symbolic_formula()`` 返回对象或其变体。
+        formulas: Payload returned by ``symbolic_formula()`` or similar.
 
     Returns:
-        list[dict]: 每项包含 ``index``、``expr`` 和 ``complexity`` 的有效表达式记录。
+        list[dict]: Records containing ``index``, ``expr``, and ``complexity`` for each valid entry.
     """
     raw = _to_formula_list(formulas)
     valid = []
@@ -129,13 +128,13 @@ def collect_valid_formulas(formulas):
 
 
 def collect_all_formulas(formulas):
-    """收集全部表达式，包括零表达式和常数表达式。
+    """Collect all expressions including constants and zero expressions.
 
     Args:
-        formulas: ``symbolic_formula()`` 返回对象或其变体。
+        formulas: Payload returned by ``symbolic_formula()`` or similar.
 
     Returns:
-        list[dict]: 每项包含 ``index``、``expr`` 和 ``complexity`` 的表达式记录。
+        list[dict]: Records containing ``index``, ``expr``, and ``complexity`` for each expression.
     """
     raw = _to_formula_list(formulas)
     result = []
@@ -147,17 +146,17 @@ def collect_all_formulas(formulas):
 
 
 def get_layer_lib(layer_idx, depth, lib_hidden=None, lib_output=None, lib=None):
-    """按层选择符号函数库。
+    """Select the appropriate symbolic library for a given layer.
 
     Args:
-        layer_idx: 当前层索引。
-        depth: 网络深度。
-        lib_hidden: 隐藏层函数库。
-        lib_output: 输出层函数库。
-        lib: 统一函数库；若提供则覆盖分层库。
+        layer_idx: Layer index.
+        depth: Network depth.
+        lib_hidden: Hidden-layer library override.
+        lib_output: Output-layer library override.
+        lib: Single library that overrides the per-layer defaults.
 
     Returns:
-        list: 当前层用于符号拟合的函数库。
+        list: Function library used for symbolic fitting on the layer.
     """
     if lib is not None:
         return lib
@@ -167,14 +166,14 @@ def get_layer_lib(layer_idx, depth, lib_hidden=None, lib_output=None, lib=None):
 
 
 def format_expr(expr_str, n_digits: int = 2):
-    """将表达式中的浮点系数格式化为有限有效数字。
+    """Format floating point coefficients in an expression to a limited number of significant digits.
 
     Args:
-        expr_str: 原始表达式字符串。
-        n_digits: 有效数字位数。
+        expr_str: Original expression string.
+        n_digits: Number of significant digits.
 
     Returns:
-        str: 格式化后的表达式字符串。
+        str: Expression string with formatted floating-point values.
     """
     def _round_match(m):
         val = float(m.group())

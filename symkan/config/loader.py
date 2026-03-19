@@ -15,6 +15,18 @@ ENV_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)(?::-(.*?))?\}")
 
 
 def _expand_env_string(value: str) -> str:
+    """Expand ``${VAR}`` placeholders inside a scalar string.
+
+    Args:
+        value: Raw scalar string that may contain environment placeholders.
+
+    Returns:
+        str: Expanded string with all placeholders resolved.
+
+    Raises:
+        ConfigError: If a required environment variable is missing and no
+            default value is provided.
+    """
     def replace_env(match: re.Match[str]) -> str:
         name = match.group(1)
         default = match.group(2)
@@ -29,6 +41,17 @@ def _expand_env_string(value: str) -> str:
 
 
 def _expand_env_placeholders(value: Any) -> Any:
+    """Recursively expand environment placeholders in parsed YAML values.
+
+    Args:
+        value: Parsed YAML node, which may be a scalar, list, or mapping.
+
+    Returns:
+        Any: Value tree with scalar placeholders expanded in place.
+
+    Raises:
+        ConfigError: If placeholders are used in mapping keys.
+    """
     if isinstance(value, str):
         return _expand_env_string(value)
     if isinstance(value, list):
@@ -47,7 +70,19 @@ def _expand_env_placeholders(value: Any) -> Any:
 
 
 def preprocess_yaml_text(text: str) -> str:
-    """Expand environment variables after YAML parsing so placeholders stay scalar."""
+    """Expand environment placeholders while keeping YAML values scalar-safe.
+
+    Args:
+        text: Raw YAML text before validation.
+
+    Returns:
+        str: YAML text re-dumped after placeholder expansion. Returns an empty
+        string when the original YAML payload is empty.
+
+    Raises:
+        ConfigError: If placeholders appear in mapping keys or required
+            environment variables are missing.
+    """
 
     payload = yaml.safe_load(text)
     if payload is None:
@@ -57,6 +92,15 @@ def preprocess_yaml_text(text: str) -> str:
 
 
 def _format_validation_error(exc: ValidationError, config_path: Optional[Path]) -> str:
+    """Convert a Pydantic validation error into a readable multi-line message.
+
+    Args:
+        exc: Original validation error raised by Pydantic.
+        config_path: Optional config file path used to add file context.
+
+    Returns:
+        str: Human-readable error message suitable for ``ConfigError``.
+    """
     prefix = f"invalid config file '{config_path}':" if config_path is not None else "invalid config:"
     details: list[str] = []
     for item in exc.errors():
@@ -72,6 +116,19 @@ def _validate_model(
     payload: dict[str, Any],
     config_path: Optional[Path] = None,
 ):
+    """Validate a payload against a specific Pydantic config model.
+
+    Args:
+        model_class: Target Pydantic model class.
+        payload: Raw mapping to validate.
+        config_path: Optional config file path for error reporting.
+
+    Returns:
+        BaseModel: Validated model instance of ``model_class``.
+
+    Raises:
+        ConfigError: If schema validation fails.
+    """
     try:
         return model_class.model_validate(payload)
     except ValidationError as exc:
@@ -79,22 +136,66 @@ def _validate_model(
 
 
 def validate_app_config(values: dict[str, Any]) -> AppConfig:
+    """Validate a raw mapping as a full AppConfig.
+
+    Args:
+        values: Unvalidated config payload, typically from YAML or tests.
+
+    Returns:
+        AppConfig: Canonical validated application config.
+    """
     return _validate_model(AppConfig, values)
 
 
 def validate_train_config(values: dict[str, Any]) -> TrainConfig:
+    """Validate a raw mapping as a TrainConfig.
+
+    Args:
+        values: Unvalidated training config payload.
+
+    Returns:
+        TrainConfig: Validated training config instance.
+    """
     return _validate_model(TrainConfig, values)
 
 
 def validate_stagewise_config(values: dict[str, Any]) -> StagewiseConfig:
+    """Validate a raw mapping as a StagewiseConfig.
+
+    Args:
+        values: Unvalidated stagewise config payload.
+
+    Returns:
+        StagewiseConfig: Validated stagewise config instance.
+    """
     return _validate_model(StagewiseConfig, values)
 
 
 def validate_symbolize_config(values: dict[str, Any]) -> SymbolizeConfig:
+    """Validate a raw mapping as a SymbolizeConfig.
+
+    Args:
+        values: Unvalidated symbolize config payload.
+
+    Returns:
+        SymbolizeConfig: Validated symbolize config instance.
+    """
     return _validate_model(SymbolizeConfig, values)
 
 
 def load_config(config_path: Union[str, Path]) -> AppConfig:
+    """Load, expand, and validate an AppConfig from YAML.
+
+    Args:
+        config_path: Path to the YAML config file.
+
+    Returns:
+        AppConfig: Fully validated application config.
+
+    Raises:
+        ConfigError: If the file is missing, unreadable, invalid YAML, empty,
+            not a mapping, or fails schema validation.
+    """
     path = Path(config_path)
     if not path.exists():
         raise ConfigError(f"config file not found: {path}")
@@ -119,6 +220,13 @@ def load_config(config_path: Union[str, Path]) -> AppConfig:
 
 
 def load_app_config(config_path: Union[str, Path]) -> AppConfig:
-    """Backward-compatible alias for the previous loader name."""
+    """Load an AppConfig via the backward-compatible alias.
+
+    Args:
+        config_path: Path to the YAML config file.
+
+    Returns:
+        AppConfig: Fully validated application config.
+    """
 
     return load_config(config_path)

@@ -1,7 +1,7 @@
-"""symkan 分阶段训练与剪枝调度。
+"""Symkan staged training and pruning orchestration.
 
-该模块实现符号化前的阶段训练入口，包括验证集切分、自适应剪枝阈值、
-阶段级早停和快照选模逻辑。
+This module drives pre-symbolic staged training with validation splits,
+adaptive pruning thresholds, stage-wise early stopping, and snapshot selection.
 """
 
 import copy
@@ -24,16 +24,16 @@ from symkan.pruning import safe_attribute
 
 
 def sym_readiness_score(acc, n_edges, sym_target_edges, acc_weight: float = 0.4):
-    """计算符号化就绪评分。
+    """Compute a symbolic readiness score that balances accuracy and sparsity.
 
     Args:
-        acc: 当前模型精度。
-        n_edges: 当前边数。
-        sym_target_edges: 符号化期望边数。
-        acc_weight: 精度权重；稀疏度权重为 ``1 - acc_weight``。
+        acc: Current model accuracy.
+        n_edges: Current edge count.
+        sym_target_edges: Target edge count for symbolic search.
+        acc_weight: Weight assigned to accuracy (implicit sparsity weight is ``1 - acc_weight``).
 
     Returns:
-        float: 综合评分，分数越高表示越适合作为符号化入口。
+        float: Readiness score; higher values indicate better symbolic readiness.
     """
     if n_edges <= sym_target_edges:
         prune_burden = 0.0
@@ -44,12 +44,29 @@ def sym_readiness_score(acc, n_edges, sym_target_edges, acc_weight: float = 0.4)
 
 
 def _has_split(dataset, split: str) -> bool:
+    """Check whether a dataset dictionary contains a usable split.
+
+    Args:
+        dataset: Dataset dictionary.
+        split: Split name such as ``train`` or ``val``.
+
+    Returns:
+        bool: ``True`` when both input and label tensors are present.
+    """
     input_key = f"{split}_input"
     label_key = f"{split}_label"
     return input_key in dataset and label_key in dataset and dataset[input_key] is not None and dataset[label_key] is not None
 
 
 def _valid_edge_count(value) -> bool:
+    """Check whether an edge-count-like value can be treated as finite.
+
+    Args:
+        value: Raw edge count candidate.
+
+    Returns:
+        bool: ``True`` when the value can be converted to a finite float.
+    """
     try:
         return bool(np.isfinite(float(value)))
     except Exception:
@@ -57,16 +74,16 @@ def _valid_edge_count(value) -> bool:
 
 
 def _create_validation_split(dataset, ratio: float, seed: Optional[int], min_val_samples: int = 10):
-    """在现有 dataset 上以复制字典的方式创建验证集切分。
+    """Create a validation split by copying the dataset dictionary.
 
     Args:
-        dataset: 原始数据集字典。
-        ratio: 验证集比例。
-        seed: 随机种子。
-        min_val_samples: 验证集最少样本数。
+        dataset: Original dataset dictionary.
+        ratio: Desired validation ratio.
+        seed: Random seed for shuffling.
+        min_val_samples: Minimum validation sample count.
 
     Returns:
-        dict: 包含训练集和验证集的新数据字典。
+        dict: Dataset dictionary augmented with validation split entries.
     """
     if _has_split(dataset, "val") or ratio <= 0:
         return dataset
@@ -125,15 +142,15 @@ def _create_validation_split(dataset, ratio: float, seed: Optional[int], min_val
 
 
 def _safe_eval_acc(model, dataset, preferred_split: str = "val"):
-    """优先验证集，不可用时回退到训练集。
+    """Evaluate accuracy preferring the validation split, falling back to training.
 
     Args:
-        model: 待评估模型。
-        dataset: 数据集字典。
-        preferred_split: 优先尝试的数据划分。
+        model: Model to evaluate.
+        dataset: Dataset dictionary.
+        preferred_split: Split name to prefer.
 
     Returns:
-        tuple[float, str]: 精度和实际使用的划分名称。
+        tuple[float, str]: Accuracy and the split actually used.
     """
     if preferred_split == "val" and _has_split(dataset, "val"):
         return model_acc_ds(model, dataset, split="val"), "val"
@@ -143,6 +160,15 @@ def _safe_eval_acc(model, dataset, preferred_split: str = "val"):
 
 
 def _safe_attribute_for_prune(model, dataset):
+    """Run attribution before pruning and degrade gracefully on failure.
+
+    Args:
+        model: Model to attribute in place.
+        dataset: Dataset dictionary used for attribution.
+
+    Returns:
+        str | None: Warning message when attribution failed, otherwise ``None``.
+    """
     try:
         safe_attribute(model, dataset)
         return None
@@ -155,6 +181,15 @@ def _safe_attribute_for_prune(model, dataset):
 
 
 def _fit_or_error(context: str, **fit_kwargs):
+    """Run guarded fitting and return a formatted error instead of raising.
+
+    Args:
+        context: Human-readable stage label for error messages.
+        **fit_kwargs: Keyword arguments forwarded to ``safe_fit_report``.
+
+    Returns:
+        tuple[dict | None, str | None]: Fit result and optional formatted error.
+    """
     report = safe_fit_report(**fit_kwargs)
     if report.success:
         return report.result, None
@@ -162,12 +197,27 @@ def _fit_or_error(context: str, **fit_kwargs):
 
 
 def _should_show_concise_progress(config: AppConfig, verbose: bool) -> bool:
+    """Determine whether concise stagewise progress logs should be printed.
+
+    Args:
+        config: Application config carrying runtime verbosity flags.
+        verbose: Stagewise verbose flag.
+
+    Returns:
+        bool: ``True`` when concise progress logs should be shown.
+    """
     runtime = getattr(config, "runtime", None)
     quiet = bool(getattr(runtime, "quiet", False))
     return not quiet and not verbose
 
 
 def _print_progress(enabled: bool, message: str) -> None:
+    """Print a progress message only when compact progress mode is enabled.
+
+    Args:
+        enabled: Whether progress output is enabled.
+        message: Message to print.
+    """
     if enabled:
         print(message)
 
@@ -180,6 +230,19 @@ def _compute_adaptive_lamb(
     min_lamb_ratio: float = 0.3,
     max_lamb_ratio: float = 1.5,
 ):
+    """Adjust lambda based on how close pruning is to the target sparsity.
+
+    Args:
+        base_lamb: Baseline lambda for the stage.
+        current_edges: Current edge count.
+        initial_edges: Initial edge count before pruning.
+        target_edges: Desired edge target.
+        min_lamb_ratio: Lower multiplier bound for late-stage pruning.
+        max_lamb_ratio: Upper multiplier bound for early-stage pruning.
+
+    Returns:
+        float: Adaptive lambda value for the current prune attempt.
+    """
     if not (_valid_edge_count(current_edges) and _valid_edge_count(initial_edges)):
         return float(base_lamb)
     current_edges = float(current_edges)
@@ -203,6 +266,18 @@ def _compute_adaptive_ft_steps(
     target_edges: int,
     min_ratio: float = 0.3,
 ):
+    """Scale post-prune fine-tune steps with current pruning progress.
+
+    Args:
+        base_steps: Baseline post-prune fine-tune steps.
+        current_edges: Current edge count.
+        initial_edges: Initial edge count before pruning.
+        target_edges: Desired edge target.
+        min_ratio: Lower multiplier bound for the adapted steps.
+
+    Returns:
+        int: Adapted number of fine-tune steps.
+    """
     if base_steps <= 0:
         return 0
     if not (_valid_edge_count(current_edges) and _valid_edge_count(initial_edges)):
@@ -235,14 +310,22 @@ def _normalize_width(width: list[object]) -> list[int]:
 
 
 def _clone_state_dict_cpu(model) -> dict[str, torch.Tensor]:
+    """Clone a model state dict onto CPU tensors.
+
+    Args:
+        model: Model exposing ``state_dict``.
+
+    Returns:
+        dict[str, torch.Tensor]: Deep-copied CPU state dict.
+    """
     return {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
 
 
 @dataclass
 class AdaptiveThresholdController:
-    """剪枝阈值自适应控制器。
+    """Adaptive pruning threshold controller.
 
-    根据最近剪枝收益和成功次数动态调整下一轮阈值。
+    Adjusts the next threshold based on recent pruning gains and success counts.
     """
 
     base_step: float = 0.005
@@ -311,23 +394,23 @@ def _attempt_prune_with_validation(
     use_disk_clone: bool = False,
     clone_ckpt_path: str = "_safe_copy_temp",
 ):
-    """用验证反馈执行单次剪枝尝试。
+    """Attempt a single prune step with validation feedback.
 
     Args:
-        model: 当前阶段模型。
-        dataset: 数据集字典。
-        threshold: 本轮剪枝阈值。
-        current_lr: 当前学习率。
-        current_lamb: 当前正则强度。
-        batch_size: 批大小。
-        prune_acc_drop_tol: 允许的精度回落阈值。
-        post_prune_ft_steps: 剪枝后恢复微调步数。
-        guard_mode: ``full`` 使用双段 guarded fit（quick + recovery），``light`` 使用单段 guarded fit。
-        use_disk_clone: 是否使用磁盘克隆回滚快照。
-        clone_ckpt_path: 磁盘克隆临时路径前缀。
+        model: Current stage model.
+        dataset: Dataset dictionary.
+        threshold: Prune threshold for this attempt.
+        current_lr: Current learning rate.
+        current_lamb: Current regularization strength.
+        batch_size: Batch size.
+        prune_acc_drop_tol: Tolerance for accuracy drop after prune.
+        post_prune_ft_steps: Recovery fine-tune steps after pruning.
+        guard_mode: ``full`` performs quick + recovery guarded fits, ``light`` uses a single guarded fit.
+        use_disk_clone: Whether to use disk cloning for rollback.
+        clone_ckpt_path: Prefix for temporary disk checkpoints.
 
     Returns:
-        dict: 包含回滚模型、是否成功、边数收益和评估信息的记录。
+        dict: Record containing the rollback model, success flag, edge gain, and validation info.
     """
     mode = str(guard_mode).strip().lower()
     use_full_guard = mode == "full"
@@ -347,7 +430,8 @@ def _attempt_prune_with_validation(
         quick_ft_steps = 0
         if edges_removed > 0 and post_prune_ft_steps > 0:
             if use_full_guard:
-                # Full guard 先做短恢复，快速筛掉无效剪枝，避免大步数微调浪费。
+                # Full guard performs a short recovery fit to filter invalid pruning before
+                # longer fine-tuning steps waste time.
                 quick_ft_steps = min(int(post_prune_ft_steps), 20)
                 if quick_ft_steps > 0:
                     _, quick_fit_error = _fit_or_error(
@@ -465,17 +549,21 @@ def _attempt_prune_with_validation(
 
 
 def stagewise_train(dataset, config: AppConfig):
-    """分阶段训练并自动选择最优快照。
+    """Run staged training and automatically choose the best snapshot.
 
-    该流程在每个阶段执行拟合，并在满足条件时进行渐进式剪枝、短微调与回滚保护，
-    最终依据 ``sym_readiness_score`` 从多阶段快照中选出符号化入口模型。
+    Each stage performs guarded fitting and, when appropriate, progressive
+    pruning, short recovery fine-tuning, and rollback protection. The final
+    symbolic entry model is selected by ``sym_readiness_score`` across all
+    recorded snapshots.
 
     Args:
-        dataset: 由 ``build_dataset`` 构建的数据字典。
-        config: 统一运行配置对象；实际使用 ``config.stagewise``。
+        dataset: Dataset dictionary returned by ``build_dataset``.
+        config: Unified runtime config object, primarily using
+            ``config.stagewise``.
 
     Returns:
-        tuple: ``(best_model, result_dict)``，分别是最优模型与阶段训练结果。
+        tuple: ``(best_model, result_dict)`` containing the selected model and
+        stagewise training metadata.
     """
     stage_config = config.stagewise
     width = stage_config.width
@@ -654,7 +742,7 @@ def stagewise_train(dataset, config: AppConfig):
         except Exception as e:
             rollback = f"fit_error: {e}"
             if verbose:
-                print(f"  [stage {si}] fit 异常: {e}")
+                print(f"  [stage {si}] fit exception: {e}")
 
         prune_accepted = False
         if si >= prune_start_stage and get_n_edge(model) > target_edges and not rollback:
@@ -700,8 +788,9 @@ def stagewise_train(dataset, config: AppConfig):
                         clone_ckpt_path=clone_ckpt_path,
                     )
                     model = attempt["model"]
-                    # 控制器始终基于最近一次尝试更新阈值，即使回滚了模型也一样，
-                    # 因为失败本身就是下一轮调阈的信号。
+                    # The controller always updates from the latest attempt,
+                    # even if the model was rolled back, because the failure
+                    # itself is a signal for the next threshold adjustment.
                     controller.update(attempt["success"], attempt["edges_removed"])
                     cur_prune_th = controller.current_threshold
                     prune_accepted = prune_accepted or bool(attempt["success"])
@@ -979,7 +1068,8 @@ def stagewise_train(dataset, config: AppConfig):
     if not candidates:
         candidates = stage_snapshots
 
-    # 先按精度过滤，再按 readiness score 选模，避免为了稀疏度牺牲过多精度。
+    # Filter by accuracy first, then rank by readiness score so sparsity does
+    # not dominate at the expense of too much accuracy.
     candidates.sort(key=lambda s: s["score"], reverse=True)
     best_snap = candidates[0]
 
@@ -1043,14 +1133,14 @@ def stagewise_train(dataset, config: AppConfig):
 
 
 def stagewise_train_report(dataset, config: AppConfig):
-    """返回 ``stagewise_train`` 的结构化报告版本。
+    """Return the structured report version of ``stagewise_train``.
 
     Args:
-        dataset: 数据集字典。
-        config: 统一运行配置对象。
+        dataset: Dataset dictionary.
+        config: Unified runtime config object.
 
     Returns:
-        tuple: ``(best_model, StagewiseResult)``。
+        tuple: ``(best_model, StagewiseResult)``.
     """
     from symkan.core.types import StagewiseResult
 

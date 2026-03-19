@@ -1,4 +1,4 @@
-"""symkan 数据集构建与验证集切分工具。"""
+"""symkan dataset construction and optional validation-split utilities."""
 
 import warnings
 from typing import Optional
@@ -11,13 +11,13 @@ from .runtime import get_device, resolve_device
 
 
 def _resolve_device(device: Optional[str] = None) -> str:
-    """解析数据构建阶段使用的设备字符串。
+    """Resolve the device string used during dataset construction.
 
     Args:
-        device: 传入设备；为空或 ``auto`` 时返回当前全局设备。
+        device: Override device; uses the global default for ``None`` or ``auto``.
 
     Returns:
-        str: 设备字符串。
+        str: Device string such as ``cpu`` or ``cuda``.
     """
     if device is None or device == "auto":
         return get_device()
@@ -31,18 +31,18 @@ def _split_train_validation(
     seed: Optional[int] = None,
     min_val_samples: int = 10,
 ):
-    """为训练集创建可选验证集切分。
+    """Create an optional validation split from the training data.
 
     Args:
-        train_input: 训练输入张量。
-        train_label: 训练标签张量。
-        validation_ratio: 验证集比例。
-        seed: 随机种子。
-        min_val_samples: 验证集最少样本数。
+        train_input: Training input tensor.
+        train_label: Training label tensor.
+        validation_ratio: Fraction of data to reserve for validation.
+        seed: RNG seed for splitting.
+        min_val_samples: Minimum number of validation samples.
 
     Returns:
         tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
-        训练集与验证集张量。
+        Train and validation tensors.
     """
     if validation_ratio <= 0:
         return train_input, train_label, None, None
@@ -58,7 +58,7 @@ def _split_train_validation(
 
     ratio = float(validation_ratio)
     n_val = int(n_total * ratio)
-    # 若按比例切分导致验证样本太少，则上调比例以保证最小统计稳定性。
+    # Inflate the ratio when the naive split would leave too few validation samples.
     if n_val < min_val_samples:
         adjusted_ratio = min(float(min_val_samples) / float(n_total), 0.3)
         if adjusted_ratio > ratio:
@@ -93,6 +93,20 @@ def _split_train_validation(
 
 
 def _to_label_tensor(y, *, device: torch.device, split: str) -> torch.Tensor:
+    """Normalize raw labels into a validated tensor representation.
+
+    Args:
+        y: Raw label payload, typically a NumPy array or tensor.
+        device: Target device for the returned tensor.
+        split: Dataset split name used in validation errors.
+
+    Returns:
+        torch.Tensor: Rank-1 class indices or rank-2 float labels.
+
+    Raises:
+        ValueError: If labels are empty, negative, non-integer 1D floats, or
+            have an unsupported rank.
+    """
     tensor = torch.as_tensor(y, device=device)
     if tensor.ndim == 1:
         if tensor.numel() == 0:
@@ -121,6 +135,20 @@ def _to_one_hot_if_needed(
     train_label: torch.Tensor,
     test_label: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Convert index labels to one-hot labels while preserving valid 2D labels.
+
+    Args:
+        train_label: Training labels as class indices or 2D label matrix.
+        test_label: Test labels as class indices or 2D label matrix.
+
+    Returns:
+        tuple[torch.Tensor, torch.Tensor]: Training and test labels in a shared
+        one-hot-compatible 2D format.
+
+    Raises:
+        ValueError: If train and test labels imply incompatible class
+            dimensions.
+    """
     train_is_index = train_label.ndim == 1
     test_is_index = test_label.ndim == 1
 
@@ -161,6 +189,16 @@ def _validate_sample_count(
     *,
     split: str,
 ) -> None:
+    """Validate that inputs and labels contain the same number of samples.
+
+    Args:
+        x: Input tensor for the split.
+        y: Label tensor for the split.
+        split: Dataset split name used in validation errors.
+
+    Raises:
+        ValueError: If the sample counts do not match.
+    """
     if x.shape[0] != y.shape[0]:
         raise ValueError(
             f"{split} input/label sample count mismatch: "
@@ -178,21 +216,21 @@ def build_dataset(
     seed: Optional[int] = None,
     min_val_samples: int = 10,
 ):
-    """构建 KAN/symkan 统一 dataset 字典。
+    """Build a unified dataset dictionary for KAN and symkan.
 
     Args:
-        Xtr: 训练输入数组。
-        Ytr: 训练标签数组（通常为 one-hot）。
-        Xte: 测试输入数组。
-        Yte: 测试标签数组（通常为 one-hot）。
-        device: 目标设备，支持 ``auto/cpu/cuda``。
-        validation_ratio: 验证集比例；默认 ``0.0`` 表示禁用。
-        seed: 验证集切分随机种子。
-        min_val_samples: 验证集最少样本数。
+        Xtr: Training inputs array.
+        Ytr: Training labels array (often one-hot).
+        Xte: Test inputs array.
+        Yte: Test labels array (often one-hot).
+        device: Target device string, supports ``auto``, ``cpu``, ``cuda``.
+        validation_ratio: Fraction reserved for validation; ``0.0`` disables.
+        seed: RNG seed for validation split.
+        min_val_samples: Minimum number of validation samples.
 
     Returns:
-        dict: 包含 ``train_input/train_label/val_input/val_label/test_input/test_label``
-        的张量字典。
+        dict: Tensor dictionary with ``train_input``, ``train_label``, ``val_input``,
+        ``val_label``, ``test_input``, and ``test_label``.
     """
     if validation_ratio < 0 or validation_ratio >= 1:
         raise ValueError(f"validation_ratio must be in [0, 1); got {validation_ratio}")

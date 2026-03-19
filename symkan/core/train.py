@@ -1,6 +1,7 @@
-"""symkan 训练封装与容错原语。
+"""symkan training wrappers with resilience primitives.
 
-从原 modeling.py 迁移。提供 safe_fit 及结构化训练报告。
+Migrated from the original modeling.py; exposes ``safe_fit`` helpers
+and structured training reports.
 """
 
 import os
@@ -24,6 +25,14 @@ def format_fit_failure(report: FitReport, context: str = "safe_fit") -> str:
 
 
 def _ensure_model_history_path(model):
+    """Ensure the pykan checkpoint history file exists before fitting.
+
+    Args:
+        model: Model-like object that may expose ``ckpt_path``.
+
+    Returns:
+        bool: ``True`` when a usable history path exists, otherwise ``False``.
+    """
     ckpt_path = getattr(model, "ckpt_path", None)
     if not isinstance(ckpt_path, str) or len(ckpt_path) == 0:
         return False
@@ -49,6 +58,24 @@ def _build_fit_kwargs(
     singularity_avoiding: bool,
     log: int,
 ) -> dict[str, Any]:
+    """Build normalized keyword arguments for ``model.fit``.
+
+    Args:
+        dataset: Training dataset payload.
+        opt: Optimizer name.
+        steps: Number of fit steps.
+        lr: Learning rate.
+        lamb: Main sparsity regularization coefficient.
+        lamb_l1: L1 regularization coefficient.
+        lamb_entropy: Entropy regularization coefficient.
+        batch: Batch size, where ``-1`` means full-batch.
+        update_grid: Whether ``fit`` may update spline grids.
+        singularity_avoiding: Whether singularity avoidance is enabled.
+        log: Logging interval passed through to ``fit``.
+
+    Returns:
+        dict[str, Any]: Normalized kwargs ready for ``model.fit``.
+    """
     kw: dict[str, Any] = dict(
         dataset=dataset,
         opt=opt,
@@ -68,6 +95,16 @@ def _build_fit_kwargs(
 
 
 def _run_fit(model, kw: dict[str, Any]) -> FitReport:
+    """Run ``model.fit`` with built-in compatibility fallbacks.
+
+    Args:
+        model: Model-like object exposing ``fit``.
+        kw: Normalized fit kwargs.
+
+    Returns:
+        FitReport: Structured result describing success, fallback usage, or
+        failure details.
+    """
     try:
         result = model.fit(**kw)
         return FitReport(success=True, result=result)
@@ -119,26 +156,26 @@ def safe_fit(
     raise_on_failure: bool = False,
     context: str = "safe_fit",
 ):
-    """带自动降级与容错的训练封装。
+    """Guarded training helper with automatic fallback logic.
 
     Args:
-        model: KAN/symkan 模型对象。
-        dataset: 由 ``build_dataset`` 构建的数据字典。
-        opt: 优化器名称，如 ``Adam`` 或 ``LBFGS``。
-        steps: 训练步数。
-        lr: 学习率。
-        lamb: 稀疏正则权重。
-        lamb_l1: L1 正则系数。
-        lamb_entropy: 熵正则系数。
-        batch: 批大小；``-1`` 表示全量。
-        update_grid: 是否更新 grid。
-        singularity_avoiding: 是否启用奇异点规避。
-        log: 日志间隔。
-        raise_on_failure: 为 ``True`` 时，失败直接抛出 ``SafeFitError``。
-        context: 失败消息中的上下文名称。
+        model: KAN/symkan model object.
+        dataset: Dataset dictionary from ``build_dataset``.
+        opt: Optimizer name such as ``Adam`` or ``LBFGS``.
+        steps: Number of training steps.
+        lr: Learning rate.
+        lamb: Sparsity regularization coefficient.
+        lamb_l1: L1 regularization coefficient.
+        lamb_entropy: Entropy regularization coefficient.
+        batch: Batch size, where ``-1`` means full-batch.
+        update_grid: Whether to allow ``fit`` to update spline grids.
+        singularity_avoiding: Whether to enable singularity avoidance.
+        log: Logging interval.
+        raise_on_failure: When ``True``, raise ``SafeFitError`` on failure.
+        context: Context label embedded in failure messages.
 
     Returns:
-        dict: 训练过程结果字典（失败时返回空字典）。
+        dict: Training result payload (empty dict when failures are ignored).
     """
     _ensure_model_history_path(model)
     kw = _build_fit_kwargs(
@@ -161,7 +198,7 @@ def safe_fit(
     message = format_fit_failure(report, context=context)
     if raise_on_failure:
         raise SafeFitError(message)
-    print(f"  [safe_fit] {message}，跳过")
+    print(f"  [safe_fit] {message}, skipping")
     return {}
 
 
@@ -179,24 +216,24 @@ def safe_fit_report(
     singularity_avoiding: bool = True,
     log: int = 10,
 ) -> FitReport:
-    """``safe_fit`` 的结构化报告版本。
+    """Structured wrapper exposing ``safe_fit`` reports.
 
     Args:
-        model: KAN/symkan 模型对象。
-        dataset: 由 ``build_dataset`` 构建的数据字典。
-        opt: 优化器名称，如 ``Adam`` 或 ``LBFGS``。
-        steps: 训练步数。
-        lr: 学习率。
-        lamb: 稀疏正则权重。
-        lamb_l1: L1 正则系数。
-        lamb_entropy: 熵正则系数。
-        batch: 批大小；``-1`` 表示全量。
-        update_grid: 是否更新 grid。
-        singularity_avoiding: 是否启用奇异点规避。
-        log: 日志间隔。
+        model: KAN/symkan model object.
+        dataset: Dataset dictionary from ``build_dataset``.
+        opt: Optimizer name such as ``Adam`` or ``LBFGS``.
+        steps: Number of training steps.
+        lr: Learning rate.
+        lamb: Sparsity regularization coefficient.
+        lamb_l1: L1 regularization coefficient.
+        lamb_entropy: Entropy regularization coefficient.
+        batch: Batch size, where ``-1`` means full-batch.
+        update_grid: Whether to allow ``fit`` to update spline grids.
+        singularity_avoiding: Whether to enable singularity avoidance.
+        log: Logging interval.
 
     Returns:
-        FitReport: 结构化结果，便于区分成功/失败/降级。
+        FitReport: Structured status describing success, failure, or fallbacks.
     """
     _ensure_model_history_path(model)
     kw = _build_fit_kwargs(

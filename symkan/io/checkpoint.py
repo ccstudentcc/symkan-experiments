@@ -1,4 +1,4 @@
-"""symkan 模型克隆与检查点复制工具。"""
+"""Model cloning and checkpoint utilities for symkan."""
 
 import copy
 import io
@@ -20,6 +20,15 @@ _CKPT_SUFFIXES = ("_config.yml", "_state", "_cache_data")
 
 
 def _load_tensor_artifact(path: str, device: torch.device):
+    """Load a Torch checkpoint artifact with backward-compatible kwargs.
+
+    Args:
+        path: Artifact path on disk.
+        device: Target device for deserialization.
+
+    Returns:
+        Any: Deserialized artifact content.
+    """
     try:
         return torch.load(path, map_location=device, weights_only=True)
     except TypeError:
@@ -27,6 +36,11 @@ def _load_tensor_artifact(path: str, device: torch.device):
 
 
 def _cleanup_ckpt_artifacts(prefix: Path) -> None:
+    """Delete checkpoint sidecar files created during clone operations.
+
+    Args:
+        prefix: Shared checkpoint prefix without suffixes.
+    """
     for suffix in _CKPT_SUFFIXES:
         artifact = Path(f"{prefix}{suffix}")
         try:
@@ -37,6 +51,15 @@ def _cleanup_ckpt_artifacts(prefix: Path) -> None:
 
 @contextmanager
 def _checkpoint_prefix(path: str = DEFAULT_CLONE_CKPT_PREFIX):
+    """Create a temporary checkpoint prefix and always clean it up.
+
+    Args:
+        path: Optional explicit checkpoint prefix. The default generates a
+            unique temporary prefix in the current working directory.
+
+    Yields:
+        Path: Prefix path to use with pykan checkpoint helpers.
+    """
     if path != DEFAULT_CLONE_CKPT_PREFIX:
         prefix = Path(path)
         prefix.parent.mkdir(parents=True, exist_ok=True)
@@ -54,20 +77,20 @@ def _checkpoint_prefix(path: str = DEFAULT_CLONE_CKPT_PREFIX):
 
 
 def clone_model_in_memory(model, device: Optional[str] = None):
-    """使用内存路径深拷贝模型。
+    """Deep copy a model in memory and move it to the requested device.
 
     Args:
-        model: 待克隆模型。
-        device: 目标设备；为空时使用当前运行时设备。
+        model: Model to clone.
+        device: Target device; defaults to the current runtime device.
 
     Returns:
-        Any: 模型副本（迁移到目标设备）。
+        Any: Cloned model instance.
     """
     dev = resolve_device(device or get_device())
     try:
         model_load = copy.deepcopy(model)
     except Exception:
-        # deepcopy 失败时回退到 torch 序列化路径，兼容不可 deepcopy 的对象。
+        # Fallback to torch serialization when deepcopy is not supported.
         buf = io.BytesIO()
         torch.save(model, buf)
         buf.seek(0)
@@ -79,15 +102,15 @@ def clone_model_in_memory(model, device: Optional[str] = None):
 
 
 def clone_model_via_ckpt(model, path: str = DEFAULT_CLONE_CKPT_PREFIX, device: Optional[str] = None):
-    """通过 ckpt 文件路径深拷贝 KAN 模型。
+    """Clone a KAN model by writing and reading a checkpoint on disk.
 
     Args:
-        model: 待克隆模型。
-        path: 临时 ckpt 前缀路径。
-        device: 目标设备；为空时使用当前运行时设备。
+        model: Model to clone.
+        path: Temporary checkpoint prefix path.
+        device: Target device; defaults to the current runtime device.
 
     Returns:
-        Any: 模型副本（迁移到目标设备）。
+        Any: Cloned model moved to the target device.
     """
     dev = resolve_device(device or get_device())
     with _checkpoint_prefix(path) as ckpt_prefix:
@@ -148,18 +171,19 @@ def clone_model(
     use_disk_clone: bool = False,
     ckpt_path: str = DEFAULT_CLONE_CKPT_PREFIX,
 ):
-    """统一模型克隆入口。
+    """Unified cloning entry point that prefers memory cloning.
 
-    默认优先内存克隆；当失败或显式指定时回退到磁盘 ckpt 克隆。
+    Memory cloning is attempted first; disk checkpoints are used when the
+    user forces disk clones or when memory cloning fails.
 
     Args:
-        model: 待克隆模型。
-        device: 目标设备；为空时使用当前运行时设备。
-        use_disk_clone: 是否强制使用磁盘克隆。
-        ckpt_path: 磁盘克隆临时路径前缀。
+        model: Model to clone.
+        device: Target device; defaults to the current runtime device.
+        use_disk_clone: Force disk-based cloning when True.
+        ckpt_path: Prefix for temporary disk checkpoints.
 
     Returns:
-        Any: 模型副本。
+        Any: Cloned model instance.
     """
     if use_disk_clone:
         return clone_model_via_ckpt(model, path=ckpt_path, device=device)

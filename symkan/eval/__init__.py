@@ -1,6 +1,6 @@
-"""symkan 评估模块公共接口导出。
+"""Public exports for symkan's evaluation module.
 
-提供公式数值一致性验证、多分类 ROC/AUC 计算与可视化接口。
+Provides formula validation, multiclass ROC/AUC computation, and plotting helpers.
 """
 from .metrics import (
     validate_formula_numerically,

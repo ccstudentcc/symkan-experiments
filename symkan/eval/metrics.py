@@ -1,4 +1,4 @@
-"""symkan 评估指标与可视化工具。"""
+"""Evaluation metrics and visualization helpers for symkan."""
 
 import numpy as np
 import pandas as pd
@@ -13,6 +13,15 @@ _LAMBDA_CACHE = {}
 
 
 def _get_compiled_formula(expr_str, n_feat):
+    """Compile and cache a symbolic expression for NumPy evaluation.
+
+    Args:
+        expr_str: Symbolic expression text.
+        n_feat: Number of input features referenced by the expression.
+
+    Returns:
+        Callable[..., Any]: Cached callable produced by ``sympy.lambdify``.
+    """
     key = (expr_str, int(n_feat))
     cached = _LAMBDA_CACHE.get(key)
     if cached is not None:
@@ -34,16 +43,16 @@ def _get_compiled_formula(expr_str, n_feat):
 
 
 def validate_formula_numerically(model, formulas, dataset, n_sample: int = 500):
-    """验证符号表达式与模型输出的一致性。
+    """Validate symbolic formulas numerically against model outputs.
 
     Args:
-        model: 符号化后的模型对象。
-        formulas: ``symbolic_formula()`` 返回对象。
-        dataset: 由 ``build_dataset`` 构建的数据字典。
-        n_sample: 用于数值验证的测试样本上限。
+        model: Symbolized model instance.
+        formulas: Payload from ``symbolic_formula()``.
+        dataset: Dataset dict from ``build_dataset``.
+        n_sample: Maximum number of samples used in validation.
 
     Returns:
-        pandas.DataFrame | None: 每个表达式的 R²、复杂度与稳定性信息。
+        pandas.DataFrame | None: R², complexity, and stability information per expression.
     """
     if formulas is None:
         return None
@@ -89,14 +98,14 @@ def validate_formula_numerically(model, formulas, dataset, n_sample: int = 500):
 
 
 def compute_multiclass_roc_auc(y_true_onehot, y_score):
-    """计算多分类 ROC 曲线与 AUC。
+    """Compute ROC curves and AUC for each class.
 
     Args:
-        y_true_onehot: one-hot 真值标签。
-        y_score: 每类别预测分数或概率。
+        y_true_onehot: One-hot encoded true labels.
+        y_score: Prediction scores or probabilities per class.
 
     Returns:
-        dict: 每个类别对应的 ``fpr/tpr/auc``。
+        dict: ``fpr/tpr/auc`` entries for each class.
     """
     n_classes = y_true_onehot.shape[1]
     roc_data = {}
@@ -111,12 +120,12 @@ def compute_multiclass_roc_auc(y_true_onehot, y_score):
 
 
 def plot_roc_curves(roc_data, class_labels=None, title="ROC Curves (Per Class)"):
-    """绘制多分类 ROC 曲线图。
+    """Plot multiclass ROC curves.
 
     Args:
-        roc_data: ``compute_multiclass_roc_auc`` 返回的结果字典。
-        class_labels: 类别显示名称列表。
-        title: 图标题。
+        roc_data: Result dict returned by ``compute_multiclass_roc_auc``.
+        class_labels: Optional display names for each class.
+        title: Chart title.
     """
     import matplotlib.pyplot as plt
 

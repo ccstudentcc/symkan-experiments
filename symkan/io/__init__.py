@@ -1,6 +1,7 @@
-"""symkan I/O 模块公共接口导出。
+"""Top-level symkan I/O exports.
 
-该模块集中导出模型克隆、结果保存与实验 bundle 读写能力。
+This module re-exports model cloning helpers, result exporters, and
+bundle read/write utilities.
 """
 
 from .checkpoint import clone_model, clone_model_in_memory, clone_model_via_ckpt

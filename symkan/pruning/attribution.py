@@ -1,6 +1,7 @@
-"""symkan 特征归因与容错封装。
+"""Fault-tolerant feature attribution wrappers for symkan.
 
-该模块包装 pykan 的 attribute 流程，统一处理推理模式冲突和失败回退。
+This module wraps pykan's ``attribute`` flow to centralize inference mode
+conflict handling and fallback logic.
 """
 
 import numpy as np
@@ -10,15 +11,15 @@ from symkan.core.infer import _infer_model_device
 
 
 def safe_attribute(model, dataset, n_sample: int = 2048):
-    """安全执行归因计算并返回特征分数。
+    """Safely compute feature attributions and return feature scores.
 
     Args:
-        model: KAN/symkan 模型对象。
-        dataset: 由 ``build_dataset`` 构建的数据字典。
-        n_sample: 参与归因计算的训练样本上限。
+        model: KAN/symkan model instance.
+        dataset: Dataset dictionary produced by ``build_dataset``.
+        n_sample: Maximum training samples used for attribution.
 
     Returns:
-        numpy.ndarray: 特征分数向量，形状为 ``[input_dim]``。
+        numpy.ndarray: Feature score vector of shape ``[input_dim]``.
     """
     was_training = bool(getattr(model, "training", False))
     model.eval()
@@ -41,8 +42,8 @@ def safe_attribute(model, dataset, n_sample: int = 2048):
                 _ = model(x, singularity_avoiding=True)
             _run_attribute()
         except RuntimeError as e:
-            # 某些 pykan 路径会在 inference_mode 下缓存反向图需要的中间张量，
-            # 此时退回 no_grad 以保留前向所需状态。
+            # Some pykan paths cache backward tensors while in inference_mode,
+            # so we retry under no_grad when that happens to avoid missing state.
             if "Inference tensors cannot be saved for backward" not in str(e):
                 raise
             with torch.no_grad():
@@ -62,15 +63,15 @@ def safe_attribute(model, dataset, n_sample: int = 2048):
 
 
 def safe_attribute_report(model, dataset, n_sample: int = 2048):
-    """返回 ``safe_attribute`` 的结构化报告版本。
+    """Return a structured report for ``safe_attribute``.
 
     Args:
-        model: KAN/symkan 模型对象。
-        dataset: 由 ``build_dataset`` 构建的数据字典。
-        n_sample: 参与归因计算的训练样本上限。
+        model: KAN/symkan model instance.
+        dataset: Dataset dictionary produced by ``build_dataset``.
+        n_sample: Maximum training samples used for attribution.
 
     Returns:
-        AttributeReport: 结构化归因结果。
+        AttributeReport: Structured attribution result.
     """
     from symkan.core.types import AttributeReport
 

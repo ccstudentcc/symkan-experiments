@@ -1,6 +1,7 @@
-"""symkan 推理与评估原语。
+"""symkan inference and evaluation primitives.
 
-从原 modeling.py 迁移。提供 logits 计算、准确率评估与模型边数统计。
+Migrated from the original modeling.py module. Provides logits computation,
+accuracy helpers, and edge-count reporting.
 """
 
 from typing import Optional
@@ -13,6 +14,15 @@ from .runtime import get_device, resolve_device
 
 
 def _infer_model_device(model):
+    """Infer the device currently used by a model.
+
+    Args:
+        model: Model-like object exposing parameters or buffers.
+
+    Returns:
+        torch.device: Inferred model device, or the current global runtime
+        device as a fallback.
+    """
     try:
         return next(model.parameters()).device
     except Exception:
@@ -25,12 +35,34 @@ def _infer_model_device(model):
 
 
 def _pick_device(model, device: Optional[str] = None):
+    """Resolve the effective inference device for a call.
+
+    Args:
+        model: Model-like object used for fallback device inference.
+        device: Optional explicit device override.
+
+    Returns:
+        torch.device: Resolved device object.
+    """
     if device is not None and str(device).lower() != "auto":
         return resolve_device(device)
     return _infer_model_device(model)
 
 
 def _label_tensor_to_indices(labels, *, device: torch.device, split: str) -> torch.Tensor:
+    """Convert labels to integer class indices for metric computation.
+
+    Args:
+        labels: Raw labels as indices, one-hot labels, or probability labels.
+        device: Target device for the normalized tensor.
+        split: Dataset split name used in validation errors.
+
+    Returns:
+        torch.Tensor: Rank-1 tensor of integer class indices.
+
+    Raises:
+        ValueError: If labels are invalid or have an unsupported rank.
+    """
     if not torch.is_tensor(labels):
         tensor = torch.as_tensor(labels, device=device)
     else:
@@ -59,15 +91,15 @@ def _label_tensor_to_indices(labels, *, device: torch.device, split: str) -> tor
 
 
 def model_logits(model, X, device: Optional[str] = None):
-    """计算模型 logits（NumPy 输入路径）。
+    """Compute model logits using a NumPy-friendly path.
 
     Args:
-        model: KAN/symkan 模型对象。
-        X: 输入特征数组。
-        device: 可选设备；为空时自动推断模型设备。
+        model: KAN/symkan model object.
+        X: Input feature array.
+        device: Optional override device; auto-infer if ``None``.
 
     Returns:
-        numpy.ndarray: logits 数组。
+        numpy.ndarray: Logits array.
     """
     was_training = bool(getattr(model, "training", False))
     model.eval()
@@ -82,19 +114,19 @@ def model_logits(model, X, device: Optional[str] = None):
 
 
 def model_logits_ds(model, dataset, split: str = "test", device: Optional[str] = None):
-    """计算模型 logits（Tensor 快路径）。
+    """Compute model logits directly from dataset tensors.
 
     Args:
-        model: KAN/symkan 模型对象。
-        dataset: 由 ``build_dataset`` 构建的数据字典。
-        split: 数据划分，支持 ``train``、``val`` 或 ``test``。
-        device: 可选设备；为空时自动推断模型设备。
+        model: KAN/symkan model object.
+        dataset: Dataset dictionary produced by ``build_dataset``.
+        split: Split name to read (``train``, ``val``, or ``test``).
+        device: Optional override device; auto-infer if ``None``.
 
     Returns:
-        torch.Tensor: logits 张量。
+        torch.Tensor: Logits tensor.
 
     Raises:
-        ValueError: 当请求的 split 不存在或为空时抛出。
+        ValueError: When the requested split is missing or empty.
     """
     was_training = bool(getattr(model, "training", False))
     model.eval()
@@ -102,7 +134,7 @@ def model_logits_ds(model, dataset, split: str = "test", device: Optional[str] =
     try:
         input_key = f"{split}_input"
         if input_key not in dataset or dataset[input_key] is None:
-            raise ValueError(f"数据集缺少可用 split: {split}")
+            raise ValueError(f"Dataset missing usable split: {split}")
         x = dataset[input_key]
         if not torch.is_tensor(x):
             x = torch.as_tensor(x, dtype=torch.float32, device=dev)
@@ -117,71 +149,71 @@ def model_logits_ds(model, dataset, split: str = "test", device: Optional[str] =
 
 
 def model_acc(model, X, y_cls, device: Optional[str] = None):
-    """基于 NumPy 路径计算分类准确率。
+    """Compute classification accuracy via the NumPy logits path.
 
     Args:
-        model: KAN/symkan 模型对象。
-        X: 输入特征数组。
-        y_cls: 类别索引标签。
-        device: 可选设备；为空时自动推断模型设备。
+        model: KAN/symkan model object.
+        X: Input feature array.
+        y_cls: Class index labels.
+        device: Optional override device; auto-infer if ``None``.
 
     Returns:
-        float: 分类准确率。
+        float: Classification accuracy.
     """
     pred = np.argmax(model_logits(model, X, device=device), axis=1)
     return accuracy_score(y_cls, pred)
 
 
 def model_acc_ds_fast(model, dataset, split: str = "test", device: Optional[str] = None):
-    """基于 Tensor 快路径计算分类准确率。
+    """Compute classification accuracy via the tensor-based fast path.
 
     Args:
-        model: KAN/symkan 模型对象。
-        dataset: 由 ``build_dataset`` 构建的数据字典。
-        split: 数据划分，支持 ``train``、``val`` 或 ``test``。
-        device: 可选设备；为空时自动推断模型设备。
+        model: KAN/symkan model object.
+        dataset: Dataset dictionary produced by ``build_dataset``.
+        split: Split name to use (``train``, ``val``, or ``test``).
+        device: Optional override device; auto-infer if ``None``.
 
     Returns:
-        float: 分类准确率。
+        float: Classification accuracy.
 
     Raises:
-        ValueError: 当请求的 split 不存在或为空时抛出。
+        ValueError: When the requested split is missing or empty.
     """
     logits = model_logits_ds(model, dataset, split=split, device=device)
     label_key = f"{split}_label"
     if label_key not in dataset or dataset[label_key] is None:
-        raise ValueError(f"数据集缺少可用 split: {split}")
+        raise ValueError(f"Dataset missing usable split: {split}")
     pred = torch.argmax(logits, dim=1)
     y = _label_tensor_to_indices(dataset[label_key], device=pred.device, split=split)
     return (pred == y).float().mean().item()
 
 
 def model_acc_ds(model, dataset, split: str = "test", device: Optional[str] = None):
-    """统一准确率接口（优先快路径，失败时自动回退）。
+    """Unified accuracy helper that prefers the fast tensor path with fallback.
 
     Args:
-        model: KAN/symkan 模型对象。
-        dataset: 由 ``build_dataset`` 构建的数据字典。
-        split: 数据划分，支持 ``train``、``val`` 或 ``test``。
-        device: 可选设备；为空时自动推断模型设备。
+        model: KAN/symkan model object.
+        dataset: Dataset dictionary produced by ``build_dataset``.
+        split: Split name to use (``train``, ``val``, or ``test``).
+        device: Optional override device; auto-infer if ``None``.
 
     Returns:
-        float: 分类准确率。
+        float: Classification accuracy.
 
     Raises:
-        ValueError: 当 ``split='val'`` 且验证集不可用时抛出。
+        ValueError: When ``split='val'`` but the validation split is unavailable.
     """
     try:
         return model_acc_ds_fast(model, dataset, split=split, device=device)
     except (KeyError, ValueError) as exc:
         if split == "val":
             raise ValueError(
-                "验证集 split 不可用；请在 build_dataset 中设置 validation_ratio>0，"
-                "或在 stagewise_train 中关闭 use_validation。"
+                "Validation split unavailable; set validation_ratio>0 in build_dataset"
+                " or disable use_validation in stagewise_train."
             ) from exc
         raise
     except Exception:
-        # 极端情况下回退到 NumPy 路径，优先保证可用性而非最优性能。
+        # In extreme cases fall back to the NumPy path to maximize availability.
         x = dataset[f"{split}_input"]
         y = dataset[f"{split}_label"]
         if torch.is_tensor(x):
@@ -214,13 +246,13 @@ def model_acc_ds(model, dataset, split: str = "test", device: Optional[str] = No
 
 
 def get_n_edge(model):
-    """获取模型当前边数。
+    """Return the current edge count for the model.
 
     Args:
-        model: KAN/symkan 模型对象。
+        model: KAN/symkan model object.
 
     Returns:
-        int | float: 当可读时返回整数边数，否则返回 ``numpy.nan``。
+        int | float: Integer edge count when available, otherwise ``numpy.nan``.
     """
     try:
         return int(model.n_edge)

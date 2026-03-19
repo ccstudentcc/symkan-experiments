@@ -1,6 +1,7 @@
-"""symkan 符号化模块公共接口导出。
+"""Public exports for symkan's symbolic module.
 
-该模块集中导出函数库管理、表达式处理与主符号化流水线入口。
+This module re-exports library management, expression helpers, and the core
+symbolization pipeline entry points.
 """
 
 from .library import (

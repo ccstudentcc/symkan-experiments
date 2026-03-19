@@ -1,6 +1,6 @@
-"""symkan 剪枝与归因模块公共接口导出。
+"""Exports for symkan's pruning and attribution module.
 
-该模块暴露带容错逻辑的特征归因计算入口。
+This module exposes fault-tolerant feature attribution entry points.
 """
 
 from .attribution import safe_attribute, safe_attribute_report

@@ -1,7 +1,8 @@
-"""symkan 主符号化流水线。
+"""Symkan's main symbolic pipeline.
 
-该模块负责将训练后的 KAN 模型推进到符号表达式导出阶段，涵盖渐进剪枝、
-输入压缩、逐层符号拟合和末端强化微调。
+This module advances a trained KAN model into symbolic expression export,
+including progressive pruning, optional input compaction, layer-wise symbolic
+fitting, and final refinement.
 """
 
 import time
@@ -23,6 +24,18 @@ from .search import fast_symbolic
 
 
 def _fit_or_raise(context: str, **fit_kwargs):
+    """Run guarded fitting and raise on failure.
+
+    Args:
+        context: Human-readable stage label for error messages.
+        **fit_kwargs: Keyword arguments forwarded to ``safe_fit_report``.
+
+    Returns:
+        dict: Raw fit result payload.
+
+    Raises:
+        RuntimeError: If guarded fitting fails.
+    """
     report = safe_fit_report(**fit_kwargs)
     if report.success:
         return report.result
@@ -30,6 +43,15 @@ def _fit_or_raise(context: str, **fit_kwargs):
 
 
 def _fit_or_error(context: str, **fit_kwargs):
+    """Run guarded fitting and return a formatted error instead of raising.
+
+    Args:
+        context: Human-readable stage label for error messages.
+        **fit_kwargs: Keyword arguments forwarded to ``safe_fit_report``.
+
+    Returns:
+        tuple[dict | None, str | None]: Fit result and optional formatted error.
+    """
     report = safe_fit_report(**fit_kwargs)
     if report.success:
         return report.result, None
@@ -43,6 +65,14 @@ def _set_abort_reason(
     reason: str,
     error_type: Optional[str] = None,
 ) -> None:
+    """Record the stage and reason that caused the pipeline to abort.
+
+    Args:
+        timing: Timing/diagnostic dictionary updated in place.
+        stage: Pipeline stage name.
+        reason: Human-readable abort reason.
+        error_type: Optional exception type name.
+    """
     timing["abort_stage"] = stage
     timing["abort_reason"] = str(reason)
     if error_type is not None:
@@ -58,6 +88,16 @@ def _append_pipeline_warning(
     error_type: Optional[str] = None,
     **extra: object,
 ) -> None:
+    """Append a structured warning record to pipeline diagnostics.
+
+    Args:
+        warnings_list: Warning list updated in place.
+        code: Stable warning code.
+        stage: Pipeline stage name.
+        message: Human-readable warning message.
+        error_type: Optional exception type name.
+        **extra: Additional serializable fields to attach.
+    """
     warning: dict[str, object] = {
         "code": code,
         "stage": stage,
@@ -72,6 +112,14 @@ def _append_pipeline_warning(
 
 
 def _count_effective_edges(work):
+    """Count effective active edges across activation and symbolic masks.
+
+    Args:
+        work: KAN model-like object with activation and symbolic masks.
+
+    Returns:
+        int: Effective active edge count across all layers.
+    """
     depth = len(work.width_in) - 1
     total = 0
 
@@ -114,6 +162,17 @@ def _count_effective_edges(work):
 
 
 def _adaptive_attr_sample_count(n_edge_now, target_edges, min_sample=512, max_sample=2048):
+    """Choose attribution sample count based on current pruning burden.
+
+    Args:
+        n_edge_now: Current edge count.
+        target_edges: Target edge count after pruning.
+        min_sample: Lower bound for attribution samples.
+        max_sample: Upper bound for attribution samples.
+
+    Returns:
+        int: Suggested attribution sample count.
+    """
     try:
         n_now = float(n_edge_now)
         tgt = float(max(1, target_edges))
@@ -138,20 +197,20 @@ def _heavy_finetune(
     early_stop_patience=0,
     early_stop_min_delta=1e-4,
 ):
-    """执行符号化后的强化微调。
+    """Run the post-symbolic heavy fine-tune procedure.
 
     Args:
-        work: 待微调模型。
-        dataset: 微调数据集。
-        total_steps: 总微调步数。
-        batch_size: 批大小。
-        verbose: 是否打印日志。
-        lr_schedule: 分阶段学习率序列。
-        early_stop_patience: 早停耐心值。
-        early_stop_min_delta: 判定有效改进的最小精度增量。
+        work: Model to fine-tune.
+        dataset: Dataset used for fine-tuning.
+        total_steps: Total fine-tuning steps.
+        batch_size: Batch size used during fine-tuning.
+        verbose: Whether to print progress messaging.
+        lr_schedule: Optional learning rate schedule per phase.
+        early_stop_patience: Early-stop patience value.
+        early_stop_min_delta: Minimum accuracy gain to reset patience.
 
     Returns:
-        float: 恢复最佳参数后的模型精度。
+        float: Accuracy of the work after restoring the best parameters.
     """
     if batch_size is None:
         batch_size = default_batch_size()
@@ -218,17 +277,19 @@ def symbolize_pipeline(
     dataset,
     config: AppConfig,
 ):
-    """执行 symkan 主符号化流水线。
+    """Execute the main symkan symbolic pipeline.
 
-    流程依次包含渐进剪枝、可选输入压缩、逐层符号拟合、强化微调和结果导出。
+    The pipeline runs progressive pruning, optional input compaction,
+    layer-wise symbolic fitting, heavy fine-tuning, and result export.
 
     Args:
-        model: 待符号化的 KAN/symkan 模型。
-        dataset: 由 ``build_dataset`` 构建的数据字典。
-        config: 统一运行配置对象；实际使用 ``config.symbolize``。
+        model: KAN/symkan model to be symbolized.
+        dataset: Dataset dictionary returned by ``build_dataset``.
+        config: Unified AppConfig instance, primarily using ``config.symbolize``.
 
     Returns:
-        dict: 包含模型、表达式、边数、精度、轨迹、统计与耗时信息。
+        dict: Result payload containing the model, expressions, edge counts, accuracy,
+        trace, statistics, and timing diagnostics.
     """
     register_custom_functions()
 
@@ -297,7 +358,7 @@ def symbolize_pipeline(
         "input_compaction_fallback": False,
     }
     if np.isfinite(n_edge_input) and n_edge_input > target_edges * 1.5:
-        # 保留旧版的宽松目标边数策略，避免极宽模型在早期轮次直接卡死。
+        # Preserve the legacy loose edge target to avoid early-stage collapse on wide models.
         effective_target = max(target_edges, int(n_edge_input * 0.5))
 
     thresholds = np.linspace(float(prune_threshold_start), float(prune_threshold_end), max_prune_rounds)
@@ -361,7 +422,7 @@ def symbolize_pipeline(
             drop_ratio = max(0.0, (float(n_before) - float(n_after)) / float(n_before))
 
         if drop_ratio > float(prune_max_drop_ratio_per_round):
-            # 单轮剪枝过猛，回滚并用更低阈值重试一次，避免直接塌缩到低边数区。
+            # A single prune round removed too many edges; roll back and retry with a lower threshold to prevent collapse.
             work.load_state_dict(snap_prune_state)
             safer_th = max(1e-4, float(th) * float(prune_threshold_backoff))
             try:
@@ -484,7 +545,7 @@ def symbolize_pipeline(
             success = (not no_gain) and (not too_much_drop)
 
             if no_gain:
-                # 没剪掉任何边时，说明阈值过低，应上调而不是下调。
+                # No edges removed indicates the threshold is too low; increase it instead of decreasing.
                 success_count = 0
                 failure_count += 1
                 low_gain_rounds += 1
@@ -502,15 +563,14 @@ def symbolize_pipeline(
                     boost *= 1.5
                 current_threshold = min(th_high, float(th) + adaptive_step * boost)
             else:
-                # 有剪枝但精度掉太多，说明阈值偏高，回退。
+                # Pruning occurred but accuracy dropped excessively, so back off the threshold.
                 failure_count += 1
                 success_count = 0
                 low_gain_rounds += 1
                 penalty = 0.3 * (1.0 + min(2.0, failure_count * 0.3))
                 current_threshold = max(th_low, float(th) - adaptive_step * penalty)
 
-            # 只有在阈值已接近上界时仍持续低收益，才判定为收敛并停止，
-            # 否则继续探索阈值空间。
+            # Only declare convergence when the threshold is near its upper bound and gains remain low; otherwise continue exploring.
             near_ceiling = current_threshold >= (th_high - max(adaptive_step, 1e-4))
             if near_ceiling and low_gain_rounds >= max(1, int(prune_adaptive_low_gain_patience)):
                 break
@@ -654,15 +714,15 @@ def symbolize_pipeline(
 
 
 def symbolize_pipeline_report(model, dataset, config: AppConfig):
-    """返回 ``symbolize_pipeline`` 的结构化报告版本。
+    """Return the structured report version of ``symbolize_pipeline``.
 
     Args:
-        model: 待符号化模型。
-        dataset: 数据集字典。
-        config: 统一运行配置对象。
+        model: Model to be symbolized.
+        dataset: Dataset dictionary.
+        config: Unified AppConfig instance.
 
     Returns:
-        SymbolizeResult: 结构化结果对象。
+        SymbolizeResult: Structured result object.
     """
     from symkan.core.types import SymbolizeResult
 

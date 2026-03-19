@@ -1,7 +1,7 @@
-"""兼容导出层。
+"""Compatibility export layer.
 
-所有公共名字已迁移到 ``infer.py`` 和 ``train.py``，
-旧代码仍可通过 ``symkan.core.modeling`` 导入以保持向后兼容。
+All public names have migrated to ``infer.py`` and ``train.py``.
+Legacy code can still import through ``symkan.core.modeling`` for backward compatibility.
 """
 
 # Re-export inference primitives
