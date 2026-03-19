@@ -9,6 +9,13 @@
 - 设计文档：[design](design.md)
 - 消融说明：[ablation_usage](ablation_usage.md)
 
+## 工程版口径入口（2026-03）
+
+1. 若需要确认 notebook 参数在工程版报告中的解释边界，优先阅读 [engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
+2. 若需要引用工程版复测结果与归档目录，优先阅读 [engineering_rerun_report.md](engineering_rerun_report.md)。
+3. 若用于发布前参数说明核对，请结合 [engineering_release_checklist.md](engineering_release_checklist.md) 进行一致性检查。
+4. 本文聚焦 notebook 参数层；跨版本结论口径以上述工程版文档为准。
+
 ## 目录
 
 - [1. 说明范围](#1-说明范围)

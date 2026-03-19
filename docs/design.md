@@ -13,6 +13,13 @@
 - 参数细节：[kan_parameters](kan_parameters.md)
 - 消融说明：[ablation_usage](ablation_usage.md)
 
+## 工程版口径入口（2026-03）
+
+1. 若需要“历史参考版 vs 当前工程版”的版本边界，优先阅读 [engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
+2. 若需要当前工程版的主引用结果与指标解释，优先阅读 [engineering_rerun_report.md](engineering_rerun_report.md)。
+3. 若用于发布口径确认，请同步检查 [engineering_release_checklist.md](engineering_release_checklist.md)。
+4. 本文聚焦设计原则与约束；跨版本叙述以上述工程版文档为准。
+
 ## 目录
 
 - [目标](#目标)
@@ -22,6 +29,7 @@
 - [关键算法选型](#关键算法选型)
 - [行内注释策略](#行内注释策略)
 - [风险与边界](#风险与边界)
+- [工程化改动落地（2026-03-19）](#工程化改动落地2026-03-19)
 - [实验回证后的设计收敛（2026-03）](#实验回证后的设计收敛2026-03)
 - [默认设定与兼容约束](#默认设定与兼容约束)
 - [后续演进方向](#后续演进方向)
@@ -136,6 +144,17 @@ $$
 3. 宽松的目标边数策略会影响 benchmark 公平性，因此需要明确区分默认行为和实验行为。
 4. `load_export_bundle()` 基于 `pickle`，只能用于本地生成且来源可信的 bundle。
 5. 配置中的环境变量占位符只在 YAML 解析后的标量字符串上展开，数据自动补齐默认也只允许写入仓库 `data/`，两者都属于显式安全边界而非隐式便利行为。
+
+## 工程化改动落地（2026-03-19）
+
+本节用于记录近期工程化改动已经改变的“设计层事实”，避免仅在用法文档中描述而在设计文档缺位。
+
+1. 配置收敛：Notebook / CLI / 库层统一以 `AppConfig` 为配置边界，脚本层仅做小范围白名单覆盖。
+2. notebook 兼容职责拆分：`symkan.config.notebook` 负责 flat kwargs 到 canonical 配置的归一化；`symkan.notebook_compat` 仅保留执行桥接职责。
+3. 入口口径收敛：常规执行入口统一为 `python -m scripts.*`；`scripts/run_engineering_rerun.ps1` 作为工程复测编排入口。
+4. 输出目录分层：默认运行输出为 `outputs/benchmark_*`，手册示例输出为 `outputs/rerun/*`，工程归档输出为 `outputs/rerun_v2_engine_safe_<date>/*`。
+5. 跨版本指标边界：仅允许 `export_wall_time_s` 到 `symbolize_wall_time_s` 的语义映射；`run_total_wall_time_s` 是工程版新增字段，不与历史版做同名比较。
+6. 文档治理约束：当入口、配置、指标或目录语义发生变化时，`README.md`、`docs/index.md`、`docs/project_map.md` 与本文必须同步更新。
 
 ## 实验结果支持下的设计收敛（2026-03）
 

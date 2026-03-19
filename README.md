@@ -4,12 +4,6 @@
 
 训练 KAN -> 逐步剪枝 -> 符号化 -> 数值验证 -> 导出结构化结果 -> 批量复现实验
 
-阅读仓库时，可先参考以下三份文档：
-
-1. [docs/project_map.md](docs/project_map.md)：项目地图，先知道仓库里每个目录和脚本负责什么。
-2. [docs/symkan_usage.md](docs/symkan_usage.md)：核心库 `symkan/` 的使用方式和方法背景。
-3. [docs/symkanbenchmark_usage.md](docs/symkanbenchmark_usage.md)：批量实验脚本怎么跑、结果怎么读。
-
 ## 项目背景
 
 在基于 `pykan` 的探索性实验基础上，进入批量复现或论文写作阶段时，通常会遇到以下问题：
@@ -32,6 +26,22 @@
 - 设计依据：读 [docs/design.md](docs/design.md)。
 - 单因素消融：读 [docs/ablation_usage.md](docs/ablation_usage.md)。
 - 结果报告：读 [docs/ablation_report.md](docs/ablation_report.md) 和 [docs/layerwiseft_improved_report.md](docs/layerwiseft_improved_report.md)。
+- 工程版口径说明：读 [docs/engineering_version_rerun_note.md](docs/engineering_version_rerun_note.md)。
+- 工程版复测主报告：读 [docs/engineering_rerun_report.md](docs/engineering_rerun_report.md)。
+- 工程版发布检查：读 [docs/engineering_release_checklist.md](docs/engineering_release_checklist.md)。
+- 文档同步规则（SSOT）：读 [docs/doc_sync_matrix.md](docs/doc_sync_matrix.md)。
+
+## 统一口径（2026-03-19）
+
+为避免“代码已更新、文档未同步”的偏差，当前仓库统一按以下口径描述：
+
+1. 入口口径：常规 CLI 使用 `python -m scripts.*`；工程版复测可使用 `scripts/run_engineering_rerun.ps1` 作为编排封装入口。
+2. 配置口径：Notebook / CLI / 库层统一收敛到 `symkan.config.AppConfig`；旧 notebook flat kwargs 的 canonical 化由 `symkan.config.notebook` 负责，`symkan.notebook_compat` 仅保留薄桥接职责。
+3. 输出口径：项目默认输出为 `outputs/benchmark_*`；手册示例输出为 `outputs/rerun/*`；工程归档输出为 `outputs/rerun_v2_engine_safe_<date>/*`。
+4. 跨版本指标口径：仅将 `export_wall_time_s` 语义映射到 `symbolize_wall_time_s`；`run_total_wall_time_s` 为工程版新增字段，历史版无同名可比项。
+5. 导航口径：`README.md` 中“文档路径/文档导航”与 `docs/index.md` 必须保持一致；发生冲突时以 `docs/index.md` 为准并同步回写。
+
+若后续继续迭代 `main`，请同步更新 [docs/index.md](docs/index.md) 的“统一口径速查”与本文对应段落，避免 README 与 docs 叙述漂移。
 
 ## 基本运行
 
@@ -103,7 +113,7 @@ python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml
 
 ## 仓库结构
 
-```text
+```plaintext
 symkan-experiments/
 ├─ data/                        # 数据集与本地缓存
 ├─ symkan/                      # 工程化核心库：配置、训练、符号化、评估、导出
@@ -174,16 +184,13 @@ python -m pytest
 
 ## 文档导航
 
-- [docs/index.md](docs/index.md)：文档总入口。
+为减少重复维护，完整文档目录与分场景阅读路径以 [docs/index.md](docs/index.md) 为准。常用入口如下：
+
 - [docs/project_map.md](docs/project_map.md)：项目地图与阅读路线。
 - [docs/symkan_usage.md](docs/symkan_usage.md)：核心库使用说明。
-- [docs/symkanbenchmark_usage.md](docs/symkanbenchmark_usage.md)：批量实验脚本说明。
-- [docs/full_experiment_runbook.md](docs/full_experiment_runbook.md)：完整实验复跑步骤与输出清单。
-- [docs/design.md](docs/design.md)：架构设计、边界和项目层默认设定。
-- [docs/kan_parameters.md](docs/kan_parameters.md)：`notebooks/kan.ipynb` 参数解释。
-- [docs/ablation_usage.md](docs/ablation_usage.md)：消融脚本使用说明。
-- [docs/ablation_report.md](docs/ablation_report.md)：当前单因素消融结论。
-- [docs/layerwiseft_improved_report.md](docs/layerwiseft_improved_report.md)：LayerwiseFT 改进版对比。
+- [docs/full_experiment_runbook.md](docs/full_experiment_runbook.md)：完整实验复跑步骤与产物检查。
+- [docs/engineering_rerun_report.md](docs/engineering_rerun_report.md)：工程版复测主报告与对照解释。
+- [docs/doc_sync_matrix.md](docs/doc_sync_matrix.md)：文档同步规则单一真源（SSOT）。
 
 ## 治理文件
 

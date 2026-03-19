@@ -157,7 +157,7 @@ python -m scripts.symkanbenchmark --tasks full,parallel-bench
 
 默认输出目录为 `outputs/benchmark_runs/`。每个 seed 对应一个独立的 run 子目录，以避免结果覆盖：
 
-```text
+```plaintext
 outputs/benchmark_runs/
   symkanbenchmark_runs.csv
   symkanbenchmark_eval_runs.csv

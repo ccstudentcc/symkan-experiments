@@ -11,6 +11,13 @@
 - 消融报告：[ablation_report](ablation_report.md)
 - LayerwiseFT 改进报告：[layerwiseft_improved_report](layerwiseft_improved_report.md)
 
+## 工程版口径入口（2026-03）
+
+1. 若需要区分历史参考版与当前工程版的结论边界，优先阅读 [engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
+2. 若需要工程版主引用结果（目录、指标与对照解释），优先阅读 [engineering_rerun_report.md](engineering_rerun_report.md)。
+3. 若用于发布前检查，请同步执行 [engineering_release_checklist.md](engineering_release_checklist.md)。
+4. 本文聚焦消融脚本与执行方式；跨版本统一叙述以上述工程版文档为准。
+
 ## 目录
 
 - [1. 说明范围](#1-说明范围)
@@ -202,7 +209,7 @@ python -m scripts.ablation_runner --config configs/ablation_runner.default.yaml 
 
 典型目录结构如下：
 
-```text
+```plaintext
 outputs/benchmark_ablation/
   ablation_runs_raw.csv
   ablation_runs_summary.csv

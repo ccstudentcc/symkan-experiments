@@ -12,6 +12,13 @@
 
 该仓库围绕 KAN 的符号化流程组织。`symkan/` 提供工程化库接口，其中既包括算法执行模块，也包括统一配置入口；根目录脚本负责批量实验与分析，`docs/` 提供方法、参数和实验结论的说明。
 
+## 工程版口径入口（2026-03）
+
+1. 若需要区分“历史参考版”与“当前工程版”的结论边界，优先阅读 [engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
+2. 若需要引用工程版复测目录、指标表与解释口径，优先阅读 [engineering_rerun_report.md](engineering_rerun_report.md)。
+3. 若用于发布或答辩收口，发布前检查项以 [engineering_release_checklist.md](engineering_release_checklist.md) 为准。
+4. 本文是项目结构地图；涉及跨版本结论时，以上述工程版文档为主引用来源。
+
 ## 仓库组成
 
 ### 1. `symkan/`

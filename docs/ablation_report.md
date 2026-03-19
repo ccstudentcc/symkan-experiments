@@ -9,6 +9,13 @@
 - LayerwiseFT 改进报告：[layerwiseft_improved_report](layerwiseft_improved_report.md)
 - benchmark 文档：[symkanbenchmark_usage](symkanbenchmark_usage.md)
 
+## 工程版口径入口（2026-03）
+
+1. 若需要“历史参考版 vs 当前工程版”的统一解释边界，优先阅读 [engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
+2. 若需要引用当前工程版主结果与归档目录，优先阅读 [engineering_rerun_report.md](engineering_rerun_report.md)。
+3. 若用于 release/答辩材料，请同步检查 [engineering_release_checklist.md](engineering_release_checklist.md)。
+4. 本文聚焦消融专题结论；跨版本口径以上述工程版文档为准。
+
 ## 目录
 
 - [1. 实验设计回顾](#1-实验设计回顾)

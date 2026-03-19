@@ -383,7 +383,7 @@ python -m scripts.compare_layerwiseft_improved `
 
 若按本文全部跑完，`outputs/rerun/` 下大致会出现如下结构：
 
-```text
+```plaintext
 outputs/rerun/
   benchmark_runs/
     symkanbenchmark_runs.csv

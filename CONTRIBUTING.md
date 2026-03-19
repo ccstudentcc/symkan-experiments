@@ -56,6 +56,7 @@
 
 - 问题定义与背景。
 - 具体改动内容。
+- 本次改动分类（例如：结构 / 设计 / 使用语义 / 实验流程 / 指标口径 / 输出口径）。
 - 选择当前方案而非替代方案的原因。
 - 是否影响现有 CLI、Notebook 或结果文件格式。
 - 已执行的检查、实验或人工核对项。
@@ -65,6 +66,13 @@
 1. 环境段：执行类文档是否包含“参考环境（用于结果解释）”，且与同轮复测文档一致。
 2. 代码块语言：命令示例是否统一为 `powershell`，并避免 `bash` / `sh` / `shell`。
 3. 换行风格：多行命令是否统一使用 PowerShell 续行符 `` ` ``，且每个命令代码块首行均含运行目录注释。
+
+若本次改动涉及工程版口径、发布说明或文档导航，提交前建议额外完成以下自检：
+
+1. 以 [docs/doc_sync_matrix.md](docs/doc_sync_matrix.md) 为单一真源，确认本次改动影响的文档集合已全部同步。
+2. 导航一致性：`README.md` 的“文档路径/文档导航”与 `docs/index.md` 是否一致。
+3. 工程版三件套：`engineering_version_rerun_note`、`engineering_rerun_report`、`engineering_release_checklist` 是否在相关文档中可追踪可跳转。
+4. 链接有效性：`README.md` 与 `docs/` 相对链接是否均可访问。
 
 ## 检查要求
 
@@ -82,6 +90,19 @@ python -m pytest
 ```
 
 这样可以与仓库当前的模块化入口保持一致，并减少不同 `pytest` 启动方式带来的导入路径差异。
+
+若改动涉及文档治理或发布收口，建议补跑以下自动检查命令：
+
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
+rg -n "```(bash|sh|shell)" README.md docs CONTRIBUTING.md ARCHITECTURE.md
+rg -n "python\\s+scripts\\.|python\\s+symkanbenchmark\\.py|python\\s+ablation_runner\\.py" README.md docs
+```
+
+说明：
+
+1. 第一条用于发现不符合规范的代码块语言标记。
+2. 第二条用于发现入口命令口径回退（应统一为 `python -m scripts.*`）。
 
 若改动影响公共接口或项目入口，通常还需要同步更新：
 

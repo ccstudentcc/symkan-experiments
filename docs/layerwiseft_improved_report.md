@@ -9,6 +9,13 @@
 - 消融总报告：[ablation_report](ablation_report.md)
 - benchmark 文档：[symkanbenchmark_usage](symkanbenchmark_usage.md)
 
+## 工程版口径入口（2026-03）
+
+1. 若需要在报告中区分历史参考版与当前工程版，优先阅读 [engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
+2. 若需要引用当前工程版主结果目录与对照表，优先阅读 [engineering_rerun_report.md](engineering_rerun_report.md)。
+3. 若用于 release 表述，请同步检查 [engineering_release_checklist.md](engineering_release_checklist.md)。
+4. 本文属于专题结果报告；跨版本统一叙述以上述工程版文档为准。
+
 ## 目录
 
 - [1. 实验目标](#1-实验目标)

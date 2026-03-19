@@ -2,7 +2,7 @@
 
 This directory stores run-generated artifacts and long-lived experiment archives.
 
-- `outputs/benchmark_runs/`: default output root for `symkanbenchmark.py`.
+- `outputs/benchmark_runs/`: default output root for `python -m scripts.symkanbenchmark`.
 - `outputs/benchmark_ab/`: archived A/B benchmark comparisons.
 - `outputs/benchmark_ablation/`: archived ablation runs and derived analyses.
 - `outputs/notebooks/`: CSV artifacts exported by `notebooks/kan.ipynb`.

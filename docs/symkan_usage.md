@@ -10,6 +10,13 @@
 - notebook 参数细节：[kan_parameters](kan_parameters.md)
 - 消融实验说明：[ablation_usage](ablation_usage.md)
 
+## 工程版口径入口（2026-03）
+
+1. 若需要“历史参考版 vs 当前工程版”的统一说明，优先阅读 [engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
+2. 若需要工程版主引用结果（目录、指标、对照解释），优先阅读 [engineering_rerun_report.md](engineering_rerun_report.md)。
+3. 若用于 release / 答辩提交，请同步检查 [engineering_release_checklist.md](engineering_release_checklist.md)。
+4. 本文聚焦 `symkan` 库层接口；跨版本结论与发布口径以上述工程版文档为准。
+
 ## 目录
 
 - [1. 项目简介](#1-项目简介)

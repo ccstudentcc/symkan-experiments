@@ -19,6 +19,23 @@
    - 报告类文档应在“研究设定与口径/默认设定”章节给出设备与运行时环境。
    - 同一轮实验复测使用同一套环境描述，避免跨文档表述不一致。
 
+## 0.2 最近改动同步基线（2026-03-19）
+
+本节用于把“最近工程改动”显式绑定到文档系统，避免只改代码不改叙述。
+
+1. 配置统一：Notebook / CLI / 库层统一收敛到 `AppConfig`；相关叙述应与 `README.md`、`symkan_usage.md` 保持一致。
+2. Notebook 桥接收口：`symkan.config.notebook` 负责 canonical 化；`symkan.notebook_compat` 仅为薄桥接，不应在其他文档中被描述为“主配置层”。
+3. 命令风格统一：执行命令统一 `python -m scripts.*`（工程复测可补充 `scripts/run_engineering_rerun.ps1`），并保持 PowerShell 代码块风格。
+4. 指标口径统一：跨版本耗时字段仅允许 `export_wall_time_s -> symbolize_wall_time_s` 语义映射；`run_total_wall_time_s` 视为工程版新增字段。
+5. 发布前一致性检查：每次 release 前应对 `README.md` 与 `docs/` 执行一次“口径同步复核”（见 `engineering_release_checklist.md`）。
+
+## 0.3 文档同步矩阵（SSOT）
+
+文档同步规则的单一真源见 [doc_sync_matrix.md](doc_sync_matrix.md)。
+
+1. 日常改动：先按矩阵判断“本次改动影响哪些文档”。
+2. 发布前：在 `engineering_release_checklist.md` 中逐项勾选，并以矩阵为准做最终收口。
+
 ## 1. 建议起始阅读路径
 
 对于首次接触本仓库的读者，建议按如下顺序建立整体认知：
@@ -61,6 +78,11 @@
 1. [ablation_report.md](ablation_report.md)：单因素消融结论与解释边界。
 2. [layerwiseft_improved_report.md](layerwiseft_improved_report.md)：改进版 LayerwiseFT 比较结果。
 3. [ablation_plan.md](ablation_plan.md)：实验设计目标、约束与风险控制。
+
+### 2.5 发布记录归档
+
+1. [archive/releases/engineering_release_record_20260319.md](archive/releases/engineering_release_record_20260319.md)：`2026-03-19` 工程版发布记录示例。
+2. 后续发布记录统一归档到 `docs/archive/releases/`，文件命名建议为 `engineering_release_record_YYYYMMDD.md`。
 
 ## 3. 按任务场景选择路径
 
