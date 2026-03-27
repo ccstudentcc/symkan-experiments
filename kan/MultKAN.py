@@ -901,7 +901,11 @@ class MultKAN(nn.Module):
                 self.acts_scale.append((output_range / input_range).detach())
                 self.acts_scale_spline.append(output_range_spline / input_range)
                 self.spline_preacts.append(preacts.detach())
+                # Keep cache contract stable across numeric bases:
+                # `spline_postacts` is the edge-level curve used by symbolic fitting.
                 self.spline_postacts.append(postacts.detach())
+                # For `radial_bf`, this remains a numeric edge response cache
+                # with the same shape/usage as the original spline path.
                 self.spline_postsplines.append(postspline.detach())
 
                 self.acts_premult.append(x.detach())
