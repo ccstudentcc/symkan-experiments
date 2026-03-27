@@ -1,0 +1,115 @@
+{
+  "metrics": {
+    "run_index": 3,
+    "total_runs": 3,
+    "stage_seed": 62,
+    "device": "cpu",
+    "batch_size": 64,
+    "lib_preset": "layered",
+    "numeric_basis": "radial_bf",
+    "kan_width": [
+      784,
+      16,
+      10
+    ],
+    "enhanced_kan_width": [
+      120,
+      16,
+      10
+    ],
+    "base_acc": 0.8878,
+    "base_n_edge": 12704,
+    "selected_input_dim": 120,
+    "enhanced_acc": 0.7937999963760376,
+    "enhanced_n_edge": 92,
+    "selected_stage": "final",
+    "selected_score": 0.6686391286228014,
+    "final_acc": 0.7689999938011169,
+    "final_n_edge": 90,
+    "effective_target_edges": 90,
+    "effective_input_dim": 53,
+    "valid_expression_count": 10,
+    "expr_complexity_mean": 155.6,
+    "macro_auc": 0.9584984615133706,
+    "validation_mean_r2": -1.3275382493773698,
+    "validation_negative_r2_count": 10,
+    "stage_total_seconds": 43.580282299999965,
+    "stage_train_total_seconds": 11.98990839999999,
+    "stage_prune_total_seconds": 17.395403299999998,
+    "stage_final_finetune_seconds": 0.8491826999999716,
+    "symbolic_total_seconds": 41.445242500000006,
+    "symbolic_core_seconds": 41.445242500000006,
+    "symbolize_wall_time_s": 73.93010220000002,
+    "post_symbolic_eval_wall_time_s": 0.9685350999999969,
+    "run_total_wall_time_s": 135.17790429999997,
+    "run_overhead_wall_time_s": 17.66751979999998,
+    "symbolic_non_core_seconds": 32.484859700000015,
+    "symbolic_non_core_valid": true,
+    "symbolic_abort_stage": null,
+    "symbolic_abort_reason": null,
+    "symbolic_abort_error_type": null,
+    "symbolic_warning_count": 0,
+    "export_wall_time_s": 73.93010220000002,
+    "pre_symbolic_n_edge": 92,
+    "pre_symbolic_too_dense": false,
+    "stagewise_enabled": true,
+    "stage_guard_mode": "light",
+    "input_compaction_enabled": true,
+    "input_compaction_fallback": false,
+    "input_compaction_reason": null,
+    "input_compaction_error_type": null,
+    "layerwise_finetune_steps": 60,
+    "layerwise_finetune_lr": 0.003,
+    "layerwise_finetune_lamb": 5e-05,
+    "layerwise_use_validation": true,
+    "layerwise_validation_ratio": 0.15,
+    "layerwise_validation_seed": 123,
+    "layerwise_early_stop_patience": 2,
+    "layerwise_early_stop_min_delta": 0.001,
+    "layerwise_eval_interval": 20,
+    "layerwise_validation_n_sample": 300,
+    "output_dir": "D:\\chenpeng\\Documents\\学习\\数学\\毕业论文\\symkan-experiments\\outputs\\rerun_v2_engine_safe_20260327\\benchmark_ab\\radial_bf\\run_03_seed62"
+  },
+  "roc": [
+    {
+      "class": 0,
+      "auc": 0.9923465993936377
+    },
+    {
+      "class": 1,
+      "auc": 0.9902919713470039
+    },
+    {
+      "class": 2,
+      "auc": 0.9521838306225754
+    },
+    {
+      "class": 3,
+      "auc": 0.9541526889062655
+    },
+    {
+      "class": 4,
+      "auc": 0.946550890073214
+    },
+    {
+      "class": 5,
+      "auc": 0.9402317924812563
+    },
+    {
+      "class": 6,
+      "auc": 0.9746915230663306
+    },
+    {
+      "class": 7,
+      "auc": 0.9494037654544792
+    },
+    {
+      "class": 8,
+      "auc": 0.9435494585343458
+    },
+    {
+      "class": 9,
+      "auc": 0.9415820952545982
+    }
+  ]
+}
