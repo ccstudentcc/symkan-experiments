@@ -1,0 +1,45 @@
+{
+  "seed": 52,
+  "classes": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "dataset_source": "tensorflow.keras.datasets.mnist",
+  "input_dim": 784,
+  "output_dim": 10,
+  "epochs": 180,
+  "batch_size": 64,
+  "learning_rate": 0.005,
+  "num_hidden_layers": 1,
+  "unary_ops": [
+    "sin",
+    "cos",
+    "exp",
+    "gauss"
+  ],
+  "binary_ops": [
+    "*"
+  ],
+  "num_unary": 20,
+  "num_binary": 5,
+  "alpha_sparsity_input": 0.95,
+  "alpha_sparsity_model": 0.99,
+  "alpha_sparsity_unary": 0.4,
+  "alpha_sparsity_binary": 0.4,
+  "accuracy": 0.8668,
+  "macro_auc_ovr": 0.9667887117252312,
+  "train_seconds": 558.4414162,
+  "seed_train_wall_time_s": 558.4414162,
+  "predict_seconds": 0.9405031000001145,
+  "run_total_seconds": 559.8773575,
+  "samples_train": 60000,
+  "samples_test": 10000
+}

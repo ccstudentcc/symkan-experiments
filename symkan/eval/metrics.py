@@ -32,6 +32,8 @@ def _get_compiled_formula(expr_str, n_feat):
     numpy_modules = [
         {
             "softplus": lambda x: np.log1p(np.exp(np.clip(x, -500, 500))),
+            "softsign": lambda x: x / (1.0 + np.abs(x)),
+            "SoftSign": lambda x: x / (1.0 + np.abs(x)),
             "Abs": np.abs,
             "sigmoid": lambda x: 1.0 / (1.0 + np.exp(np.clip(-x, -500, 500))),
         },

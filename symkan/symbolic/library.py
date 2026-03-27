@@ -13,7 +13,7 @@ from kan.Symbolic_KANLayer import SYMBOLIC_LIB as _SYM_LIB_REG
 
 LIB_HIDDEN = ["x", "x^2", "tanh"]
 LIB_OUTPUT = ["x", "x^2"]
-FAST_LIB = ["x", "x^2", "tanh", "sin", "cos", "exp", "log", "sqrt"]
+FAST_LIB = ["x", "x^2", "x^3", "tanh", "sin", "cos", "exp", "log", "sqrt", "abs"]
 
 EXPRESSIVE_LIB = list(_SYM_LIB_REG.keys())
 FULL_LIB = EXPRESSIVE_LIB
@@ -26,7 +26,7 @@ _SAFE_EXPR_PATTERN = _re.compile(r"^[0-9A-Za-z_+\-*/().,^ \t]+$")
 def register_custom_functions():
     """Register symkan-specific symbolic functions into the pykan library.
 
-    The default extensions are ``sigmoid`` and ``softplus`` to broaden the
+    The default extensions are ``sigmoid``, ``softplus`` and ``softsign`` to broaden the
     search space. The function is idempotent and safe to call multiple times.
     """
     global _CUSTOM_REGISTERED
@@ -47,6 +47,15 @@ def register_custom_functions():
         4,
         lambda x, y_th: ((), torch.nn.functional.softplus(x)),
     )
+
+    _softsign_reg = (
+        lambda x: x / (1 + torch.abs(x)),
+        lambda x: x / (1 + sp.Abs(x)),
+        3,
+        lambda x, y_th: ((), x / (1 + torch.abs(x))),
+    )
+    _SYM_LIB_REG["softsign"] = _softsign_reg
+    _SYM_LIB_REG["SoftSign"] = _softsign_reg
 
 
 def _is_safe_expression_text(expr) -> bool:

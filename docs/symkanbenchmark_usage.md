@@ -225,6 +225,9 @@ outputs/benchmark_runs/
 - `--lib-preset fast`：精简函数库，优先降低搜索成本与运行时间。
 - `--lib-preset expressive`：增强表达能力，可在分层库不足时试验。
 - `--lib-preset full`：完整函数库，搜索空间最大，通常最慢但最灵活。
+- `--run-profile engineering`：保持当前工程化口径（默认行为）。
+- `--run-profile legacy`：按 `d8` 历史参考版本的关键默认值回退（用于口径对齐）。
+- `--run-profile fast`：一键切到速度优先口径（并不等同于 legacy）。
 
 - `--device cpu`：覆盖 `runtime.device`。
 - `--global-seed 321`：覆盖 `runtime.global_seed`。

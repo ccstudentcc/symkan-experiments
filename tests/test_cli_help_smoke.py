@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
     ("module_name", "expected_text"),
     [
         ("scripts.symkanbenchmark", "--tasks"),
+        ("scripts.symbolnet", "--epochs"),
         ("scripts.ablation_runner", "--aggregate-only"),
         ("scripts.benchmark_ab_compare", "--baseline"),
         ("scripts.compare_layerwiseft_improved", "--new-variant"),

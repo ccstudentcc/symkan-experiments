@@ -38,6 +38,7 @@ def make_runner(**overrides: object) -> BenchmarkRunnerConfig:
         "parallel_prune_attr_sample_max": 1536,
         "parallel_heavy_ft_patience": 1,
         "parallel_heavy_ft_min_delta": 5e-4,
+        "run_profile": None,
     }
     values.update(overrides)
     return BenchmarkRunnerConfig(**values)
@@ -216,3 +217,54 @@ def test_benchmark_parser_accepts_layerwise_cli_overrides() -> None:
 def test_benchmark_parser_accepts_stage_guard_mode_override() -> None:
     runner = parse_benchmark_cli_config(["--stage-guard-mode", "full"])
     assert runner.stage_guard_mode == "full"
+
+
+def test_benchmark_parser_accepts_run_profile_override() -> None:
+    runner = parse_benchmark_cli_config(["--run-profile", "fast"])
+    assert runner.run_profile == "fast"
+
+
+def test_benchmark_parser_accepts_legacy_profile_override() -> None:
+    runner = parse_benchmark_cli_config(["--run-profile", "legacy"])
+    assert runner.run_profile == "legacy"
+
+
+def test_benchmark_legacy_profile_aligns_legacy_defaults() -> None:
+    config = load_benchmark_app_config(None, make_runner(run_profile="legacy"))
+
+    assert config.library.lib_preset == "layered"
+    assert config.workflow.disable_stagewise_train is False
+    assert config.stagewise.prune_acc_drop_tol == pytest.approx(0.04)
+    assert config.symbolize.layerwise_finetune_steps == 60
+    assert config.symbolize.layerwise_use_validation is True
+    assert config.symbolize.prune_collapse_floor == pytest.approx(0.6)
+
+
+def test_benchmark_fast_profile_applies_speed_focused_overrides() -> None:
+    config = load_benchmark_app_config(None, make_runner(run_profile="fast"))
+
+    assert config.library.lib_preset == "fast"
+    assert config.stagewise.guard_mode == "light"
+    assert config.stagewise.use_validation is False
+    assert config.symbolize.layerwise_finetune_steps == 0
+    assert config.symbolize.layerwise_use_validation is False
+    assert config.symbolize.collect_timing is False
+    assert config.symbolize.prune_collapse_floor == pytest.approx(0.0)
+
+
+def test_benchmark_explicit_overrides_take_priority_over_fast_profile() -> None:
+    config = load_benchmark_app_config(
+        None,
+        make_runner(
+            run_profile="fast",
+            lib_preset="expressive",
+            layerwise_finetune_steps=5,
+            layerwise_use_validation=True,
+            prune_collapse_floor=0.4,
+        ),
+    )
+
+    assert config.library.lib_preset == "expressive"
+    assert config.symbolize.layerwise_finetune_steps == 5
+    assert config.symbolize.layerwise_use_validation is True
+    assert config.symbolize.prune_collapse_floor == pytest.approx(0.4)

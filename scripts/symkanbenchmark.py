@@ -238,6 +238,7 @@ class BenchmarkRunnerConfig:
     parallel_prune_attr_sample_max: int
     parallel_heavy_ft_patience: int
     parallel_heavy_ft_min_delta: float
+    run_profile: Optional[str] = None
     device: Optional[str] = None
     global_seed: Optional[int] = None
     baseline_seed: Optional[int] = None
@@ -771,6 +772,66 @@ def build_runtime_app_config(
     )
 
 
+def _resolve_run_profile_updates(profile: Optional[str]) -> dict[str, dict[str, Any]]:
+    if profile is None or profile == "engineering":
+        return {}
+    if profile == "legacy":
+        return {
+            "library": {
+                "lib_preset": "layered",
+            },
+            "workflow": {
+                "disable_stagewise_train": False,
+            },
+            "stagewise": {
+                "prune_acc_drop_tol": 0.04,
+                "use_validation": False,
+                "adaptive_threshold": False,
+                "adaptive_lamb": False,
+                "adaptive_ft": False,
+                "stage_early_stop": False,
+                "guard_mode": "light",
+            },
+            "symbolize": {
+                "layerwise_finetune_steps": 60,
+                "layerwise_use_validation": True,
+                "layerwise_validation_ratio": 0.15,
+                "layerwise_early_stop_patience": 2,
+                "layerwise_early_stop_min_delta": 1e-3,
+                "layerwise_eval_interval": 20,
+                "layerwise_validation_n_sample": 300,
+                "enable_input_compaction": True,
+                "prune_collapse_floor": 0.6,
+                "prune_attr_sample_adaptive": True,
+                "prune_attr_sample_min": 768,
+                "prune_attr_sample_max": 2048,
+                "prune_adaptive_threshold": True,
+                "prune_adaptive_step": 0.0,
+                "prune_adaptive_acc_drop_tol": 0.02,
+                "prune_adaptive_min_edges_gain": 1,
+                "prune_adaptive_low_gain_patience": 4,
+                "collect_timing": True,
+            },
+        }
+    if profile == "fast":
+        return {
+            "library": {
+                "lib_preset": "fast",
+            },
+            "stagewise": {
+                "guard_mode": "light",
+                "use_validation": False,
+            },
+            "symbolize": {
+                "layerwise_finetune_steps": 0,
+                "layerwise_use_validation": False,
+                "collect_timing": False,
+                "prune_collapse_floor": 0.0,
+            },
+        }
+    raise ValueError(f"unknown run profile: {profile}")
+
+
 def apply_benchmark_overrides(config: AppConfig, args: BenchmarkRunnerConfig) -> AppConfig:
     runtime_update: dict[str, Any] = {}
     library_update: dict[str, Any] = {}
@@ -826,18 +887,24 @@ def apply_benchmark_overrides(config: AppConfig, args: BenchmarkRunnerConfig) ->
         evaluation_update["validate_n_sample"] = args.validate_n_sample
 
     updates: dict[str, Any] = {}
-    if runtime_update:
-        updates["runtime"] = _validated_model_update(config.runtime, runtime_update)
-    if library_update:
-        updates["library"] = _validated_model_update(config.library, library_update)
-    if workflow_update:
-        updates["workflow"] = _validated_model_update(config.workflow, workflow_update)
-    if stagewise_update:
-        updates["stagewise"] = _validated_model_update(config.stagewise, stagewise_update)
-    if evaluation_update:
-        updates["evaluation"] = _validated_model_update(config.evaluation, evaluation_update)
-    if symbolize_update:
-        updates["symbolize"] = _validated_model_update(config.symbolize, symbolize_update)
+
+    def merge_section_update(section_name: str, patch: dict[str, Any]) -> None:
+        if not patch:
+            return
+        current = updates.get(section_name, getattr(config, section_name))
+        updates[section_name] = _validated_model_update(current, patch)
+
+    profile_updates = _resolve_run_profile_updates(args.run_profile)
+    for section_name, patch in profile_updates.items():
+        merge_section_update(section_name, patch)
+
+    merge_section_update("runtime", runtime_update)
+    merge_section_update("library", library_update)
+    merge_section_update("workflow", workflow_update)
+    merge_section_update("stagewise", stagewise_update)
+    merge_section_update("evaluation", evaluation_update)
+    merge_section_update("symbolize", symbolize_update)
+
     if not updates:
         return config
     return _validated_app_config_update(config, **updates)
@@ -1498,6 +1565,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--save-bundle", action="store_true", help="额外导出 pkl bundle")
     parser.add_argument("--verbose", action="store_true", help="打印 stagewise 与 symbolize 详细日志；默认模式仍会显示简要阶段进度")
     parser.add_argument("--quiet", action="store_true", help="静默运行，屏蔽简要进度与详细日志")
+    parser.add_argument(
+        "--run-profile",
+        choices=["engineering", "legacy", "fast"],
+        default=None,
+        help=(
+            "预设运行模式：engineering 保持工程化口径；legacy 对齐 d8 时代关键默认值；"
+            "fast 偏算法速度优先（仍可被显式 CLI 参数覆盖）"
+        ),
+    )
     parser.add_argument("--device", default=None, help="显式覆盖 runtime.device")
     parser.add_argument("--global-seed", type=int, default=None, help="显式覆盖 runtime.global_seed")
     parser.add_argument("--baseline-seed", type=int, default=None, help="显式覆盖 runtime.baseline_seed")
