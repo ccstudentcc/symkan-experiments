@@ -7,6 +7,8 @@ import torch
 from kan.FastKANLayer import FastKANLayer
 from kan.KANLayer import KANLayer
 from kan.MultKAN import MultKAN
+from symkan.pruning.attribution import safe_attribute
+from symkan.symbolic.compact import compact_inputs_for_symbolic
 
 
 def test_multkan_default_numeric_basis_is_bspline() -> None:
@@ -103,3 +105,56 @@ def test_multkan_radial_bf_supports_suggest_fix_and_formula_export() -> None:
     assert len(formulas) == 1
     assert str(formulas[0]) != ""
     assert len(variables) == 1
+
+
+def test_multkan_radial_bf_attribute_drives_prune_edge() -> None:
+    torch.manual_seed(4)
+    model = MultKAN(width=[3, 3, 1], grid=5, k=3, auto_save=False, numeric_basis="radial_bf")
+    x = torch.randn(32, 3)
+    y = (x[:, :1] * 0.5) - (x[:, 1:2] * 0.2)
+    dataset = {
+        "train_input": x,
+        "train_label": y,
+        "test_input": x.clone(),
+        "test_label": y.clone(),
+    }
+
+    _ = model(x)
+    feature_score = safe_attribute(model, dataset, n_sample=16)
+    assert feature_score.shape == (3,)
+
+    active_before = int((model.act_fun[0].mask != 0).sum().item())
+    model.prune_edge(threshold=1e9, log_history=False)
+    active_after = int((model.act_fun[0].mask != 0).sum().item())
+    assert active_after <= active_before
+    assert active_after == 0
+
+
+def test_multkan_radial_bf_input_compaction_returns_usable_model() -> None:
+    torch.manual_seed(5)
+    model = MultKAN(width=[3, 3, 1], grid=5, k=3, auto_save=False, numeric_basis="radial_bf")
+    x = torch.randn(20, 3)
+    dataset = {
+        "train_input": x,
+        "train_label": torch.randn(20, 1),
+        "test_input": x.clone(),
+        "test_label": torch.randn(20, 1),
+    }
+
+    _ = model(x)
+    model.act_fun[0].mask.data.zero_()
+    model.symbolic_fun[0].mask.data.zero_()
+    model.act_fun[0].mask.data[1, 0] = 1.0
+
+    compact_state = compact_inputs_for_symbolic(model, dataset)
+    assert compact_state is not None
+    assert compact_state["active_inputs"] == [1]
+
+    compact_model = compact_state["model"]
+    assert compact_model.numeric_basis == "radial_bf"
+    assert isinstance(compact_model.act_fun[0], FastKANLayer)
+
+    compact_dataset = compact_state["dataset"]
+    assert compact_dataset["train_input"].shape == (20, 1)
+    assert compact_dataset["test_input"].shape == (20, 1)
+    assert compact_model(torch.randn(8, 1)).shape == (8, 1)
