@@ -16,11 +16,6 @@ _MNIST_FALLBACK_EXCEPTIONS = (ImportError, ModuleNotFoundError, OSError, Runtime
 
 DEFAULT_SYMBOLNET_RUNS_DIR = "outputs/symbolnet_runs"
 DEFAULT_SYMBOLNET_CONFIG_PATH = "configs/symbolnet/symbolnet.default.yaml"
-CNN_BOOST_STABLE_LEARNING_RATE = 0.001
-CNN_BOOST_STABLE_UNARY_OPS_CSV = "identity,square,cube,softsign"
-CNN_BOOST_STABLE_ALPHA_SPARSITY_INPUT = 0.85
-CNN_BOOST_STABLE_ALPHA_SPARSITY_MODEL = 0.95
-CNN_BOOST_FORBIDDEN_UNARY_OPS = {"sin", "cos", "exp", "gauss", "sinh", "cosh", "tanh"}
 
 np = None
 fetch_openml = None
@@ -177,97 +172,6 @@ def load_mnist_data(classes: list[int], max_train_samples: Optional[int], max_te
         "input_dim": int(x_train.shape[1]),
         "output_dim": int(y_train.shape[1]),
     }
-
-
-def _apply_cnn_boost(
-    dataset: dict[str, Any],
-    *,
-    feature_dim: int,
-    epochs: int,
-    batch_size: int,
-    learning_rate: float,
-    seed: int,
-    quiet: bool,
-) -> dict[str, Any]:
-    _ensure_runtime_deps(require_tf=True)
-
-    input_dim = int(dataset["input_dim"])
-    side = int(round(math.sqrt(float(input_dim))))
-    if side * side != input_dim:
-        raise ValueError(
-            f"CNN boost requires square image inputs; got input_dim={input_dim} "
-            "(expected perfect square like 784 for MNIST)."
-        )
-
-    x_train = np.asarray(dataset["X_train"], dtype=np.float32)
-    x_test = np.asarray(dataset["X_test"], dtype=np.float32)
-    y_train_onehot = np.asarray(dataset["Y_train"], dtype=np.float32)
-    y_test_onehot = np.asarray(dataset["Y_test"], dtype=np.float32)
-    y_train_cls = np.argmax(y_train_onehot, axis=1).astype(np.int64)
-    y_test_cls = np.argmax(y_test_onehot, axis=1).astype(np.int64)
-
-    x_train_img = x_train.reshape((-1, side, side, 1)).astype(np.float32)
-    x_test_img = x_test.reshape((-1, side, side, 1)).astype(np.float32)
-
-    random.seed(seed)
-    np.random.seed(seed)
-    tf.random.set_seed(seed)
-
-    inputs = keras.Input(shape=(side, side, 1), name="symbolnet_cnn_input")
-    x = keras.layers.Conv2D(16, kernel_size=3, padding="same", activation="relu")(inputs)
-    x = keras.layers.MaxPool2D(pool_size=2)(x)
-    x = keras.layers.Conv2D(32, kernel_size=3, padding="same", activation="relu")(x)
-    x = keras.layers.MaxPool2D(pool_size=2)(x)
-    x = keras.layers.Flatten()(x)
-    x = keras.layers.Dense(128, activation="relu")(x)
-    feature = keras.layers.Dense(int(feature_dim), activation="relu", name="symbolnet_cnn_feature")(x)
-    logits = keras.layers.Dense(int(dataset["output_dim"]), activation="softmax", name="symbolnet_cnn_head")(feature)
-
-    cnn_model = keras.Model(inputs=inputs, outputs=logits, name="symbolnet_cnn_boost")
-    cnn_model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=float(learning_rate)),
-        loss="sparse_categorical_crossentropy",
-        metrics=["accuracy"],
-    )
-    cnn_model.fit(
-        x_train_img,
-        y_train_cls,
-        validation_data=(x_test_img, y_test_cls),
-        epochs=int(epochs),
-        batch_size=int(batch_size),
-        verbose=0 if quiet else 1,
-    )
-
-    feature_model = keras.Model(
-        inputs=cnn_model.input,
-        outputs=cnn_model.get_layer("symbolnet_cnn_feature").output,
-        name="symbolnet_cnn_feature_extractor",
-    )
-    x_train_feature = feature_model.predict(x_train_img, batch_size=int(batch_size), verbose=0).astype(np.float32)
-    x_test_feature = feature_model.predict(x_test_img, batch_size=int(batch_size), verbose=0).astype(np.float32)
-
-    feat_mean = np.mean(x_train_feature, axis=0, keepdims=True).astype(np.float32)
-    feat_std = np.std(x_train_feature, axis=0, keepdims=True).astype(np.float32) + np.float32(1e-6)
-    x_train_feature = ((x_train_feature - feat_mean) / feat_std).astype(np.float32)
-    x_test_feature = ((x_test_feature - feat_mean) / feat_std).astype(np.float32)
-
-    boosted = dict(dataset)
-    boosted["X_train"] = x_train_feature
-    boosted["X_test"] = x_test_feature
-    boosted["raw_input_dim"] = int(input_dim)
-    boosted["input_dim"] = int(x_train_feature.shape[1])
-    boosted["source"] = (
-        f"{dataset.get('source', 'unknown')} + cnn_boost(dim={int(feature_dim)},epochs={int(epochs)})"
-    )
-    boosted["cnn_boost"] = {
-        "enabled": True,
-        "feature_dim": int(feature_dim),
-        "epochs": int(epochs),
-        "batch_size": int(batch_size),
-        "learning_rate": float(learning_rate),
-        "seed": int(seed),
-    }
-    return boosted
 
 
 def _ensure_sympy_dep() -> Any:
@@ -614,6 +518,10 @@ def _build_neural_sr(
                 num_unary_weights = tf.cast(0.0, tf.float64)
                 num_binary_masks = tf.cast(0.0, tf.float64)
                 num_binary_weights = tf.cast(0.0, tf.float64)
+                threshold_unary_sum = tf.cast(0.0, tf.float64)
+                threshold_unary_dim = tf.cast(0.0, tf.float64)
+                threshold_binary_sum = tf.cast(0.0, tf.float64)
+                threshold_binary_dim = tf.cast(0.0, tf.float64)
 
                 for layer in symbolic_layers:
                     sum_exp_t += tf.reduce_sum(tf.exp(-tf.cast(layer.aux_w_t, tf.float64)))
@@ -634,20 +542,26 @@ def _build_neural_sr(
                         tf.cast(tf.where(layer.aux_unary - layer.aux_unary_t > 0.0, 0.0, 1.0), tf.float64)
                     )
                     num_unary_weights += tf.cast(tf.size(layer.aux_unary), tf.float64)
+                    threshold_unary_sum += tf.reduce_sum(tf.cast(layer.aux_unary_t, tf.float64))
+                    threshold_unary_dim += tf.cast(tf.size(layer.aux_unary_t), tf.float64)
                     if layer.num_binary > 0:
                         num_binary_masks += tf.reduce_sum(
                             tf.cast(tf.where(layer.aux_binary - layer.aux_binary_t > 0.0, 0.0, 1.0), tf.float64)
                         )
                         num_binary_weights += tf.cast(tf.size(layer.aux_binary), tf.float64)
+                        threshold_binary_sum += tf.reduce_sum(tf.cast(layer.aux_binary_t, tf.float64))
+                        threshold_binary_dim += tf.cast(tf.size(layer.aux_binary_t), tf.float64)
 
                 sparsity_model = tf.math.divide_no_nan(num_model_masks, num_model_weights)
                 sparsity_unary = tf.math.divide_no_nan(num_unary_masks, num_unary_weights)
                 sparsity_binary = tf.math.divide_no_nan(num_binary_masks, num_binary_weights)
+                threshold_unary_mean = tf.math.divide_no_nan(threshold_unary_sum, threshold_unary_dim)
+                threshold_binary_mean = tf.math.divide_no_nan(threshold_binary_sum, threshold_binary_dim)
 
                 threshold_model_reg_loss = regression_loss * tf.math.divide_no_nan(sum_exp_t, num_model_weights)
                 threshold_input_reg_loss = regression_loss * tf.exp(-threshold_input_mean)
-                threshold_unary_reg_loss = regression_loss * tf.exp(-sparsity_unary)
-                threshold_binary_reg_loss = regression_loss * tf.exp(-sparsity_binary)
+                threshold_unary_reg_loss = regression_loss * tf.exp(-threshold_unary_mean)
+                threshold_binary_reg_loss = regression_loss * tf.exp(-threshold_binary_mean)
 
                 def _reg(s: Any, s_t: float, d: float) -> Any:
                     s_t_tf = tf.cast(s_t, dtype=tf.float64)
@@ -906,11 +820,6 @@ class SymbolNetRunnerConfig:
     alpha_sparsity_model: float = 0.99
     alpha_sparsity_unary: float = 0.4
     alpha_sparsity_binary: float = 0.4
-    enable_cnn_boost: bool = False
-    cnn_feature_dim: int = 20
-    cnn_epochs: int = 6
-    cnn_batch_size: int = 256
-    cnn_learning_rate: float = 0.001
     quiet: bool = False
     config_path: Optional[str] = None
 
@@ -932,14 +841,6 @@ class SymbolNetRunnerConfig:
             raise ValueError("--batch-size must be >= 1")
         if self.learning_rate <= 0.0:
             raise ValueError("--learning-rate must be > 0")
-        if self.cnn_feature_dim < 1:
-            raise ValueError("--cnn-feature-dim must be >= 1")
-        if self.cnn_epochs < 1:
-            raise ValueError("--cnn-epochs must be >= 1")
-        if self.cnn_batch_size < 1:
-            raise ValueError("--cnn-batch-size must be >= 1")
-        if self.cnn_learning_rate <= 0.0:
-            raise ValueError("--cnn-learning-rate must be > 0")
 
 
 class SymbolNetConfigError(ValueError):
@@ -1004,11 +905,6 @@ def load_symbolnet_runner_config(config_path: Path) -> SymbolNetRunnerConfig:
         "classes",
         "max_train_samples",
         "max_test_samples",
-        "enable_cnn_boost",
-        "cnn_feature_dim",
-        "cnn_epochs",
-        "cnn_batch_size",
-        "cnn_learning_rate",
     }
     allowed_model = {
         "epochs",
@@ -1053,16 +949,6 @@ def load_symbolnet_runner_config(config_path: Path) -> SymbolNetRunnerConfig:
         cfg.max_train_samples = None if data["max_train_samples"] is None else int(data["max_train_samples"])
     if "max_test_samples" in data:
         cfg.max_test_samples = None if data["max_test_samples"] is None else int(data["max_test_samples"])
-    if "enable_cnn_boost" in data:
-        cfg.enable_cnn_boost = bool(data["enable_cnn_boost"])
-    if "cnn_feature_dim" in data:
-        cfg.cnn_feature_dim = int(data["cnn_feature_dim"])
-    if "cnn_epochs" in data:
-        cfg.cnn_epochs = int(data["cnn_epochs"])
-    if "cnn_batch_size" in data:
-        cfg.cnn_batch_size = int(data["cnn_batch_size"])
-    if "cnn_learning_rate" in data:
-        cfg.cnn_learning_rate = float(data["cnn_learning_rate"])
 
     if "epochs" in model:
         cfg.epochs = int(model["epochs"])
@@ -1102,11 +988,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--classes", default=None, help="comma-separated MNIST classes")
     parser.add_argument("--max-train-samples", type=int, default=None, help="optional train subset size")
     parser.add_argument("--max-test-samples", type=int, default=None, help="optional test subset size")
-    parser.add_argument("--cnn-boost", action=argparse.BooleanOptionalAction, default=None, help="enable optional CNN feature boost before SymbolNet training")
-    parser.add_argument("--cnn-feature-dim", type=int, default=None, help="feature dimension used by CNN boost")
-    parser.add_argument("--cnn-epochs", type=int, default=None, help="CNN boost training epochs")
-    parser.add_argument("--cnn-batch-size", type=int, default=None, help="CNN boost batch size")
-    parser.add_argument("--cnn-learning-rate", type=float, default=None, help="CNN boost learning rate")
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--learning-rate", type=float, default=None)
@@ -1141,16 +1022,6 @@ def parse_symbolnet_cli_config(argv: Optional[list[str]] = None) -> SymbolNetRun
         cfg.max_train_samples = namespace.max_train_samples
     if namespace.max_test_samples is not None:
         cfg.max_test_samples = namespace.max_test_samples
-    if namespace.cnn_boost is not None:
-        cfg.enable_cnn_boost = bool(namespace.cnn_boost)
-    if namespace.cnn_feature_dim is not None:
-        cfg.cnn_feature_dim = namespace.cnn_feature_dim
-    if namespace.cnn_epochs is not None:
-        cfg.cnn_epochs = namespace.cnn_epochs
-    if namespace.cnn_batch_size is not None:
-        cfg.cnn_batch_size = namespace.cnn_batch_size
-    if namespace.cnn_learning_rate is not None:
-        cfg.cnn_learning_rate = namespace.cnn_learning_rate
     if namespace.epochs is not None:
         cfg.epochs = namespace.epochs
     if namespace.batch_size is not None:
@@ -1182,32 +1053,6 @@ def parse_symbolnet_cli_config(argv: Optional[list[str]] = None) -> SymbolNetRun
     return cfg
 
 
-def _apply_cnn_boost_stability_params(runner: SymbolNetRunnerConfig) -> dict[str, tuple[Any, Any]]:
-    if not runner.enable_cnn_boost:
-        return {}
-
-    updates: dict[str, tuple[Any, Any]] = {}
-
-    if runner.learning_rate != CNN_BOOST_STABLE_LEARNING_RATE:
-        updates["learning_rate"] = (runner.learning_rate, CNN_BOOST_STABLE_LEARNING_RATE)
-        runner.learning_rate = CNN_BOOST_STABLE_LEARNING_RATE
-    unary_ops_current = _parse_csv_strs(runner.unary_ops_csv)
-    has_forbidden_unary = any(op in CNN_BOOST_FORBIDDEN_UNARY_OPS for op in unary_ops_current)
-    if has_forbidden_unary or runner.unary_ops_csv != CNN_BOOST_STABLE_UNARY_OPS_CSV:
-        updates["unary_ops_csv"] = (runner.unary_ops_csv, CNN_BOOST_STABLE_UNARY_OPS_CSV)
-        runner.unary_ops_csv = CNN_BOOST_STABLE_UNARY_OPS_CSV
-    if runner.alpha_sparsity_input != CNN_BOOST_STABLE_ALPHA_SPARSITY_INPUT:
-        updates["alpha_sparsity_input"] = (runner.alpha_sparsity_input, CNN_BOOST_STABLE_ALPHA_SPARSITY_INPUT)
-        runner.alpha_sparsity_input = CNN_BOOST_STABLE_ALPHA_SPARSITY_INPUT
-    if runner.alpha_sparsity_model != CNN_BOOST_STABLE_ALPHA_SPARSITY_MODEL:
-        updates["alpha_sparsity_model"] = (runner.alpha_sparsity_model, CNN_BOOST_STABLE_ALPHA_SPARSITY_MODEL)
-        runner.alpha_sparsity_model = CNN_BOOST_STABLE_ALPHA_SPARSITY_MODEL
-
-    if updates:
-        runner.normalize()
-    return updates
-
-
 def run_symbolnet(runner: SymbolNetRunnerConfig) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     output_dir = _resolve_output_dir(runner.output_dir, repo_root)
@@ -1216,30 +1061,6 @@ def run_symbolnet(runner: SymbolNetRunnerConfig) -> None:
     classes = sorted(set(_parse_csv_ints(runner.classes, "--classes")))
     seeds = _parse_csv_ints(runner.seeds, "--seeds")
     dataset = load_mnist_data(classes, runner.max_train_samples, runner.max_test_samples)
-    if runner.enable_cnn_boost:
-        stability_updates = _apply_cnn_boost_stability_params(runner)
-        cnn_seed = seeds[0] if seeds else 42
-        dataset = _apply_cnn_boost(
-            dataset,
-            feature_dim=runner.cnn_feature_dim,
-            epochs=runner.cnn_epochs,
-            batch_size=runner.cnn_batch_size,
-            learning_rate=runner.cnn_learning_rate,
-            seed=cnn_seed,
-            quiet=runner.quiet,
-        )
-        print(
-            f"[symbolnet] cnn boost enabled: raw_input_dim={dataset.get('raw_input_dim', '?')} "
-            f"-> input_dim={dataset['input_dim']} (feature_dim={runner.cnn_feature_dim})"
-        )
-        if stability_updates:
-            print(
-                "[symbolnet] cnn boost stability params applied: "
-                f"learning_rate={runner.learning_rate}, "
-                f"unary_ops={runner.unary_ops}, "
-                f"alpha_sparsity_input={runner.alpha_sparsity_input}, "
-                f"alpha_sparsity_model={runner.alpha_sparsity_model}"
-            )
 
     summary_rows: list[dict[str, Any]] = []
     for index, seed in enumerate(seeds, start=1):
@@ -1250,18 +1071,22 @@ def run_symbolnet(runner: SymbolNetRunnerConfig) -> None:
         result = train_symbolnet_once(runner, dataset, seed=seed)
         run_total_seconds = float(time.perf_counter() - run_start)
 
+        symbolic_rows = _build_symbolic_summary_rows(
+            model=result["symbolic_model"],
+            model_dim=result["model_dim"],
+            operators=result["operators"],
+            num_operators=result["num_operators"],
+            class_auc=result["class_auc"],
+        )
+        complexities = [float(row["复杂度"]) for row in symbolic_rows if "复杂度" in row]
+        mean_complexity = float(np.mean(complexities)) if complexities else float("nan")
+
         metrics_payload = {
             "seed": int(seed),
             "classes": classes,
             "dataset_source": dataset["source"],
             "input_dim": int(dataset["input_dim"]),
-            "raw_input_dim": int(dataset.get("raw_input_dim", dataset["input_dim"])),
             "output_dim": int(dataset["output_dim"]),
-            "enable_cnn_boost": bool(runner.enable_cnn_boost),
-            "cnn_feature_dim": int(runner.cnn_feature_dim),
-            "cnn_epochs": int(runner.cnn_epochs),
-            "cnn_batch_size": int(runner.cnn_batch_size),
-            "cnn_learning_rate": float(runner.cnn_learning_rate),
             "epochs": int(runner.epochs),
             "batch_size": int(runner.batch_size),
             "learning_rate": float(runner.learning_rate),
@@ -1282,17 +1107,11 @@ def run_symbolnet(runner: SymbolNetRunnerConfig) -> None:
             "run_total_seconds": run_total_seconds,
             "samples_train": int(result["samples_train"]),
             "samples_test": int(result["samples_test"]),
+            "mean_complexity": mean_complexity,
         }
         _write_metrics_json(run_dir / "metrics.json", metrics_payload)
         _write_history_csv(run_dir / "history.csv", result["history"])
         _write_roc_auc_summary_csv(run_dir / "roc_auc_summary.csv", result["class_auc"])
-        symbolic_rows = _build_symbolic_summary_rows(
-            model=result["symbolic_model"],
-            model_dim=result["model_dim"],
-            operators=result["operators"],
-            num_operators=result["num_operators"],
-            class_auc=result["class_auc"],
-        )
         _write_symbolic_summary_csv(run_dir / "symbolnet_symbolic_summary.csv", symbolic_rows)
 
         summary_row = {"run_index": int(index), **metrics_payload, "run_dir": str(run_dir)}
