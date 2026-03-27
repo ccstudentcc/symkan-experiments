@@ -126,6 +126,7 @@ def clone_model_via_ckpt(model, path: str = DEFAULT_CLONE_CKPT_PREFIX, device: O
             width=config["width"],
             grid=config["grid"],
             k=config["k"],
+            numeric_basis=config.get("numeric_basis", getattr(model, "numeric_basis", "bspline")),
             mult_arity=config["mult_arity"],
             base_fun=config["base_fun_name"],
             symbolic_enabled=config["symbolic_enabled"],

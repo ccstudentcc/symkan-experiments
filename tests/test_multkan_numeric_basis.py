@@ -7,6 +7,7 @@ import torch
 from kan.FastKANLayer import FastKANLayer
 from kan.KANLayer import KANLayer
 from kan.MultKAN import MultKAN
+from symkan.io.checkpoint import clone_model
 from symkan.pruning.attribution import safe_attribute
 from symkan.symbolic.compact import compact_inputs_for_symbolic
 
@@ -50,6 +51,22 @@ def test_multkan_radial_bf_survives_prune_input_and_checkpoint_roundtrip() -> No
         assert loaded.numeric_basis == "radial_bf"
         assert isinstance(loaded.act_fun[0], FastKANLayer)
         assert loaded(torch.randn(4, 1)).shape == (4, 1)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_multkan_radial_bf_disk_clone_keeps_numeric_basis() -> None:
+    torch.manual_seed(6)
+    model = MultKAN(width=[2, 3, 1], grid=5, k=3, auto_save=False, numeric_basis="radial_bf")
+    _ = model(torch.randn(6, 2))
+
+    tmp_dir = Path("tmp") / f"multkan_clone_{uuid.uuid4().hex}"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        clone = clone_model(model, use_disk_clone=True, ckpt_path=str(tmp_dir / "clone_ckpt"))
+        assert clone.numeric_basis == "radial_bf"
+        assert isinstance(clone.act_fun[0], FastKANLayer)
+        assert clone(torch.randn(4, 2)).shape == (4, 1)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
