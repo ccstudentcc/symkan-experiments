@@ -359,6 +359,39 @@ def write_json(path: Path, payload: Dict[str, Any]) -> None:
     path.write_text(json.dumps(to_jsonable(payload), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _normalize_kan_width(model: Any) -> List[int]:
+    """Normalize KAN width to a flat int list, e.g. [784, 16, 10]."""
+    width_in = getattr(model, "width_in", None)
+    if width_in is not None:
+        try:
+            return [int(v) for v in list(width_in)]
+        except Exception:
+            pass
+
+    raw_width = getattr(model, "width", None)
+    if raw_width is None:
+        return []
+
+    try:
+        layer_seq_types = (list, tuple)
+        if np is not None:
+            layer_seq_types = (list, tuple, np.ndarray)
+        normalized: List[int] = []
+        for layer in list(raw_width):
+            if isinstance(layer, layer_seq_types):
+                if len(layer) >= 2:
+                    normalized.append(int(layer[0]) + int(layer[1]))
+                elif len(layer) == 1:
+                    normalized.append(int(layer[0]))
+                else:
+                    return []
+            else:
+                normalized.append(int(layer))
+        return normalized
+    except Exception:
+        return []
+
+
 def _build_experiment_metrics(
     *,
     config: AppConfig,
@@ -403,6 +436,9 @@ def _build_experiment_metrics(
         "device": get_device(),
         "batch_size": batch_size,
         "lib_preset": config.library.lib_preset,
+        "numeric_basis": str(getattr(enhanced_model, "numeric_basis", config.model.numeric_basis)),
+        "kan_width": _normalize_kan_width(base_model),
+        "enhanced_kan_width": _normalize_kan_width(enhanced_model),
         "base_acc": base_acc,
         "base_n_edge": int(get_n_edge(base_model)),
         "selected_input_dim": int(len(keep_idx)),

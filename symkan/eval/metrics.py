@@ -1,5 +1,7 @@
 """Evaluation metrics and visualization helpers for symkan."""
 
+import re
+
 import numpy as np
 import pandas as pd
 import sympy as sp
@@ -10,25 +12,57 @@ from symkan.symbolic.library import collect_valid_formulas
 
 
 _LAMBDA_CACHE = {}
+_INPUT_SYMBOL_PATTERN = re.compile(r"^x_(\d+)$")
 
 
-def _get_compiled_formula(expr_str, n_feat):
+def _extract_input_symbol_indices(expr) -> list[int]:
+    indices: list[int] = []
+    for symbol in expr.free_symbols:
+        match = _INPUT_SYMBOL_PATTERN.fullmatch(str(symbol))
+        if match:
+            indices.append(int(match.group(1)))
+    return sorted(set(indices))
+
+
+def _build_symbol_maps(symbol_indices: list[int], n_feat: int) -> list[dict[int, int]]:
+    if not symbol_indices:
+        return [{}]
+
+    min_idx = min(symbol_indices)
+    max_idx = max(symbol_indices)
+    zero_based_ok = min_idx >= 0 and max_idx < n_feat
+    one_based_ok = min_idx >= 1 and max_idx <= n_feat
+
+    maps: list[dict[int, int]] = []
+    # symbolic_formula() in MultKAN emits x_1..x_n by default, so prefer one-based
+    # when x_0 is absent and both mappings are technically possible.
+    if one_based_ok and 0 not in symbol_indices:
+        maps.append({idx: idx - 1 for idx in symbol_indices})
+    if zero_based_ok:
+        maps.append({idx: idx for idx in symbol_indices})
+    if one_based_ok and (0 in symbol_indices):
+        maps.append({idx: idx - 1 for idx in symbol_indices})
+
+    return maps
+
+
+def _get_compiled_formula(expr_str, symbol_indices: tuple[int, ...]):
     """Compile and cache a symbolic expression for NumPy evaluation.
 
     Args:
         expr_str: Symbolic expression text.
-        n_feat: Number of input features referenced by the expression.
+        symbol_indices: Ordered input symbol indices used by the expression.
 
     Returns:
         Callable[..., Any]: Cached callable produced by ``sympy.lambdify``.
     """
-    key = (expr_str, int(n_feat))
+    key = (expr_str, symbol_indices)
     cached = _LAMBDA_CACHE.get(key)
     if cached is not None:
         return cached
 
     expr = sp.sympify(expr_str)
-    sym_vars = [sp.Symbol(f"x_{i}") for i in range(n_feat)]
+    sym_vars = [sp.Symbol(f"x_{i}") for i in symbol_indices]
     numpy_modules = [
         {
             "softplus": lambda x: np.log1p(np.exp(np.clip(x, -500, 500))),
@@ -75,22 +109,49 @@ def validate_formula_numerically(model, formulas, dataset, n_sample: int = 500):
 
     results = []
     for item in valid:
+        idx = item["index"]
+        y_ref = y_model[:, idx] if idx < y_model.shape[1] else np.zeros(actual_n)
         try:
-            f = _get_compiled_formula(item["expr"], n_feat)
-            y_sym = f(*[X[:, i] for i in range(n_feat)])
-            if isinstance(y_sym, (int, float)):
-                y_sym = np.full(actual_n, y_sym)
-            y_sym = np.array(y_sym, dtype=np.float64).flatten()
+            expr = sp.sympify(item["expr"])
+            symbol_indices = _extract_input_symbol_indices(expr)
+            symbol_maps = _build_symbol_maps(symbol_indices, n_feat)
+            if not symbol_maps:
+                raise ValueError(
+                    f"input symbol indices out of range for n_feat={n_feat}: {symbol_indices}"
+                )
 
-            has_extreme = bool(np.any(np.abs(y_sym) > 1e6) or np.any(np.isnan(y_sym)) or np.any(np.isinf(y_sym)))
-            y_sym = np.clip(y_sym, -100, 100)
-            y_sym = np.nan_to_num(y_sym, nan=0.0, posinf=100.0, neginf=-100.0)
+            best_result = None
+            eval_errors: list[str] = []
+            for symbol_map in symbol_maps:
+                ordered_symbols = tuple(sorted(symbol_map))
+                f = _get_compiled_formula(item["expr"], ordered_symbols)
+                args = [X[:, symbol_map[symbol_idx]] for symbol_idx in ordered_symbols]
+                try:
+                    y_sym = f(*args)
+                    if isinstance(y_sym, (int, float)):
+                        y_sym = np.full(actual_n, y_sym)
+                    y_sym = np.array(y_sym, dtype=np.float64).flatten()
 
-            idx = item["index"]
-            y_ref = y_model[:, idx] if idx < y_model.shape[1] else np.zeros(actual_n)
-            ss_res = np.sum((y_ref - y_sym) ** 2)
-            ss_tot = np.sum((y_ref - np.mean(y_ref)) ** 2) + 1e-12
-            r2 = 1.0 - ss_res / ss_tot
+                    has_extreme = bool(
+                        np.any(np.abs(y_sym) > 1e6) or np.any(np.isnan(y_sym)) or np.any(np.isinf(y_sym))
+                    )
+                    y_sym = np.clip(y_sym, -100, 100)
+                    y_sym = np.nan_to_num(y_sym, nan=0.0, posinf=100.0, neginf=-100.0)
+
+                    ss_res = np.sum((y_ref - y_sym) ** 2)
+                    ss_tot = np.sum((y_ref - np.mean(y_ref)) ** 2) + 1e-12
+                    r2 = 1.0 - ss_res / ss_tot
+
+                    candidate = (float(r2), bool(has_extreme))
+                    if best_result is None or candidate[0] > best_result[0]:
+                        best_result = candidate
+                except Exception as mapping_exc:
+                    eval_errors.append(str(mapping_exc))
+
+            if best_result is None:
+                raise RuntimeError("; ".join(eval_errors) if eval_errors else "formula evaluation failed")
+
+            r2, has_extreme = best_result
 
             results.append({"index": idx, "r2": float(r2), "complexity": item["complexity"], "numerically_unstable": has_extreme})
         except Exception as e:

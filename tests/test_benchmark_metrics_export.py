@@ -11,6 +11,12 @@ from scripts.symkanbenchmark import (
 from symkan.config import AppConfig
 
 
+class _DummyKANModel:
+    def __init__(self, width, numeric_basis: str = "bspline") -> None:
+        self.width = width
+        self.numeric_basis = numeric_basis
+
+
 def test_build_experiment_metrics_surfaces_symbolic_observability(monkeypatch) -> None:
     monkeypatch.setattr("scripts.symkanbenchmark.get_device", lambda: "cpu")
     monkeypatch.setattr("scripts.symkanbenchmark.get_n_edge", lambda model: 17)
@@ -19,6 +25,8 @@ def test_build_experiment_metrics_surfaces_symbolic_observability(monkeypatch) -
     config.runtime.global_seed = 123
     config.stagewise.target_edges = 40
     config.symbolize.enable_input_compaction = True
+    base_model = _DummyKANModel(width=[[784, 0], [16, 0], [10, 0]], numeric_basis="radial_bf")
+    enhanced_model = _DummyKANModel(width=[[120, 0], [16, 0], [10, 0]], numeric_basis="radial_bf")
 
     metrics = _build_experiment_metrics(
         config=config,
@@ -27,10 +35,10 @@ def test_build_experiment_metrics_surfaces_symbolic_observability(monkeypatch) -
         total_runs=3,
         stage_seed=99,
         batch_size=16,
-        base_model=object(),
+        base_model=base_model,
         base_acc=0.81,
         keep_idx=[0, 1],
-        enhanced_model=object(),
+        enhanced_model=enhanced_model,
         enhanced_acc=0.88,
         stage_result={"selected_stage": "stage_2", "selected_score": 0.75},
         symbolize_result={
@@ -64,6 +72,9 @@ def test_build_experiment_metrics_surfaces_symbolic_observability(monkeypatch) -
     )
 
     assert metrics["device"] == "cpu"
+    assert metrics["numeric_basis"] == "radial_bf"
+    assert metrics["kan_width"] == [784, 16, 10]
+    assert metrics["enhanced_kan_width"] == [120, 16, 10]
     assert metrics["pre_symbolic_too_dense"] is True
     assert metrics["symbolic_abort_stage"] == "prune_round"
     assert metrics["symbolic_abort_reason"] == "attribute exploded"
@@ -87,6 +98,8 @@ def test_build_experiment_metrics_marks_invalid_non_core_seconds(monkeypatch) ->
     monkeypatch.setattr("scripts.symkanbenchmark.get_n_edge", lambda model: 17)
 
     config = AppConfig()
+    base_model = _DummyKANModel(width=[[784, 0], [16, 0], [10, 0]], numeric_basis="bspline")
+    enhanced_model = _DummyKANModel(width=[[120, 0], [16, 0], [10, 0]], numeric_basis="bspline")
     metrics = _build_experiment_metrics(
         config=config,
         run_dir=Path("outputs/test"),
@@ -94,10 +107,10 @@ def test_build_experiment_metrics_marks_invalid_non_core_seconds(monkeypatch) ->
         total_runs=1,
         stage_seed=42,
         batch_size=16,
-        base_model=object(),
+        base_model=base_model,
         base_acc=0.8,
         keep_idx=[0],
-        enhanced_model=object(),
+        enhanced_model=enhanced_model,
         enhanced_acc=0.8,
         stage_result={"selected_stage": "stage_1", "selected_score": 0.8},
         symbolize_result={"final_acc": 0.8, "final_n_edge": 10, "timing": {"symbolic_total_seconds": 3.0}},
@@ -116,6 +129,9 @@ def test_build_experiment_metrics_marks_invalid_non_core_seconds(monkeypatch) ->
 
     assert metrics["symbolic_non_core_valid"] is False
     assert metrics["symbolic_non_core_seconds"] != metrics["symbolic_non_core_seconds"]
+    assert metrics["numeric_basis"] == "bspline"
+    assert metrics["kan_width"] == [784, 16, 10]
+    assert metrics["enhanced_kan_width"] == [120, 16, 10]
 
 
 def test_validated_app_config_update_normalizes_pair_like_width() -> None:

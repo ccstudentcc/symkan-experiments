@@ -36,6 +36,16 @@ class IdentityModel:
         return x
 
 
+class OneBasedTanhModel:
+    def eval(self):
+        return self
+
+    def __call__(self, x):
+        y0 = x[:, :1]
+        y1 = torch.tanh(x[:, 1:2]) + x[:, :1]
+        return torch.cat([y0, y1], dim=1)
+
+
 def test_load_export_bundle_requires_explicit_trust() -> None:
     with local_temp_dir() as temp_dir:
         bundle_path = temp_dir / "bundle.pkl"
@@ -114,6 +124,21 @@ def test_validate_formula_numerically_returns_empty_frame_for_empty_test_split()
 
     assert result is not None
     assert result.empty
+
+
+def test_validate_formula_numerically_supports_one_based_symbols_with_tanh() -> None:
+    dataset = {
+        "test_input": torch.tensor([[0.2, -0.3], [0.4, 0.5], [-0.1, 0.8]], dtype=torch.float32),
+        "test_label": torch.zeros((3, 2), dtype=torch.float32),
+    }
+
+    result = validate_formula_numerically(OneBasedTanhModel(), ["x_1", "x_1 + tanh(x_2)"], dataset, n_sample=3)
+
+    assert result is not None
+    assert len(result) == 2
+    assert "error" not in result.columns
+    assert result.loc[0, "r2"] == pytest.approx(1.0, abs=1e-6)
+    assert result.loc[1, "r2"] == pytest.approx(1.0, abs=1e-6)
 
 
 def test_validate_child_name_rejects_path_traversal() -> None:
