@@ -55,6 +55,9 @@ def test_validate_app_config_nested_sections() -> None:
                 "width": [12, 16, 3],
                 "steps_per_stage": 80,
             },
+            "model": {
+                "numeric_basis": "radial_bf",
+            },
             "symbolize": {
                 "target_edges": 48,
                 "layerwise_finetune_steps": 0,
@@ -67,6 +70,7 @@ def test_validate_app_config_nested_sections() -> None:
     assert config.runtime.global_seed == 7
     assert config.stagewise.width == [12, 16, 3]
     assert config.stagewise.steps_per_stage == 80
+    assert config.model.numeric_basis == "radial_bf"
     assert config.symbolize.target_edges == 48
     assert config.symbolize.layerwise_finetune_steps == 0
 
@@ -109,6 +113,7 @@ def test_load_config_rejects_invalid_nested_field() -> None:
         ({"symbolize": {"layerwise_validation_ratio": -0.1}}, "symbolize.layerwise_validation_ratio"),
         ({"stagewise": {"prune_acc_drop_tol": -0.01}}, "stagewise.prune_acc_drop_tol"),
         ({"stagewise": {"prune_acc_drop_tol": 1.5}}, "stagewise.prune_acc_drop_tol"),
+        ({"model": {"numeric_basis": "unknown"}}, "model.numeric_basis"),
         ({"data": {"mnist_classes": []}}, "mnist_classes"),
         ({"evaluation": {"validate_n_sample": 0}}, "evaluation.validate_n_sample"),
     ],
@@ -135,6 +140,7 @@ def test_benchmark_cli_overrides_are_applied_to_nested_app_config() -> None:
         config_path=str(config_path),
         verbose=True,
         device="cpu",
+        numeric_basis="radial_bf",
         global_seed=321,
         max_prune_rounds=12,
         layerwise_finetune_steps=5,
@@ -152,6 +158,7 @@ def test_benchmark_cli_overrides_are_applied_to_nested_app_config() -> None:
     config = load_benchmark_app_config(str(config_path), runner)
 
     assert config.runtime.device == "cpu"
+    assert config.model.numeric_basis == "radial_bf"
     assert config.runtime.global_seed == 321
     assert config.symbolize.max_prune_rounds == 12
     assert config.symbolize.layerwise_finetune_steps == 5
@@ -176,6 +183,7 @@ def test_benchmark_cli_overrides_are_revalidated() -> None:
 def test_benchmark_without_config_uses_checked_in_runner_defaults() -> None:
     config = load_benchmark_app_config(None, make_runner())
 
+    assert config.model.numeric_basis == "bspline"
     assert config.stagewise.steps_per_stage == 60
     assert config.stagewise.prune_start_stage == 3
     assert config.stagewise.target_edges == 120
@@ -212,6 +220,11 @@ def test_benchmark_parser_accepts_layerwise_cli_overrides() -> None:
     assert runner.layerwise_early_stop_min_delta == pytest.approx(5e-4)
     assert runner.layerwise_eval_interval == 10
     assert runner.layerwise_validation_n_sample == 128
+
+
+def test_benchmark_parser_accepts_numeric_basis_override() -> None:
+    runner = parse_benchmark_cli_config(["--numeric-basis", "radial_bf"])
+    assert runner.numeric_basis == "radial_bf"
 
 
 def test_benchmark_parser_accepts_stage_guard_mode_override() -> None:

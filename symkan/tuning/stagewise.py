@@ -573,6 +573,7 @@ def stagewise_train(dataset, config: AppConfig):
     width = _normalize_width(list(width))
     grid = stage_config.grid
     k = stage_config.k
+    numeric_basis = str(config.model.numeric_basis)
     seed = stage_config.seed
     lamb_schedule = stage_config.lamb_schedule
     lr_schedule = stage_config.lr_schedule
@@ -643,6 +644,7 @@ def stagewise_train(dataset, config: AppConfig):
         width=width,
         grid=grid,
         k=k,
+        numeric_basis=numeric_basis,
         seed=seed,
         auto_save=False,
         symbolic_enabled=True,

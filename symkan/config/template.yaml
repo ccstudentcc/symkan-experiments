@@ -39,6 +39,8 @@ model:
   grid: 5
   # KAN spline order.
   k: 3
+  # Numeric frontend used by KAN edges: bspline / radial_bf
+  numeric_basis: bspline
   # Dense baseline training steps used for feature ranking.
   baseline_steps: 150
   # Dense baseline learning rate.

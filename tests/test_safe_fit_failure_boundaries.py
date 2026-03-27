@@ -241,6 +241,39 @@ def test_stagewise_light_guard_reduces_prefit_snapshot_overhead(
     assert full_calls > light_calls
 
 
+def test_stagewise_forwards_model_numeric_basis_to_kan(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _new_kan(**kwargs):
+        captured["kwargs"] = dict(kwargs)
+        return FakeKAN(**kwargs)
+
+    reports = iter(
+        [
+            FitReport(success=True, result={"train_loss": [0.1], "test_loss": [0.2]}),
+            FitReport(success=True, result={"train_loss": [0.05], "test_loss": [0.1]}),
+        ]
+    )
+    monkeypatch.setattr(stagewise_module, "KAN", _new_kan)
+    monkeypatch.setattr(stagewise_module, "clone_model", lambda model, **kwargs: copy.deepcopy(model))
+    monkeypatch.setattr(stagewise_module, "model_acc_ds", lambda *args, **kwargs: 0.8)
+    monkeypatch.setattr(stagewise_module, "get_n_edge", lambda model: model.n_edge)
+    monkeypatch.setattr(stagewise_module, "safe_fit_report", lambda **kwargs: next(reports))
+
+    config = AppConfig()
+    config.model.numeric_basis = "radial_bf"
+    config.stagewise.width = [1, 1]
+    config.stagewise.lamb_schedule = (0.0,)
+    config.stagewise.lr_schedule = (0.01,)
+    config.stagewise.steps_per_stage = 1
+    config.stagewise.prune_start_stage = 99
+    config.stagewise.verbose = False
+
+    stagewise_module.stagewise_train(make_dataset(), config)
+
+    assert captured["kwargs"]["numeric_basis"] == "radial_bf"
+
+
 def test_stagewise_prints_concise_progress_when_not_verbose(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

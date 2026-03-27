@@ -119,6 +119,7 @@ def build_stagewise_notebook_config(
     width: list[int],
     grid: int = 5,
     k: int = 3,
+    numeric_basis: str = "bspline",
     seed: int = 123,
     lamb_schedule: tuple[float, ...] = (0.0, 1e-4, 3e-4),
     lr_schedule: tuple[float, ...] = (0.02, 0.012, 0.006),
@@ -175,6 +176,7 @@ def build_stagewise_notebook_config(
         width: Stagewise model width, usually ``[input_dim, hidden_dim, output_dim]``.
         grid: KAN spline grid size.
         k: KAN spline order.
+        numeric_basis: Numeric frontend used by KAN edges.
         seed: Stagewise model seed.
         lamb_schedule: Per-stage regularization schedule.
         lr_schedule: Per-stage learning-rate schedule.
@@ -235,6 +237,7 @@ def build_stagewise_notebook_config(
         "device": "runtime_device",
         "global_seed": "runtime_global_seed",
         "quiet": "runtime_quiet",
+        "basis": "numeric_basis",
         "stage_guard_mode": "guard_mode",
         "topk_models": "keep_topk_models",
         "full_snapshots": "keep_full_snapshots",
@@ -252,6 +255,7 @@ def build_stagewise_notebook_config(
             "runtime_device": runtime_device if runtime_device != "auto" else None,
             "runtime_global_seed": runtime_global_seed if runtime_global_seed != 123 else None,
             "runtime_quiet": runtime_quiet if runtime_quiet else None,
+            "numeric_basis": numeric_basis if numeric_basis != "bspline" else None,
             "guard_mode": guard_mode if guard_mode != "light" else None,
             "keep_topk_models": keep_topk_models if keep_topk_models != 0 else None,
             "keep_full_snapshots": keep_full_snapshots if keep_full_snapshots else None,
@@ -280,6 +284,7 @@ def build_stagewise_notebook_config(
             "runtime_device",
             "runtime_global_seed",
             "runtime_quiet",
+            "numeric_basis",
             "guard_mode",
             "keep_topk_models",
             "keep_full_snapshots",
@@ -299,6 +304,8 @@ def build_stagewise_notebook_config(
         runtime_global_seed = legacy_kwargs["runtime_global_seed"]
     if "runtime_quiet" in legacy_kwargs:
         runtime_quiet = legacy_kwargs["runtime_quiet"]
+    if "numeric_basis" in legacy_kwargs:
+        numeric_basis = legacy_kwargs["numeric_basis"]
     if "guard_mode" in legacy_kwargs:
         guard_mode = legacy_kwargs["guard_mode"]
     if "keep_topk_models" in legacy_kwargs:
@@ -324,6 +331,7 @@ def build_stagewise_notebook_config(
         "inner_dim": int(width_list[1]) if len(width_list) >= 2 else config.model.inner_dim,
         "grid": int(grid),
         "k": int(k),
+        "numeric_basis": str(numeric_basis),
     }
     runtime_update = {
         "device": runtime_device,
@@ -433,6 +441,7 @@ def build_symbolize_notebook_config(
     runtime_device: str = "auto",
     runtime_global_seed: int = 123,
     runtime_quiet: bool = False,
+    numeric_basis: str = "bspline",
     evaluation_validate_n_sample: Optional[int] = None,
     base_config: Optional[AppConfig] = None,
     **legacy_kwargs: Any,
@@ -490,6 +499,7 @@ def build_symbolize_notebook_config(
         runtime_device: Canonical runtime device override.
         runtime_global_seed: Canonical runtime global seed override.
         runtime_quiet: Canonical runtime quiet flag.
+        numeric_basis: Numeric frontend used by KAN edges.
         evaluation_validate_n_sample: Canonical evaluation sample-count override.
         base_config: Optional base config to update instead of starting from defaults.
         **legacy_kwargs: Legacy notebook aliases kept only as compatibility
@@ -508,6 +518,7 @@ def build_symbolize_notebook_config(
         "device": "runtime_device",
         "global_seed": "runtime_global_seed",
         "quiet": "runtime_quiet",
+        "basis": "numeric_basis",
         "input_compaction": "enable_input_compaction",
         "use_validation": "layerwise_use_validation",
         "validation_ratio": "layerwise_validation_ratio",
@@ -529,6 +540,7 @@ def build_symbolize_notebook_config(
             "runtime_device": runtime_device if runtime_device != "auto" else None,
             "runtime_global_seed": runtime_global_seed if runtime_global_seed != 123 else None,
             "runtime_quiet": runtime_quiet if runtime_quiet else None,
+            "numeric_basis": numeric_basis if numeric_basis != "bspline" else None,
             "enable_input_compaction": enable_input_compaction if enable_input_compaction is not True else None,
             "layerwise_use_validation": layerwise_use_validation if layerwise_use_validation is not True else None,
             "layerwise_validation_ratio": (
@@ -571,6 +583,7 @@ def build_symbolize_notebook_config(
             "runtime_device",
             "runtime_global_seed",
             "runtime_quiet",
+            "numeric_basis",
             "enable_input_compaction",
             "layerwise_use_validation",
             "layerwise_validation_ratio",
@@ -594,6 +607,8 @@ def build_symbolize_notebook_config(
         runtime_global_seed = legacy_kwargs["runtime_global_seed"]
     if "runtime_quiet" in legacy_kwargs:
         runtime_quiet = legacy_kwargs["runtime_quiet"]
+    if "numeric_basis" in legacy_kwargs:
+        numeric_basis = legacy_kwargs["numeric_basis"]
     if "enable_input_compaction" in legacy_kwargs:
         enable_input_compaction = legacy_kwargs["enable_input_compaction"]
     if "layerwise_use_validation" in legacy_kwargs:
@@ -635,6 +650,9 @@ def build_symbolize_notebook_config(
             if evaluation_validate_n_sample is not None
             else config.evaluation.validate_n_sample
         )
+    }
+    model_update = {
+        "numeric_basis": str(numeric_basis),
     }
     symbolize_update = {
         "target_edges": int(target_edges),
@@ -688,6 +706,7 @@ def build_symbolize_notebook_config(
     return validated_app_config_update(
         config,
         runtime=runtime_update,
+        model=model_update,
         evaluation=evaluation_update,
         symbolize=symbolize_update,
     )

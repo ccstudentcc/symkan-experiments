@@ -78,6 +78,7 @@ class ModelConfig(BaseModel):
         inner_dim: Hidden width used by baseline model construction.
         grid: Spline grid size.
         k: Spline order.
+        numeric_basis: Numeric frontend used by KAN edge functions.
         baseline_steps: Baseline fit steps.
         baseline_lr: Baseline fit learning rate.
         baseline_lamb: Baseline fit regularization strength.
@@ -90,6 +91,7 @@ class ModelConfig(BaseModel):
     inner_dim: int = 16
     grid: int = 5
     k: int = 3
+    numeric_basis: Literal["bspline", "radial_bf"] = "bspline"
     baseline_steps: int = 150
     baseline_lr: float = 0.02
     baseline_lamb: float = 1e-4

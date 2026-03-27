@@ -13,6 +13,7 @@ def test_build_stagewise_notebook_config_maps_canonical_kwargs() -> None:
         width=[120, 16, 10],
         grid=7,
         k=4,
+        numeric_basis="radial_bf",
         seed=42,
         steps_per_stage=60,
         batch_size=64,
@@ -31,6 +32,7 @@ def test_build_stagewise_notebook_config_maps_canonical_kwargs() -> None:
     assert config.model.inner_dim == 16
     assert config.model.grid == 7
     assert config.model.k == 4
+    assert config.model.numeric_basis == "radial_bf"
     assert config.stagewise.width == [120, 16, 10]
     assert config.stagewise.seed == 42
     assert config.stagewise.steps_per_stage == 60
@@ -67,12 +69,14 @@ def test_build_symbolize_notebook_config_maps_canonical_kwargs() -> None:
         verbose=True,
         runtime_device="cpu",
         runtime_global_seed=999,
+        numeric_basis="radial_bf",
         evaluation_validate_n_sample=500,
     )
 
     assert config.runtime.device == "cpu"
     assert config.runtime.global_seed == 999
     assert config.runtime.batch_size == 64
+    assert config.model.numeric_basis == "radial_bf"
     assert config.evaluation.validate_n_sample == 500
     assert config.symbolize.target_edges == 90
     assert config.symbolize.max_prune_rounds == 30

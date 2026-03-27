@@ -243,6 +243,7 @@ class BenchmarkRunnerConfig:
     global_seed: Optional[int] = None
     baseline_seed: Optional[int] = None
     batch_size: Optional[int] = None
+    numeric_basis: Optional[str] = None
     lib_preset: Optional[str] = None
     disable_stagewise_train: Optional[bool] = None
     stage_guard_mode: Optional[str] = None
@@ -834,6 +835,7 @@ def _resolve_run_profile_updates(profile: Optional[str]) -> dict[str, dict[str, 
 
 def apply_benchmark_overrides(config: AppConfig, args: BenchmarkRunnerConfig) -> AppConfig:
     runtime_update: dict[str, Any] = {}
+    model_update: dict[str, Any] = {}
     library_update: dict[str, Any] = {}
     workflow_update: dict[str, Any] = {}
     stagewise_update: dict[str, Any] = {}
@@ -848,6 +850,8 @@ def apply_benchmark_overrides(config: AppConfig, args: BenchmarkRunnerConfig) ->
         runtime_update["baseline_seed"] = args.baseline_seed
     if args.batch_size is not None:
         runtime_update["batch_size"] = args.batch_size
+    if args.numeric_basis is not None:
+        model_update["numeric_basis"] = args.numeric_basis
     runtime_update["quiet"] = args.quiet
     runtime_update["verbose"] = False if args.quiet else args.verbose
 
@@ -899,6 +903,7 @@ def apply_benchmark_overrides(config: AppConfig, args: BenchmarkRunnerConfig) ->
         merge_section_update(section_name, patch)
 
     merge_section_update("runtime", runtime_update)
+    merge_section_update("model", model_update)
     merge_section_update("library", library_update)
     merge_section_update("workflow", workflow_update)
     merge_section_update("stagewise", stagewise_update)
@@ -1306,6 +1311,7 @@ def run_single_experiment(
         width=width_base,
         grid=config.model.grid,
         k=config.model.k,
+        numeric_basis=config.model.numeric_basis,
         seed=config.runtime.baseline_seed,
         auto_save=False,
         symbolic_enabled=True,
@@ -1353,6 +1359,7 @@ def run_single_experiment(
             width=[int(x_train_sel.shape[1]), inner_dim, data["n_classes"]],
             grid=config.model.grid,
             k=config.model.k,
+            numeric_basis=config.model.numeric_basis,
             seed=stage_seed,
             auto_save=False,
             symbolic_enabled=True,
@@ -1578,6 +1585,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--global-seed", type=int, default=None, help="显式覆盖 runtime.global_seed")
     parser.add_argument("--baseline-seed", type=int, default=None, help="显式覆盖 runtime.baseline_seed")
     parser.add_argument("--batch-size", type=int, default=None, help="显式覆盖 runtime.batch_size")
+    parser.add_argument(
+        "--numeric-basis",
+        choices=["bspline", "radial_bf"],
+        default=None,
+        help="显式覆盖 model.numeric_basis",
+    )
     parser.add_argument("--lib-preset", choices=["layered", "fast", "expressive", "full"], default=None)
     parser.add_argument("--disable-stagewise-train", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument(
