@@ -17,7 +17,7 @@
 - [3. 输出目录与文件含义](#3-输出目录与文件含义)
 - [4. 参数速查](#4-参数速查)
 - [5. 结果解读最小集合](#5-结果解读最小集合)
-- [6. Adaptive A/B 实验（baseline / adaptive / adaptive_auto）](#6-adaptive-ab-实验baseline--adaptive--adaptive_auto)
+- [6. AB Experiments Adaptive Bspline RadialBf](#6-ab-experiments-adaptive-bspline-radialbf)
 - [7. 报告口径](#7-报告口径)
 - [8. 与总文档统一口径（2026-03）](#8-与总文档统一口径2026-03)
 
@@ -196,6 +196,7 @@ outputs/benchmark_runs/
 - `symbolize.target_edges`
 - `symbolize.layerwise_finetune_steps`
 - `symbolize.affine_finetune_steps`
+- `model.numeric_basis`（`bspline` 或 `radial_bf`）
 
 口径说明如下：
 
@@ -233,6 +234,7 @@ outputs/benchmark_runs/
 - `--global-seed 321`：覆盖 `runtime.global_seed`。
 - `--baseline-seed 321`：覆盖 `runtime.baseline_seed`。
 - `--batch-size 256`：覆盖 `runtime.batch_size`。
+- `--numeric-basis bspline|radial_bf`：显式覆盖 `model.numeric_basis`。
 - `--stage-guard-mode light`：覆盖 `stagewise.guard_mode`（默认研究复跑建议）。
 - `--stage-guard-mode full`：覆盖 `stagewise.guard_mode`（回归验证建议，耗时更高）。
 - `--max-prune-rounds 12`：覆盖 `symbolize.max_prune_rounds`。
@@ -292,7 +294,7 @@ outputs/benchmark_runs/
 
 ---
 
-## 6. Adaptive A/B 实验（baseline / adaptive / adaptive_auto）
+## 6. AB Experiments Adaptive Bspline RadialBf
 
 三组定义：
 
@@ -423,6 +425,67 @@ python -m scripts.benchmark_ab_compare --root outputs/benchmark_ab --baseline ba
 1. 当前仅 `3` 个 seed，统计功效有限。
 2. 存在“均值与中位数方向不一致”的情况，说明结果对异常 seed 敏感。
 3. 若需进一步判断显著性，宜扩展到至少 `10` 个 seed，并补充非参数检验（如 Wilcoxon 符号秩）与效应量。
+
+### 6.5 baseline（bspline）vs radial_bf 对比（rerun_v2_engine_safe_20260327）
+
+该小节基于你本次 rerun 产物：
+
+- [outputs/rerun_v2_engine_safe_20260327/benchmark_ab/comparison/variant_summary.csv](../outputs/rerun_v2_engine_safe_20260327/benchmark_ab/comparison/variant_summary.csv)
+- [outputs/rerun_v2_engine_safe_20260327/benchmark_ab/comparison/pairwise_delta_summary.csv](../outputs/rerun_v2_engine_safe_20260327/benchmark_ab/comparison/pairwise_delta_summary.csv)
+- [outputs/rerun_v2_engine_safe_20260327/benchmark_ab/comparison/comparison_summary.md](../outputs/rerun_v2_engine_safe_20260327/benchmark_ab/comparison/comparison_summary.md)
+
+其中 `baseline` 即 `model.numeric_basis=bspline`，`radial_bf` 即 `model.numeric_basis=radial_bf`。
+
+#### 表 1：核心指标（mean ± std）
+
+| 变体 | final_acc | macro_auc | run_total_wall_time_s | symbolize_wall_time_s | final_n_edge |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline (bspline) | 0.7774 ± 0.0139 | 0.9561 ± 0.0025 | 201.64 ± 18.25 | 118.65 ± 14.90 | 88.67 ± 0.94 |
+| radial_bf | 0.7654 ± 0.0057 | 0.9538 ± 0.0045 | 136.66 ± 1.67 | 76.37 ± 1.83 | 89.00 ± 0.82 |
+
+#### 表 2：relative baseline 的 pairwise delta（variant - baseline）
+
+| 比较 | 指标 | mean_delta | win/lose/tie |
+| --- | --- | ---: | ---: |
+| radial_bf vs baseline | final_acc | -0.0120 | 0 / 3 / 0 |
+| radial_bf vs baseline | macro_auc | -0.0023 | 1 / 2 / 0 |
+| radial_bf vs baseline | run_total_wall_time_s | -64.98 s | 3 / 0 / 0 |
+| radial_bf vs baseline | symbolize_wall_time_s | -42.28 s | 3 / 0 / 0 |
+| radial_bf vs baseline | final_n_edge | +0.33 | 1 / 2 / 0 |
+
+结果解读（当前仅 3 seeds）：
+
+1. 当前样本下 `radial_bf` 在速度上有稳定优势（总时长与符号化时长均 3/3 更快）。
+2. 分类指标上 `baseline(bspline)` 仍占优（`final_acc` 为 0/3 落后）。
+3. 结构复杂度（`final_n_edge`）未见稳定下降，说明这组 `radial_bf` 配置的主要收益是速度而非边数压缩。
+
+### 6.6 numeric_basis 参数用法（bspline / radial_bf）
+
+推荐优先通过 YAML 固化口径：
+
+```yaml
+model:
+  numeric_basis: bspline   # 或 radial_bf
+```
+
+也可在 CLI 做显式覆盖（优先级高于 YAML）：
+
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
+python -m scripts.symkanbenchmark `
+  --tasks full `
+  --config configs/benchmark_ab/baseline.yaml `
+  --numeric-basis radial_bf `
+  --stagewise-seeds 42,52,62 `
+  --output-dir outputs/rerun_v2_engine_safe_20260327/benchmark_ab/radial_bf_cli_override `
+  --quiet
+```
+
+口径建议：
+
+1. 做正式 A/B 对照时，不建议只靠 `--numeric-basis` 临时覆盖，优先保留独立配置文件（如 `baseline.yaml` / `radial_bf.yaml`）。
+2. 报告中请明确说明：`baseline` 是否定义为 `bspline`，避免与其它 baseline 语义混淆。
+3. 导出指标中可直接核对 `metrics.json` 的 `numeric_basis` 字段，确认链路实际生效。
 
 ## 7. 报告口径
 
