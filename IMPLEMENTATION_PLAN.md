@@ -396,7 +396,7 @@ Validation:
 
 Status:
 
-Not Started
+Complete
 
 ### Stage 5: Benchmark and Verify Phase I Claims
 

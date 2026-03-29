@@ -4,39 +4,40 @@
 按 `IMPLEMENTATION_PLAN.md` 推进 ICBR-KAN Phase I，并完成当前首个可执行 stage。
 
 ## Current Stage
-Stage 3: Add Explicit Commit Helper
+Stage 4: Add `auto_symbolic_icbr(...)` Entry
 
 ## Status
 Complete
 
 ## Latest Completed Work
-- 在 `kan/icbr.py` 新增公开提交入口 `commit_symbolic_candidate(...)`，直接写入 symbolic state，不经过 `fix_symbolic()` 二次拟合。
-- 将候选应用逻辑抽成 `_apply_symbolic_candidate_state(...)`，并复用于 replay 与 commit 路径，保持状态写入口径一致。
-- commit 支持显式 `0` 函数提交（可不提供 `params`，默认提交零函数参数）。
-- 新增 `tests/test_icbr_commit.py`，覆盖：
-  - exporter correctness（提交后 `symbolic_formula()` 可导出）
-  - 零函数提交后 forward 与导出可运行
-  - `funs/funs_sympy/funs_avoid_singularity/funs_name/affine/masks` 一致性
+- 在 `kan/icbr.py` 新增 `auto_symbolic_icbr(...)`，串联 Stage 1-3：teacher cache 候选生成 -> replay rerank -> explicit commit。
+- 新增 `_run_auto_symbolic_icbr_with_models(...)`，显式要求 teacher/work 为不同对象，并按 baseline 层序与边序遍历。
+- 新增 teacher numeric-mode 处理与 fully symbolic completion 守卫（未 fully symbolic 直接抛错，不视为可导出完成）。
+- 在 `kan/MultKAN.py` 挂接 `MultKAN.auto_symbolic_icbr(...)` 入口。
+- 新增 `tests/test_icbr_integration.py`，覆盖：
+  - 小模型集成跑通并可导出公式
+  - teacher/work 混用触发失败
+  - 未 fully symbolic 时 completion guard 触发
 
 ## Files Changed
 - kan/icbr.py
-- tests/test_icbr_commit.py
+- kan/MultKAN.py
+- tests/test_icbr_integration.py
 - IMPLEMENTATION_PLAN.md
 - TASK_STATUS.md
 
 ## Validation Run
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_candidates.py tests\test_icbr_replay.py tests\test_icbr_commit.py`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_candidates.py tests\test_icbr_replay.py tests\test_icbr_commit.py tests\test_icbr_integration.py`
 
 ## Validation Result
-- 通过：`tests/test_icbr_candidates.py` + `tests/test_icbr_replay.py` + `tests/test_icbr_commit.py` 共 9 项，9 项通过。
+- 通过：`tests/test_icbr_candidates.py` + `tests/test_icbr_replay.py` + `tests/test_icbr_commit.py` + `tests/test_icbr_integration.py` 共 12 项，12 项通过。
 
 ## Decisions
-- Stage 3 只新增 commit helper，不提前做 Stage 4 的遍历流程与 teacher/work 协调控制。
-- commit 路径与 replay 共享候选应用底座，避免两套状态写入逻辑漂移。
-- 对 `0` 候选采用默认参数提交，保证“剪枝边显式提交为 0”可直接落地。
+- Stage 4 维持最小串联实现：先复用 Stage 1 的候选生成，再用 Stage 2 replay 评分，最终走 Stage 3 commit。
+- `auto_symbolic_icbr` 返回新的 work model，保持输入模型不被直接改写，显式体现 teacher/work 分离。
+- 对当前 numeric mask 已为 0 的边，直接提交 `0` 候选，确保最终 fully symbolic completion。
 
 ## Remaining Work
-- Stage 4: 串接 `auto_symbolic_icbr(...)` 入口。
 - Stage 5: CPU 基准与主张验证。
 
 ## Blockers

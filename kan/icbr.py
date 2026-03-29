@@ -450,4 +450,192 @@ def commit_symbolic_candidate(
     _apply_symbolic_candidate_state(work_model, layer_idx, input_idx, output_idx, candidate)
 
 
-__all__ = ["commit_symbolic_candidate", "generate_layer_candidates", "replay_rerank_edge_candidates"]
+def _set_teacher_numeric_mode(teacher_model) -> None:
+    for layer_idx in range(len(teacher_model.symbolic_fun)):
+        teacher_model.symbolic_fun[layer_idx].mask.data.zero_()
+
+
+def _ensure_fully_symbolic_completion(work_model) -> None:
+    for layer_idx in range(len(work_model.width_in) - 1):
+        numeric_mask = work_model.act_fun[layer_idx].mask
+        symbolic_mask = work_model.symbolic_fun[layer_idx].mask
+        fully_symbolic = torch.logical_and(numeric_mask == 0, symbolic_mask.T == 1)
+        if not bool(torch.all(fully_symbolic).item()):
+            raise RuntimeError(
+                f"Layer {layer_idx} is not fully symbolic; exporter should not be considered complete."
+            )
+
+
+def _build_edge_shortlist(
+    teacher_acts_layer: torch.Tensor,
+    teacher_edge_targets_layer: torch.Tensor,
+    *,
+    input_idx: int,
+    output_idx: int,
+    lib_names: list[str],
+    topk: int,
+    a_range: tuple[float, float],
+    b_range: tuple[float, float],
+    grid_number: int,
+    iteration: int,
+) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    for fun_name in lib_names:
+        result = generate_layer_candidates(
+            teacher_acts_layer,
+            teacher_edge_targets_layer,
+            lib=[fun_name],
+            edge_indices=[(input_idx, output_idx)],
+            a_range=a_range,
+            b_range=b_range,
+            grid_number=grid_number,
+            iteration=iteration,
+        )
+        candidates.append(result["candidates"][0])
+
+    candidates.sort(key=lambda item: (-float(item["r2"]), float(item["complexity"])))
+    topk = max(1, min(topk, len(candidates)))
+    return candidates[:topk]
+
+
+def _run_auto_symbolic_icbr_with_models(
+    teacher_model,
+    work_model,
+    calibration_input: torch.Tensor,
+    *,
+    lib_names: list[str],
+    topk: int,
+    a_range: tuple[float, float],
+    b_range: tuple[float, float],
+    grid_number: int,
+    iteration: int,
+    verbose: int,
+):
+    if teacher_model is work_model:
+        raise ValueError("teacher_model and work_model must be different objects")
+
+    _set_teacher_numeric_mode(teacher_model)
+    teacher_model.auto_save = False
+    work_model.auto_save = False
+
+    with torch.no_grad():
+        teacher_model(calibration_input)
+
+    depth = len(work_model.width_in) - 1
+    for layer_idx in range(depth):
+        teacher_acts_layer = teacher_model.acts[layer_idx]
+        teacher_edge_targets_layer = teacher_model.spline_postacts[layer_idx]
+
+        for input_idx in range(work_model.width_in[layer_idx]):
+            for output_idx in range(work_model.width_out[layer_idx + 1]):
+                symbolic_mask = float(work_model.symbolic_fun[layer_idx].mask[output_idx, input_idx].item())
+                numeric_mask = float(work_model.act_fun[layer_idx].mask[input_idx][output_idx].item())
+
+                if symbolic_mask > 0.0 and numeric_mask == 0.0:
+                    if verbose >= 2:
+                        print(f"skip ({layer_idx},{input_idx},{output_idx}) already symbolic")
+                    continue
+
+                if symbolic_mask == 0.0 and numeric_mask == 0.0:
+                    commit_symbolic_candidate(
+                        work_model,
+                        layer_idx=layer_idx,
+                        input_idx=input_idx,
+                        output_idx=output_idx,
+                        candidate={"fun_name": "0"},
+                    )
+                    if verbose >= 1:
+                        print(f"commit ({layer_idx},{input_idx},{output_idx}) as 0")
+                    continue
+
+                shortlist = _build_edge_shortlist(
+                    teacher_acts_layer,
+                    teacher_edge_targets_layer,
+                    input_idx=input_idx,
+                    output_idx=output_idx,
+                    lib_names=lib_names,
+                    topk=topk,
+                    a_range=a_range,
+                    b_range=b_range,
+                    grid_number=grid_number,
+                    iteration=iteration,
+                )
+                rerank = replay_rerank_edge_candidates(
+                    work_model,
+                    teacher_model,
+                    calibration_input,
+                    layer_idx=layer_idx,
+                    input_idx=input_idx,
+                    output_idx=output_idx,
+                    shortlist=shortlist,
+                )
+                best = rerank["best_candidate"]
+                commit_symbolic_candidate(
+                    work_model,
+                    layer_idx=layer_idx,
+                    input_idx=input_idx,
+                    output_idx=output_idx,
+                    candidate=best,
+                )
+                if verbose >= 1:
+                    print(
+                        f"commit ({layer_idx},{input_idx},{output_idx}) "
+                        f"{best['fun_name']} replay_score={best['replay_score']:.6e}"
+                    )
+
+    _ensure_fully_symbolic_completion(work_model)
+    return work_model
+
+
+def auto_symbolic_icbr(
+    model,
+    *,
+    calibration_split: Mapping[str, torch.Tensor] | torch.Tensor | None = None,
+    lib: Iterable[str] | Mapping[str, tuple] | None = None,
+    topk: int = 5,
+    a_range: tuple[float, float] = (-10.0, 10.0),
+    b_range: tuple[float, float] = (-10.0, 10.0),
+    grid_number: int = 101,
+    iteration: int = 3,
+    verbose: int = 1,
+):
+    """
+    Run Phase I ICBR symbolic fitting on a cloned work model.
+
+    Returns a new work model and keeps the input model unchanged.
+    """
+
+    if calibration_split is None:
+        if getattr(model, "cache_data", None) is None:
+            raise ValueError("calibration_split is required when model.cache_data is empty")
+        calibration_input = model.cache_data
+    else:
+        calibration_input = _extract_calibration_input(calibration_split)
+
+    symbolic_lib = _resolve_symbolic_lib(lib)
+    lib_names = list(symbolic_lib.keys())
+    if not lib_names:
+        raise ValueError("symbolic library must not be empty")
+
+    teacher_model = copy.deepcopy(model)
+    work_model = copy.deepcopy(model)
+    return _run_auto_symbolic_icbr_with_models(
+        teacher_model,
+        work_model,
+        calibration_input,
+        lib_names=lib_names,
+        topk=topk,
+        a_range=a_range,
+        b_range=b_range,
+        grid_number=grid_number,
+        iteration=iteration,
+        verbose=verbose,
+    )
+
+
+__all__ = [
+    "auto_symbolic_icbr",
+    "commit_symbolic_candidate",
+    "generate_layer_candidates",
+    "replay_rerank_edge_candidates",
+]

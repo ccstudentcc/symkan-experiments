@@ -2306,6 +2306,31 @@ class MultKAN(nn.Module):
                             
         self.log_history('auto_symbolic')
 
+    def auto_symbolic_icbr(
+        self,
+        calibration_split=None,
+        lib=None,
+        topk=5,
+        a_range=(-10, 10),
+        b_range=(-10, 10),
+        grid_number=101,
+        iteration=3,
+        verbose=1,
+    ):
+        from .icbr import auto_symbolic_icbr
+
+        return auto_symbolic_icbr(
+            self,
+            calibration_split=calibration_split,
+            lib=lib,
+            topk=topk,
+            a_range=a_range,
+            b_range=b_range,
+            grid_number=grid_number,
+            iteration=iteration,
+            verbose=verbose,
+        )
+
     def symbolic_formula(self, var=None, normalizer=None, output_normalizer = None):
         '''
         get symbolic formula
