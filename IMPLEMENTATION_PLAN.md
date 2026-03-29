@@ -502,6 +502,65 @@ Status:
 
 Complete
 
+### Stage 7: Regression Gating and Stability Verification
+
+Goal:
+
+在 Stage 6 扩展 benchmark 基础上，新增可执行回归门禁机制，确保多 seed 结果具备稳定可判定的“通过/失败”信号，用于后续版本回归与自动化验收。
+
+Target Files:
+
+- `scripts/icbr_benchmark_regression.py`（新脚本，建议）
+- `scripts/icbr_benchmark.py`（如需补充 machine-readable summary 支撑）
+- `tests/test_icbr_benchmark_regression_smoke.py`（建议）
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- 输入:
+  - benchmark summary JSON（来自 `scripts.icbr_benchmark`）
+  - 可配置的门禁阈值配置（JSON 或内置默认）
+- 输出:
+  - 逐任务与 overall 的门禁判定结果（pass/fail）
+  - 每条判定的实际值、阈值与方向说明
+  - 机器可读结果文件（JSON）与人类可读简报（Markdown）
+- 默认门禁至少覆盖:
+  - `formula_validation_result` pass rate 下限
+  - `symbolic_speedup_vs_baseline` median 下限
+  - `final_mse_loss_shift` mean 上限
+- 对任何失败项给出明确 fail reason，且脚本返回非零退出码
+
+Implementation Constraints:
+
+- 不修改 ICBR 算法路径，只扩展 benchmark 验收层
+- 不覆盖 Stage 6 产物结构；新脚本应消费现有 summary JSON
+- 门禁阈值默认取保守值，避免把小样本偶然波动误判为稳定收益
+- 保持 CPU-first 验收口径
+
+Success Criteria:
+
+- 同一份 benchmark summary 可被 regression 脚本稳定判定
+- smoke 测试覆盖:
+  - 全部通过场景
+  - 至少一个门禁失败场景
+- 回归脚本输出包含:
+  - `overall_status`
+  - `checks` 明细
+  - fail reason（如有）
+
+Validation:
+
+- `pytest tests/test_icbr_benchmark_regression_smoke.py`
+- 基于 `outputs/icbr_benchmark_extended/icbr_benchmark_summary.json` 实跑:
+  - `python -m scripts.icbr_benchmark_regression --summary-json ...`
+- 人工核对:
+  - 失败时退出码非零
+  - JSON/Markdown 报告中阈值与实际值一致
+
+Status:
+
+Complete
+
 ## 5. Acceptance Criteria
 
 Phase I 仅在以下条件全部满足时视为完成:
@@ -532,3 +591,4 @@ Phase I 仅在以下条件全部满足时视为完成:
 4. Stage 4: Add `auto_symbolic_icbr(...)` Entry
 5. Stage 5: Benchmark and Verify Phase I Claims
 6. Stage 6: Extended Multi-Seed Benchmark Validation
+7. Stage 7: Regression Gating and Stability Verification
