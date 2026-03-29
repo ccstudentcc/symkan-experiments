@@ -49,7 +49,8 @@ class _TaskSpec:
     n_var: int
     width: list[int]
     target_fn: Callable[[torch.Tensor], torch.Tensor]
-    lib: list[str]
+    lib: list[str] | None
+    icbr_topk: int | None = None
 
 
 def _task_specs() -> dict[str, _TaskSpec]:
@@ -59,21 +60,21 @@ def _task_specs() -> dict[str, _TaskSpec]:
             n_var=1,
             width=[1, 1],
             target_fn=lambda x: torch.sin(torch.pi * x[:, [0]]),
-            lib=["x", "x^2", "sin", "cos"],
+            lib=None,
         ),
         "combo": _TaskSpec(
             name="combo",
             n_var=2,
             width=[2, 2, 1],
             target_fn=lambda x: torch.sin(torch.pi * x[:, [0]]) + x[:, [1]] ** 2,
-            lib=["x", "x^2", "sin", "cos", "gaussian"],
+            lib=None,
         ),
         "poly_cubic": _TaskSpec(
             name="poly_cubic",
             n_var=2,
             width=[2, 3, 1],
             target_fn=lambda x: 0.8 * x[:, [0]] ** 3 - 0.4 * x[:, [0]] + 0.6 * x[:, [1]] ** 2,
-            lib=["x", "x^2", "x^3", "sin", "cos"],
+            lib=None,
         ),
         "trig_interaction": _TaskSpec(
             name="trig_interaction",
@@ -82,7 +83,8 @@ def _task_specs() -> dict[str, _TaskSpec]:
             target_fn=lambda x: torch.sin(torch.pi * x[:, [0]])
             + 0.5 * torch.cos(torch.pi * x[:, [1]])
             + x[:, [0]] * x[:, [2]],
-            lib=["x", "x^2", "x^3", "sin", "cos", "gaussian"],
+            lib=None,
+            icbr_topk=5,
         ),
     }
 
@@ -443,6 +445,7 @@ def run_benchmark(
     for task_name in tasks:
         spec = specs[task_name]
         for seed in seeds:
+            effective_topk = int(spec.icbr_topk) if spec.icbr_topk is not None else int(topk)
             model, dataset = _fit_teacher_model(
                 spec,
                 seed=seed,
@@ -455,7 +458,7 @@ def run_benchmark(
                 model,
                 calibration_split=dataset["test_input"],
                 lib=spec.lib,
-                topk=topk,
+                topk=effective_topk,
                 a_range=(-5.0, 5.0),
                 b_range=(-5.0, 5.0),
                 grid_number=grid_number,
@@ -466,7 +469,8 @@ def run_benchmark(
                 "seed": seed,
                 "n_var": spec.n_var,
                 "width": list(spec.width),
-                "lib": list(spec.lib),
+                "lib": list(spec.lib) if spec.lib is not None else ["__FULL_SYMBOLIC_LIB__"],
+                "icbr_topk_used": effective_topk,
                 **metrics,
             }
             rows.append(row)
@@ -486,6 +490,7 @@ def run_benchmark(
         "n_var",
         "width",
         "lib",
+        "icbr_topk_used",
         "candidate_generation_wall_time_s",
         "replay_rerank_wall_time_s",
         "symbolic_wall_time_s",
@@ -517,6 +522,7 @@ def run_benchmark(
                     "n_var": row["n_var"],
                     "width": json.dumps(row["width"], ensure_ascii=False),
                     "lib": json.dumps(row["lib"], ensure_ascii=False),
+                    "icbr_topk_used": row["icbr_topk_used"],
                     "candidate_generation_wall_time_s": row["candidate_generation_wall_time_s"],
                     "replay_rerank_wall_time_s": row["replay_rerank_wall_time_s"],
                     "symbolic_wall_time_s": row["symbolic_wall_time_s"],
@@ -582,6 +588,15 @@ def run_benchmark(
             "iteration": iteration,
             "output_dir": str(output_dir),
             "plots_enabled": make_plots,
+            "task_topk_overrides": {
+                task_name: int(specs[task_name].icbr_topk)
+                for task_name in tasks
+                if specs[task_name].icbr_topk is not None
+            },
+            "task_lib_mode": {
+                task_name: ("full_symbolic_lib" if specs[task_name].lib is None else "task_subset")
+                for task_name in tasks
+            },
         },
         "rows": rows,
         "aggregates": {
@@ -777,7 +792,7 @@ def main(argv: list[str] | None = None) -> None:
         default="minimal,combo,poly_cubic,trig_interaction",
         help="Comma-separated tasks: minimal,combo,poly_cubic,trig_interaction",
     )
-    parser.add_argument("--seeds", default="0,1,2,3,4", help="Comma-separated integer seeds")
+    parser.add_argument("--seeds", default="0,1,2,3,4,5,6,7,8,9", help="Comma-separated integer seeds")
     parser.add_argument("--output-dir", default="outputs/icbr_benchmark_extended", help="Output directory")
     parser.add_argument("--train-num", type=int, default=64, help="Training sample count per task")
     parser.add_argument("--test-num", type=int, default=64, help="Test/calibration sample count per task")

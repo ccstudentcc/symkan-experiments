@@ -5,7 +5,7 @@ import json
 import uuid
 from pathlib import Path
 
-from scripts.icbr_benchmark import main
+from scripts.icbr_benchmark import main, run_benchmark
 
 
 def test_icbr_benchmark_script_generates_outputs() -> None:
@@ -53,6 +53,7 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
         rows = list(csv.DictReader(f))
     assert len(rows) == 4
     assert {row["task"] for row in rows} == {"minimal", "combo"}
+    assert all(row["lib"] == "[\"__FULL_SYMBOLIC_LIB__\"]" for row in rows)
     required_cols = {
         "candidate_generation_wall_time_s",
         "replay_rerank_wall_time_s",
@@ -83,6 +84,8 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
     assert summary["config"]["tasks"] == ["minimal", "combo"]
     assert "overall" in summary["aggregates"]
     assert "by_task" in summary["aggregates"]
+    assert summary["config"]["task_lib_mode"]["minimal"] == "full_symbolic_lib"
+    assert summary["config"]["task_lib_mode"]["combo"] == "full_symbolic_lib"
     assert "metrics" in summary["aggregates"]["overall"]
     assert "significance" in summary["aggregates"]["overall"]
     minimal = summary["aggregates"]["by_task"]["minimal"]
@@ -102,3 +105,27 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
     visuals = summary["artifacts"]["visualizations"]
     assert "enabled" in visuals
     assert "files" in visuals
+
+
+def test_trig_interaction_uses_task_specific_topk_override() -> None:
+    out_dir = Path("tmp") / f"icbr_benchmark_topk_override_{uuid.uuid4().hex}"
+    result = run_benchmark(
+        tasks=["trig_interaction"],
+        seeds=[0, 1],
+        output_dir=out_dir,
+        train_num=16,
+        test_num=16,
+        train_steps=2,
+        lr=0.05,
+        topk=3,
+        grid_number=11,
+        iteration=1,
+        make_plots=False,
+        quiet=True,
+    )
+
+    rows = result["rows"]
+    assert len(rows) == 2
+    assert all(int(row["icbr_topk_used"]) == 5 for row in rows)
+    assert all(row["lib"] == ["__FULL_SYMBOLIC_LIB__"] for row in rows)
+    assert result["summary"]["config"]["task_lib_mode"]["trig_interaction"] == "full_symbolic_lib"

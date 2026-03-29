@@ -561,6 +561,58 @@ Status:
 
 Complete
 
+### Stage 8: Diagnose and Fix `trig_interaction` Regression
+
+Goal:
+
+在不扩张 Phase I 算法范围的前提下，针对 `trig_interaction` 的 `final_mse_loss_shift` 超门禁问题做最小范围诊断与修复，并以 10 seeds 重新验证 Stage 7 门禁结果。
+
+Target Files:
+
+- `scripts/icbr_benchmark.py`
+- `scripts/icbr_benchmark_regression.py`（如需阈值覆盖或门禁配置入口增强）
+- `tests/test_icbr_benchmark_script_smoke.py`（如需补充结构/默认参数断言）
+- `tests/test_icbr_benchmark_regression_smoke.py`（如需补充门禁覆盖）
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- 先完成诊断:
+  - 明确 `trig_interaction` 回归是否与 candidate lib、replay topk 或门禁策略直接相关
+  - 给出最小可解释的修复路径，不进行无关扩张
+- 实施最小修复:
+  - 优先围绕 `trig_interaction` 的候选库/重排参数做任务级调优
+  - 保持其他任务行为与口径稳定
+- 固化 10 seeds 验证口径:
+  - benchmark 使用 `0..9` 共 10 个 seeds
+  - 复跑 Stage 7 regression gate 并产出新报告
+
+Implementation Constraints:
+
+- 不改动 ICBR 主算法核心流程，只调 benchmark task 配置与验收策略
+- 不删除 rows 明细与 Stage 6/7 既有导出结构
+- 若修复后仍有单项失败，必须如实记录，不得“假通过”
+
+Success Criteria:
+
+- 使用 10 seeds 重新生成扩展 benchmark summary
+- regression gate 在新结果上通过；若未通过，必须明确剩余失败项与下一步处理方案
+- 相关 smoke 测试通过
+
+Validation:
+
+- `pytest tests/test_icbr_benchmark_smoke.py tests/test_icbr_benchmark_script_smoke.py tests/test_icbr_benchmark_regression_smoke.py`
+- `python -m scripts.icbr_benchmark --seeds 0,1,2,3,4,5,6,7,8,9 ...`
+- `python -m scripts.icbr_benchmark_regression --summary-json ...`
+- 人工核对 regression gate JSON:
+  - `overall_status`
+  - `failed_check_count`
+  - `checks` 中 `trig_interaction` 相关项
+
+Status:
+
+Complete
+
 ## 5. Acceptance Criteria
 
 Phase I 仅在以下条件全部满足时视为完成:
@@ -592,3 +644,4 @@ Phase I 仅在以下条件全部满足时视为完成:
 5. Stage 5: Benchmark and Verify Phase I Claims
 6. Stage 6: Extended Multi-Seed Benchmark Validation
 7. Stage 7: Regression Gating and Stability Verification
+8. Stage 8: Diagnose and Fix `trig_interaction` Regression
