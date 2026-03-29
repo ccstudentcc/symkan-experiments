@@ -37,6 +37,10 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
             "1.0",
             "--teacher-min-test-r2",
             "-1.0",
+            "--teacher-cache-dir",
+            str(out_dir / "teacher_cache"),
+            "--teacher-cache-mode",
+            "readwrite",
             "--quiet",
         ]
     )
@@ -71,6 +75,11 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
         "teacher_test_r2",
         "teacher_quality_gate_pass",
         "teacher_quality_gate_reason",
+        "teacher_cache_hit",
+        "teacher_cache_key",
+        "teacher_cache_path",
+        "teacher_cache_mode",
+        "teacher_cache_status",
         "teacher_target_mse",
         "teacher_target_r2",
         "baseline_target_mse",
@@ -107,6 +116,7 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
     assert "overall" in summary["aggregates"]
     assert "by_task" in summary["aggregates"]
     assert "teacher_quality_gate" in summary["config"]
+    assert "teacher_cache" in summary["config"]
     assert summary["config"]["task_lib_mode"]["minimal"] == "full_symbolic_lib"
     assert summary["config"]["task_lib_mode"]["combo"] == "full_symbolic_lib"
     assert "metrics" in summary["aggregates"]["overall"]
@@ -140,8 +150,8 @@ def test_quality_profile_resolves_expected_defaults() -> None:
         lr=None,
         lamb=None,
     )
-    assert resolved["train_num"] == 192
-    assert resolved["test_num"] == 192
+    assert resolved["train_num"] == 1000
+    assert resolved["test_num"] == 500
     assert resolved["train_steps"] == 80
     assert resolved["lr"] == 0.03
     assert resolved["lamb"] == 1e-3
@@ -170,6 +180,9 @@ def test_trig_interaction_uses_task_specific_topk_override() -> None:
         iteration=1,
         teacher_max_test_mse=1.0,
         teacher_min_test_r2=-1.0,
+        teacher_cache_dir=out_dir / "teacher_cache",
+        teacher_cache_mode="off",
+        teacher_cache_version="test_v1",
         make_plots=False,
         quiet=True,
     )
@@ -197,6 +210,9 @@ def test_teacher_quality_gate_can_skip_symbolic_comparison() -> None:
         iteration=1,
         teacher_max_test_mse=1e-8,
         teacher_min_test_r2=0.999999,
+        teacher_cache_dir=out_dir / "teacher_cache",
+        teacher_cache_mode="off",
+        teacher_cache_version="test_v1",
         make_plots=False,
         quiet=True,
     )
@@ -207,3 +223,58 @@ def test_teacher_quality_gate_can_skip_symbolic_comparison() -> None:
     assert row["formula_validation_result"] is False
     assert row["baseline_formula_raw"] == []
     assert row["icbr_formula_raw"] == []
+
+
+def test_teacher_cache_hit_after_first_run() -> None:
+    base_dir = Path("tmp") / f"icbr_benchmark_teacher_cache_{uuid.uuid4().hex}"
+    out_dir_1 = base_dir / "run1"
+    out_dir_2 = base_dir / "run2"
+    cache_dir = base_dir / "cache"
+
+    run1 = run_benchmark(
+        tasks=["minimal"],
+        seeds=[0],
+        output_dir=out_dir_1,
+        train_num=16,
+        test_num=16,
+        train_steps=2,
+        lr=0.05,
+        lamb=1e-3,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=1.0,
+        teacher_min_test_r2=-1.0,
+        teacher_cache_dir=cache_dir,
+        teacher_cache_mode="readwrite",
+        teacher_cache_version="stage11_test_v1",
+        make_plots=False,
+        quiet=True,
+    )
+    row1 = run1["rows"][0]
+    assert row1["teacher_cache_hit"] is False
+    assert Path(row1["teacher_cache_path"]).exists()
+
+    run2 = run_benchmark(
+        tasks=["minimal"],
+        seeds=[0],
+        output_dir=out_dir_2,
+        train_num=16,
+        test_num=16,
+        train_steps=2,
+        lr=0.05,
+        lamb=1e-3,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=1.0,
+        teacher_min_test_r2=-1.0,
+        teacher_cache_dir=cache_dir,
+        teacher_cache_mode="readwrite",
+        teacher_cache_version="stage11_test_v1",
+        make_plots=False,
+        quiet=True,
+    )
+    row2 = run2["rows"][0]
+    assert row2["teacher_cache_hit"] is True
+    assert row2["teacher_cache_key"] == row1["teacher_cache_key"]

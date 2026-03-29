@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
+import os
 import random
 import statistics
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +45,7 @@ _NUMERIC_METRICS = [
 ]
 
 _BOOLEAN_METRICS = [
+    "teacher_cache_hit",
     "teacher_quality_gate_pass",
     "formula_validation_result",
     "baseline_formula_validation_result",
@@ -62,13 +66,15 @@ _BENCHMARK_PROFILES: dict[str, dict[str, float | int]] = {
         "lamb": 1e-3,
     },
     "quality": {
-        "train_num": 192,
-        "test_num": 192,
+        "train_num": 1000,
+        "test_num": 500,
         "train_steps": 80,
         "lr": 0.03,
         "lamb": 1e-3,
     },
 }
+
+_TEACHER_CACHE_MODES = {"readwrite", "readonly", "refresh", "off"}
 
 
 @dataclass(frozen=True)
@@ -119,18 +125,15 @@ def _task_specs() -> dict[str, _TaskSpec]:
     }
 
 
-def _fit_teacher_model(
+def _build_teacher_dataset(
     spec: _TaskSpec,
     *,
     seed: int,
     train_num: int,
     test_num: int,
-    train_steps: int,
-    lr: float,
-    lamb: float,
-) -> tuple[MultKAN, dict[str, torch.Tensor]]:
+) -> dict[str, torch.Tensor]:
     torch.manual_seed(seed)
-    dataset = create_dataset(
+    return create_dataset(
         spec.target_fn,
         n_var=spec.n_var,
         train_num=train_num,
@@ -139,13 +142,26 @@ def _fit_teacher_model(
         device="cpu",
     )
 
-    model = MultKAN(
+
+def _build_teacher_model(spec: _TaskSpec) -> MultKAN:
+    return MultKAN(
         width=spec.width,
         grid=5,
         k=3,
         auto_save=False,
         device="cpu",
     )
+
+
+def _train_teacher_model(
+    spec: _TaskSpec,
+    dataset: dict[str, torch.Tensor],
+    *,
+    train_steps: int,
+    lr: float,
+    lamb: float,
+) -> MultKAN:
+    model = _build_teacher_model(spec)
     model.fit(
         dataset,
         opt="Adam",
@@ -156,7 +172,196 @@ def _fit_teacher_model(
         lamb=lamb,
         log=max(train_steps + 1, 999999),
     )
-    return model, dataset
+    return model
+
+
+def _build_teacher_cache_identity(
+    *,
+    spec: _TaskSpec,
+    seed: int,
+    train_num: int,
+    test_num: int,
+    train_steps: int,
+    lr: float,
+    lamb: float,
+    profile_name: str,
+    cache_version: str,
+) -> tuple[str, dict[str, object]]:
+    payload: dict[str, object] = {
+        "task": spec.name,
+        "seed": int(seed),
+        "n_var": int(spec.n_var),
+        "width": list(spec.width),
+        "train_num": int(train_num),
+        "test_num": int(test_num),
+        "train_steps": int(train_steps),
+        "lr": float(lr),
+        "lamb": float(lamb),
+        "profile": profile_name,
+        "cache_version": cache_version,
+    }
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
+    return f"{spec.name}_seed{seed}_{digest}", payload
+
+
+def _acquire_lock(lock_path: Path, *, timeout_s: float = 120.0) -> bool:
+    start = time.perf_counter()
+    while True:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            return True
+        except FileExistsError:
+            if (time.perf_counter() - start) >= timeout_s:
+                return False
+            time.sleep(0.1)
+
+
+def _release_lock(lock_path: Path) -> None:
+    try:
+        lock_path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _write_json_atomic(path: Path, payload: dict[str, object]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def _write_torch_state_atomic(path: Path, state_dict: dict[str, torch.Tensor]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    torch.save(state_dict, tmp)
+    tmp.replace(path)
+
+
+def _resolve_teacher_model_with_cache(
+    *,
+    spec: _TaskSpec,
+    seed: int,
+    train_num: int,
+    test_num: int,
+    train_steps: int,
+    lr: float,
+    lamb: float,
+    profile_name: str,
+    cache_dir: Path,
+    cache_mode: str,
+    cache_version: str,
+    lock_timeout_s: float = 120.0,
+) -> tuple[MultKAN, dict[str, torch.Tensor], dict[str, object]]:
+    if cache_mode not in _TEACHER_CACHE_MODES:
+        raise ValueError(f"Unsupported teacher cache mode: {cache_mode}")
+
+    dataset = _build_teacher_dataset(
+        spec,
+        seed=seed,
+        train_num=train_num,
+        test_num=test_num,
+    )
+    cache_key, cache_payload = _build_teacher_cache_identity(
+        spec=spec,
+        seed=seed,
+        train_num=train_num,
+        test_num=test_num,
+        train_steps=train_steps,
+        lr=lr,
+        lamb=lamb,
+        profile_name=profile_name,
+        cache_version=cache_version,
+    )
+
+    cache_root = cache_dir / cache_key
+    state_path = cache_root / "teacher_state.pt"
+    meta_path = cache_root / "teacher_meta.json"
+    lock_path = cache_root / "teacher_cache.lock"
+
+    def _train() -> MultKAN:
+        return _train_teacher_model(
+            spec,
+            dataset,
+            train_steps=train_steps,
+            lr=lr,
+            lamb=lamb,
+        )
+
+    if cache_mode in {"readwrite", "readonly"} and state_path.exists() and meta_path.exists():
+        try:
+            model = _build_teacher_model(spec)
+            state = torch.load(state_path, map_location="cpu")
+            model.load_state_dict(state)
+            return model, dataset, {
+                "teacher_cache_hit": True,
+                "teacher_cache_key": cache_key,
+                "teacher_cache_path": str(cache_root),
+                "teacher_cache_mode": cache_mode,
+                "teacher_cache_status": "hit",
+            }
+        except Exception as exc:
+            cache_load_error = f"{type(exc).__name__}: {exc}"
+        else:  # pragma: no cover
+            cache_load_error = ""
+    else:
+        cache_load_error = ""
+
+    if cache_mode == "off":
+        model = _train()
+        return model, dataset, {
+            "teacher_cache_hit": False,
+            "teacher_cache_key": cache_key,
+            "teacher_cache_path": str(cache_root),
+            "teacher_cache_mode": cache_mode,
+            "teacher_cache_status": "off_no_cache",
+        }
+
+    if cache_mode == "readonly":
+        model = _train()
+        status = "readonly_miss_no_write"
+        if cache_load_error:
+            status = f"readonly_load_error_no_write ({cache_load_error})"
+        return model, dataset, {
+            "teacher_cache_hit": False,
+            "teacher_cache_key": cache_key,
+            "teacher_cache_path": str(cache_root),
+            "teacher_cache_mode": cache_mode,
+            "teacher_cache_status": status,
+        }
+
+    model = _train()
+    cache_root.mkdir(parents=True, exist_ok=True)
+    lock_acquired = _acquire_lock(lock_path, timeout_s=lock_timeout_s)
+    if lock_acquired:
+        try:
+            state_dict = {key: value.detach().cpu() for key, value in model.state_dict().items()}
+            _write_torch_state_atomic(state_path, state_dict)
+            _write_json_atomic(
+                meta_path,
+                {
+                    "cache_key": cache_key,
+                    "cache_payload": cache_payload,
+                    "cache_mode_written_by": cache_mode,
+                    "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            status = "refresh_write" if cache_mode == "refresh" else "miss_write"
+            if cache_load_error:
+                status = f"{status}_after_load_error"
+        finally:
+            _release_lock(lock_path)
+    else:
+        status = "write_skipped_lock_timeout"
+        if cache_load_error:
+            status = f"{status}_after_load_error"
+
+    return model, dataset, {
+        "teacher_cache_hit": False,
+        "teacher_cache_key": cache_key,
+        "teacher_cache_path": str(cache_root),
+        "teacher_cache_mode": cache_mode,
+        "teacher_cache_status": status,
+    }
 
 
 def _serialize_formula_list(formulas: list[str]) -> str:
@@ -566,6 +771,9 @@ def run_benchmark(
     iteration: int,
     teacher_max_test_mse: float,
     teacher_min_test_r2: float,
+    teacher_cache_dir: Path = Path("outputs/teacher_cache"),
+    teacher_cache_mode: str = "readwrite",
+    teacher_cache_version: str = "v1",
     profile_name: str = "custom",
     profile_defaults: dict[str, float | int] | None = None,
     profile_overrides: dict[str, bool] | None = None,
@@ -594,14 +802,18 @@ def run_benchmark(
                 if spec.teacher_min_test_r2 is not None
                 else float(teacher_min_test_r2)
             )
-            model, dataset = _fit_teacher_model(
-                spec,
+            model, dataset, cache_info = _resolve_teacher_model_with_cache(
+                spec=spec,
                 seed=seed,
                 train_num=train_num,
                 test_num=test_num,
                 train_steps=train_steps,
                 lr=lr,
                 lamb=lamb,
+                profile_name=profile_name,
+                cache_dir=teacher_cache_dir,
+                cache_mode=teacher_cache_mode,
+                cache_version=teacher_cache_version,
             )
             with torch.no_grad():
                 teacher_test_pred = model(dataset["test_input"])
@@ -649,6 +861,11 @@ def run_benchmark(
                 "teacher_min_test_r2_threshold": effective_teacher_min_test_r2,
                 "teacher_quality_gate_pass": teacher_quality_gate_pass,
                 "teacher_quality_gate_reason": teacher_quality_gate_reason,
+                "teacher_cache_hit": bool(cache_info["teacher_cache_hit"]),
+                "teacher_cache_key": str(cache_info["teacher_cache_key"]),
+                "teacher_cache_path": str(cache_info["teacher_cache_path"]),
+                "teacher_cache_mode": str(cache_info["teacher_cache_mode"]),
+                "teacher_cache_status": str(cache_info["teacher_cache_status"]),
                 **metrics,
             }
             rows.append(row)
@@ -656,6 +873,7 @@ def run_benchmark(
                 if teacher_quality_gate_pass:
                     print(
                         f"[icbr-benchmark] task={task_name} seed={seed} "
+                        f"cache_hit={bool(cache_info['teacher_cache_hit'])} "
                         f"teacher_mse={teacher_test_mse:.6e} teacher_r2={teacher_test_r2:.4f} "
                         f"icbr_symbolic={metrics['symbolic_wall_time_s']:.4f}s "
                         f"baseline_symbolic={metrics['baseline_symbolic_wall_time_s']:.4f}s "
@@ -666,6 +884,7 @@ def run_benchmark(
                 else:
                     print(
                         f"[icbr-benchmark] task={task_name} seed={seed} "
+                        f"cache_hit={bool(cache_info['teacher_cache_hit'])} "
                         f"teacher_mse={teacher_test_mse:.6e} teacher_r2={teacher_test_r2:.4f} "
                         f"skipped_symbolic_by_gate reason={teacher_quality_gate_reason}"
                     )
@@ -684,6 +903,11 @@ def run_benchmark(
         "teacher_min_test_r2_threshold",
         "teacher_quality_gate_pass",
         "teacher_quality_gate_reason",
+        "teacher_cache_hit",
+        "teacher_cache_key",
+        "teacher_cache_path",
+        "teacher_cache_mode",
+        "teacher_cache_status",
         "candidate_generation_wall_time_s",
         "replay_rerank_wall_time_s",
         "symbolic_wall_time_s",
@@ -730,6 +954,11 @@ def run_benchmark(
                     "teacher_min_test_r2_threshold": row["teacher_min_test_r2_threshold"],
                     "teacher_quality_gate_pass": row["teacher_quality_gate_pass"],
                     "teacher_quality_gate_reason": row["teacher_quality_gate_reason"],
+                    "teacher_cache_hit": row["teacher_cache_hit"],
+                    "teacher_cache_key": row["teacher_cache_key"],
+                    "teacher_cache_path": row["teacher_cache_path"],
+                    "teacher_cache_mode": row["teacher_cache_mode"],
+                    "teacher_cache_status": row["teacher_cache_status"],
                     "candidate_generation_wall_time_s": row["candidate_generation_wall_time_s"],
                     "replay_rerank_wall_time_s": row["replay_rerank_wall_time_s"],
                     "symbolic_wall_time_s": row["symbolic_wall_time_s"],
@@ -828,6 +1057,12 @@ def run_benchmark(
                 },
                 "policy": "skip_symbolic_comparison_when_teacher_quality_fails",
             },
+            "teacher_cache": {
+                "dir": str(teacher_cache_dir),
+                "mode": teacher_cache_mode,
+                "version": teacher_cache_version,
+                "modes_supported": sorted(_TEACHER_CACHE_MODES),
+            },
             "output_dir": str(output_dir),
             "plots_enabled": make_plots,
             "task_topk_overrides": {
@@ -868,6 +1103,7 @@ def run_benchmark(
                 "final_mse_loss_shift": "icbr_mse - baseline_mse; negative means ICBR has lower MSE",
                 "teacher_test_mse": "Teacher numeric model MSE against real test labels before symbolic fitting.",
                 "teacher_test_r2": "Teacher numeric model R2 against real test labels before symbolic fitting.",
+                "teacher_cache_hit": "Whether teacher model was loaded from persistent cache.",
                 "symbolic_target_mse_shift": "icbr_target_mse - baseline_target_mse; negative means ICBR is closer to real targets.",
                 "symbolic_target_r2_shift": "icbr_target_r2 - baseline_target_r2; positive means ICBR has higher target R2.",
                 "stats_schema": "Each metric includes count | mean | median | std | min | max",
@@ -880,10 +1116,20 @@ def run_benchmark(
                 "pass_rule": "teacher_test_mse <= threshold_mse AND teacher_test_r2 >= threshold_r2",
                 "failure_policy": "Skip baseline/ICBR symbolic comparison for that row and keep explicit gate reason.",
             },
+            "teacher_cache": {
+                "cache_key_rule": "hash(task, seed, width, train_num, test_num, train_steps, lr, lamb, profile, cache_version)",
+                "modes": {
+                    "readwrite": "Read cache when available; train+write on miss.",
+                    "readonly": "Read cache only; train without writing on miss.",
+                    "refresh": "Ignore old cache and retrain, then overwrite cache.",
+                    "off": "Disable cache and always train.",
+                },
+            },
             "extensibility": [
                 "Add new tasks in _task_specs() with target_fn, width, and symbolic lib.",
                 "Rows-level details are preserved for error bars and downstream statistical tests.",
                 "Task stats CSV and significance CSV can be consumed by external plotting/report tools.",
+                "Teacher cache key version can be bumped with --teacher-cache-version for compatibility control.",
             ],
         },
     }
@@ -900,12 +1146,13 @@ def run_benchmark(
         f"- Seeds: {', '.join(str(seed) for seed in seeds)}",
         f"- Train/Test samples per task: {train_num}/{test_num}",
         f"- Train steps: {train_steps}, lr: {lr}, lamb: {lamb}",
+        f"- Teacher cache: mode={teacher_cache_mode}, dir={teacher_cache_dir}, version={teacher_cache_version}",
         f"- ICBR shortlist topk: {topk}, grid_number: {grid_number}, iteration: {iteration}",
         "",
         "## Task-Level Aggregate Stats",
         "",
-        "| task | n | teacher_mse_mean | teacher_r2_mean | teacher_gate_pass_mean | baseline_symbolic_mean | icbr_symbolic_mean | delta_mean | delta_median | speedup_mean | speedup_median | mse_shift_mean | target_mse_shift_mean | formula_pass_mean |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| task | n | teacher_cache_hit_mean | teacher_mse_mean | teacher_r2_mean | teacher_gate_pass_mean | baseline_symbolic_mean | icbr_symbolic_mean | delta_mean | delta_median | speedup_mean | speedup_median | mse_shift_mean | target_mse_shift_mean | formula_pass_mean |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for task_name in tasks:
         task_item = summary["aggregates"]["by_task"][task_name]
@@ -914,6 +1161,7 @@ def run_benchmark(
             "| "
             + f"{task_name} | "
             + f"{task_item['row_count']} | "
+            + f"{metrics['teacher_cache_hit']['mean']:.4f} | "
             + f"{metrics['teacher_test_mse']['mean']:.6e} | "
             + f"{metrics['teacher_test_r2']['mean']:.6f} | "
             + f"{metrics['teacher_quality_gate_pass']['mean']:.4f} | "
@@ -962,14 +1210,16 @@ def run_benchmark(
         [
             "## Per-Run Performance Details",
             "",
-            "| task | seed | teacher_mse | teacher_r2 | teacher_gate | candidate_s | replay_s | baseline_symbolic_s | icbr_symbolic_s | speedup_x | baseline_mse | icbr_mse | mse_shift | baseline_target_mse | icbr_target_mse | target_mse_shift | formula_ok |",
-            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "| task | seed | cache_hit | cache_status | teacher_mse | teacher_r2 | teacher_gate | candidate_s | replay_s | baseline_symbolic_s | icbr_symbolic_s | speedup_x | baseline_mse | icbr_mse | mse_shift | baseline_target_mse | icbr_target_mse | target_mse_shift | formula_ok |",
+            "|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for row in rows:
         md_lines.append(
             "| "
             + f"{row['task']} | {row['seed']} | "
+            + f"{bool(row['teacher_cache_hit'])} | "
+            + f"{row['teacher_cache_status']} | "
             + f"{float(row['teacher_test_mse']):.6e} | "
             + f"{float(row['teacher_test_r2']):.6f} | "
             + f"{bool(row['teacher_quality_gate_pass'])} | "
@@ -993,6 +1243,10 @@ def run_benchmark(
     for row in rows:
         md_lines.append(f"### task={row['task']} seed={row['seed']}")
         md_lines.append("")
+        md_lines.append(
+            f"- Teacher cache: hit={bool(row['teacher_cache_hit'])}, "
+            f"mode={row['teacher_cache_mode']}, status={row['teacher_cache_status']}"
+        )
         md_lines.append(
             f"- Teacher quality gate: pass={bool(row['teacher_quality_gate_pass'])}; "
             f"reason=`{row['teacher_quality_gate_reason']}`"
@@ -1120,6 +1374,22 @@ def main(argv: list[str] | None = None) -> None:
         default=0.75,
         help="Default teacher quality gate: min required teacher test R2 before symbolic fitting.",
     )
+    parser.add_argument(
+        "--teacher-cache-dir",
+        default="outputs/teacher_cache",
+        help="Persistent teacher cache directory used across benchmark runs.",
+    )
+    parser.add_argument(
+        "--teacher-cache-mode",
+        default="readwrite",
+        choices=sorted(_TEACHER_CACHE_MODES),
+        help="Teacher cache mode: readwrite, readonly, refresh, off.",
+    )
+    parser.add_argument(
+        "--teacher-cache-version",
+        default="v1",
+        help="Teacher cache key version suffix for compatibility control.",
+    )
     parser.add_argument("--no-plots", action="store_true", help="Disable plot generation")
     parser.add_argument("--quiet", action="store_true", help="Disable per-run progress prints")
     args = parser.parse_args(argv)
@@ -1127,6 +1397,7 @@ def main(argv: list[str] | None = None) -> None:
     tasks = _parse_str_list(args.tasks)
     seeds = _parse_int_list(args.seeds)
     output_dir = Path(args.output_dir)
+    teacher_cache_dir = Path(args.teacher_cache_dir)
     resolved_training, profile_overrides = _resolve_training_config(
         profile=args.profile,
         train_num=args.train_num,
@@ -1150,6 +1421,9 @@ def main(argv: list[str] | None = None) -> None:
         iteration=args.iteration,
         teacher_max_test_mse=args.teacher_max_test_mse,
         teacher_min_test_r2=args.teacher_min_test_r2,
+        teacher_cache_dir=teacher_cache_dir,
+        teacher_cache_mode=args.teacher_cache_mode,
+        teacher_cache_version=args.teacher_cache_version,
         profile_name=args.profile,
         profile_defaults=dict(_BENCHMARK_PROFILES[args.profile]),
         profile_overrides=profile_overrides,

@@ -4,72 +4,59 @@
 2026-03-29
 
 ## Task
-推进 Stage 10：补充高质量数值教师 profile，并完成 10 seeds 全任务门禁复验。
+完成 Stage 11：增加跨脚本多次运行可复用的 teacher 持久缓存，并完成 quality 参数口径验证。
 
 ## Current Stage
-Stage 10: Calibrate Teacher Convergence and Run 10-Seed Full-Task Verification
+Stage 11: Add Cross-Run Persistent Teacher Cache
 
 ## Status
 Complete
 
 ## Latest Completed Work
-- `scripts/icbr_benchmark.py`：
-  - 新增 benchmark profile 机制：`--profile quick|quality`。
-  - 新增训练配置解析 helper（支持 profile 默认值 + CLI 覆盖）。
-  - 训练参数新增 `--lamb`，并将其传入 `model.fit(..., lamb=...)`。
-  - summary 新增 `config.profile`（含 `name/defaults/overrides`）并记录 `lamb`。
-  - markdown 报告的 run config 增加 `profile` 与 `lamb` 展示。
-- `tests/test_icbr_benchmark_script_smoke.py`：
-  - 覆盖 `profile` 字段与 override 结构。
-  - 新增 `quality` profile 默认参数解析测试（含 `lamb`）。
-  - 同步 `run_benchmark(...)` 调用，显式传入 `lamb`。
-- 完成实跑验证（你指定参数）：
-  - `train_num=2000`
-  - `test_num=1000`
-  - `lamb=1e-3`
-  - 10 seeds + 全任务 + 全量函数库
-  - regression gate 通过
-- 已基于该次实跑结果生成可视化 PNG，并回写 `summary.json` 的 `artifacts.visualizations`。
+- 在 `scripts/icbr_benchmark.py` 实现 teacher 持久缓存主流程：
+  - 缓存 key（覆盖 task/seed/width/train_num/test_num/train_steps/lr/lamb/profile/cache_version）
+  - 缓存模式（`readwrite`/`readonly`/`refresh`/`off`）
+  - 原子写入与锁文件（`teacher_state.pt`、`teacher_meta.json`、`teacher_cache.lock`）
+  - 行级与汇总可观测字段（`teacher_cache_hit`、`teacher_cache_key`、`teacher_cache_path`、`teacher_cache_mode`、`teacher_cache_status`）
+- benchmark summary 新增 `config.teacher_cache` 配置块，并在 Markdown 报告中展示 cache 状态。
+- 在 `tests/test_icbr_benchmark_script_smoke.py` 增加“首轮 miss + 二轮 hit”测试，验证跨运行缓存命中。
+- 实跑 quality 配置（`train_num=1000, test_num=500, train_steps=80, lr=0.03, lamb=1e-3`）两次同参 benchmark：
+  - run1：`teacher_cache_hit` 全部为 `False`（写入缓存）
+  - run2：`teacher_cache_hit` 全部为 `True`（命中缓存）
+  - `teacher_cache_key` 在 run1/run2 对应 task+seed 保持一致
 
 ## Files Changed
-- IMPLEMENTATION_PLAN.md
 - scripts/icbr_benchmark.py
 - tests/test_icbr_benchmark_script_smoke.py
+- IMPLEMENTATION_PLAN.md
 - TASK_STATUS.md
 
 ## Validation Run
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_benchmark_script_smoke.py`
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_benchmark_smoke.py tests\test_icbr_benchmark_script_smoke.py tests\test_icbr_benchmark_regression_smoke.py`
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.icbr_benchmark --profile quality --train-num 2000 --test-num 1000 --lamb 1e-3 --output-dir outputs\icbr_benchmark_stage10_quality_10seeds_2000_1000_l1e3 --quiet --no-plots`
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.icbr_benchmark_regression --summary-json outputs\icbr_benchmark_stage10_quality_10seeds_2000_1000_l1e3\icbr_benchmark_summary.json --output-dir outputs\icbr_benchmark_stage10_quality_10seeds_2000_1000_l1e3`
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -c "from scripts.icbr_benchmark import _generate_visualizations; ..."`（对既有 rows 生成 PNG 并回写 summary）
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests/test_icbr_benchmark_script_smoke.py`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.icbr_benchmark --profile quality --tasks minimal,combo,poly_cubic,trig_interaction --seeds 0,1 --output-dir outputs/icbr_benchmark_stage11_cache_run1_qualitydefaults --teacher-cache-dir outputs/teacher_cache_stage11_quality --teacher-cache-mode readwrite --teacher-cache-version stage11_v1 --quiet --no-plots`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.icbr_benchmark --profile quality --tasks minimal,combo,poly_cubic,trig_interaction --seeds 0,1 --output-dir outputs/icbr_benchmark_stage11_cache_run2_qualitydefaults --teacher-cache-dir outputs/teacher_cache_stage11_quality --teacher-cache-mode readwrite --teacher-cache-version stage11_v1 --quiet --no-plots`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -c "..."`（对两次 summary 做命中率与 key 一致性核对）
 
 ## Validation Result
-- 通过：`pytest` 脚本 smoke（4 项）全部通过。
-- 通过：benchmark 相关 smoke（7 项）全部通过。
-- 通过：10 seeds 全任务实跑完成并落盘。
-- 通过：regression gate `overall_status=pass`（退出码 0）。
-- 关键结果（`outputs/icbr_benchmark_stage10_quality_10seeds_2000_1000_l1e3`）：
-  - overall `teacher_quality_gate_pass.mean = 1.0`
-  - overall `teacher_test_mse.mean = 1.4907e-03`
-  - overall `teacher_test_r2.mean = 0.9970`
-  - overall `symbolic_speedup_vs_baseline.median = 13.5790`
-  - overall `final_mse_loss_shift.mean = -7.7933e-05`
-  - overall `symbolic_target_mse_shift.mean = -7.6226e-05`
-- 已生成图：
-  - `icbr_benchmark_symbolic_time_errorbar.png`
-  - `icbr_benchmark_speedup_boxplot.png`
-  - `icbr_benchmark_mse_shift_boxplot.png`
+- `pytest` 通过：`5 passed`
+- run1 与 run2 均成功落盘 `icbr_benchmark_summary.json`
+- run1: `teacher_cache_hit_mean = 0.0`，状态计数 `{'miss_write': 8}`
+- run2: `teacher_cache_hit_mean = 1.0`，状态计数 `{'hit': 8}`
+- `keys_consistent = True`（同 task+seed 的缓存 key 一致）
 
 ## Decisions
 - 继续维持“只改 benchmark/regression 层，不改 ICBR 主路径”。
-- `quality` profile 固化为更强训练口径（80 steps、更大样本、`lamb=1e-3`）。
-- 你指定的 `train=2000/test=1000/lamb=1e-3` 优先于 profile 默认值，并在 summary 中显式记录为 override。
-- 为避免重复长时训练，图表基于已落盘 rows 二次生成并同步写回 summary。
+- `quality` 默认训练参数采用：
+  - `train_num=1000`
+  - `test_num=500`
+  - `train_steps=80`
+  - `lr=0.03`
+  - `lamb=1e-3`
+- Stage 11 保持最小可用缓存方案，先交付跨运行复用与可观测性，再考虑更重并发/清理策略。
 
 ## Remaining Work
-- 当前 Stage 10 已完成。
-- 下一步建议：新增 Stage 11，围绕 `quality + 大样本` 结果做统计显著性门限细化（例如按任务单独阈值与置信区间门禁）。
+- Stage 11 范围内无剩余工作。
+- 下一步建议新增后续 stage：基于持久 cache 做更大 seeds/任务规模的回归门禁复验与统计可视化加固。
 
 ## Blockers
 - 无

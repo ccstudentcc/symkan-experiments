@@ -718,6 +718,57 @@ Status:
 
 Complete
 
+### Stage 11: Add Cross-Run Persistent Teacher Cache
+
+Goal:
+
+为 benchmark 增加跨脚本多次运行可复用的 teacher 持久缓存，避免同一 `task+seed+训练配置` 重复训练，降低总耗时并保证 baseline/ICBR 对照变量稳定。
+
+Target Files:
+
+- `scripts/icbr_benchmark.py`
+- `tests/test_icbr_benchmark_script_smoke.py`
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- 支持可配置的 teacher cache 目录与模式:
+  - `readwrite`（默认，命中读取，未命中训练后写入）
+  - `readonly`（仅读取，未命中时可回退为仅本次训练不写入）
+  - `refresh`（忽略旧缓存并重训后覆盖写入）
+  - `off`（禁用缓存）
+- 缓存键必须覆盖关键训练语义：
+  - task、seed、网络结构、训练样本规模、训练步数、lr、lamb、profile、版本标识
+- summary/rows 必须新增缓存可观测字段（至少）：
+  - `teacher_cache_hit`
+  - `teacher_cache_key`
+  - `teacher_cache_path`
+  - `teacher_cache_mode`
+- 命中缓存时不得重复训练 teacher。
+
+Implementation Constraints:
+
+- 不改动 ICBR 主算法，只扩展 benchmark teacher 训练入口层。
+- 不删除 Stage 9/10 已有导出字段。
+- 使用文件系统缓存但保持最小复杂度；先实现可用版，再考虑更重的并发优化。
+
+Success Criteria:
+
+- 同一参数运行两次 benchmark，第二次出现稳定 cache hit。
+- 缓存命中时 rows 与 summary 中可追踪 cache 来源。
+- 脚本 smoke 测试覆盖至少一条“首轮 miss + 二轮 hit”路径。
+
+Validation:
+
+- `pytest tests/test_icbr_benchmark_script_smoke.py`
+- `python -m scripts.icbr_benchmark --profile quality --tasks minimal,combo,poly_cubic,trig_interaction --seeds 0,1 --output-dir outputs/icbr_benchmark_stage11_cache_run1_qualitydefaults --teacher-cache-dir outputs/teacher_cache_stage11_quality --teacher-cache-mode readwrite --teacher-cache-version stage11_v1 --quiet --no-plots`
+- `python -m scripts.icbr_benchmark --profile quality --tasks minimal,combo,poly_cubic,trig_interaction --seeds 0,1 --output-dir outputs/icbr_benchmark_stage11_cache_run2_qualitydefaults --teacher-cache-dir outputs/teacher_cache_stage11_quality --teacher-cache-mode readwrite --teacher-cache-version stage11_v1 --quiet --no-plots`
+- 人工核对第二次运行 summary/rows 中 `teacher_cache_hit` 比例与 `teacher_cache_key` 一致性
+
+Status:
+
+Complete
+
 ## 5. Acceptance Criteria
 
 Phase I 仅在以下条件全部满足时视为完成:
@@ -752,3 +803,4 @@ Phase I 仅在以下条件全部满足时视为完成:
 8. Stage 8: Diagnose and Fix `trig_interaction` Regression
 9. Stage 9: Add Teacher Quality Gate and Target-Error Metrics
 10. Stage 10: Calibrate Teacher Convergence and Run 10-Seed Full-Task Verification
+11. Stage 11: Add Cross-Run Persistent Teacher Cache
