@@ -5,7 +5,9 @@ import json
 import uuid
 from pathlib import Path
 
-from scripts.icbr_benchmark import _resolve_training_config, main, run_benchmark
+import numpy as np
+
+from scripts.icbr_benchmark import _expand_feynman_task_tokens, _resolve_training_config, main, run_benchmark
 
 
 def test_icbr_benchmark_script_generates_outputs() -> None:
@@ -278,3 +280,98 @@ def test_teacher_cache_hit_after_first_run() -> None:
     row2 = run2["rows"][0]
     assert row2["teacher_cache_hit"] is True
     assert row2["teacher_cache_key"] == row1["teacher_cache_key"]
+
+
+def test_feynman_dataset_file_loading_smoke() -> None:
+    base_dir = Path("tmp") / f"icbr_benchmark_feynman_{uuid.uuid4().hex}"
+    dataset_root = base_dir / "datasets"
+    variant_dir = dataset_root / "Feynman_with_units"
+    variant_dir.mkdir(parents=True, exist_ok=True)
+
+    rng = np.random.default_rng(0)
+    m0 = rng.uniform(0.1, 1.0, size=(96, 1))
+    v = rng.uniform(0.0, 0.9, size=(96, 1))
+    c = rng.uniform(1.0, 2.0, size=(96, 1))
+    y = m0 / np.sqrt(1.0 - (v**2) / (c**2))
+    raw = np.concatenate([m0, v, c, y], axis=1).astype(np.float32)
+    np.savetxt(variant_dir / "I.10.7", raw)
+
+    equations_csv = dataset_root / "FeynmanEquations.csv"
+    equations_csv.write_text("Filename,Formula\nI.10.7,m0/sqrt(1-v^2/c^2)\n", encoding="utf-8")
+
+    out_dir = base_dir / "out"
+    main(
+        [
+            "--tasks",
+            "feynman_I_10_7",
+            "--seeds",
+            "0",
+            "--output-dir",
+            str(out_dir),
+            "--train-num",
+            "48",
+            "--test-num",
+            "24",
+            "--train-steps",
+            "2",
+            "--lr",
+            "0.03",
+            "--lamb",
+            "1e-3",
+            "--topk",
+            "2",
+            "--grid-number",
+            "11",
+            "--iteration",
+            "1",
+            "--teacher-max-test-mse",
+            "10.0",
+            "--teacher-min-test-r2",
+            "-10.0",
+            "--teacher-cache-dir",
+            str(base_dir / "cache"),
+            "--teacher-cache-mode",
+            "readwrite",
+            "--feynman-root",
+            str(dataset_root),
+            "--feynman-variant",
+            "Feynman_with_units",
+            "--feynman-split-strategy",
+            "random",
+            "--feynman-width-mid",
+            "5,2",
+            "--quiet",
+            "--no-plots",
+        ]
+    )
+
+    summary = json.loads((out_dir / "icbr_benchmark_summary.json").read_text(encoding="utf-8"))
+    assert summary["config"]["tasks"] == ["feynman_I_10_7"]
+    assert summary["config"]["feynman"]["enabled"] is True
+    assert summary["config"]["feynman"]["variant"] == "Feynman_with_units"
+    row = summary["rows"][0]
+    assert row["task"] == "feynman_I_10_7"
+    assert row["task_kind"] == "feynman_file"
+    assert row["task_source"] == "feynman_file"
+    assert row["target_formula"] == "m0/sqrt(1-v^2/c^2)"
+
+
+def test_feynman_task_tokens_expand() -> None:
+    assert _expand_feynman_task_tokens(
+        ["feynman_paper10"],
+        feynman_root=Path("tmp") / f"icbr_benchmark_fake_{uuid.uuid4().hex}",
+        feynman_variant="Feynman_with_units",
+        feynman_max_datasets=10,
+        feynman_dataset_select_seed=2,
+    ) == [
+        "feynman_I_9_18",
+        "feynman_I_10_7",
+        "feynman_I_12_1",
+        "feynman_I_12_4",
+        "feynman_I_13_4",
+        "feynman_I_34_1",
+        "feynman_II_6_15a",
+        "feynman_II_6_15b",
+        "feynman_II_21_32",
+        "feynman_II_34_29a",
+    ]

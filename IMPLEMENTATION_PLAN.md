@@ -769,6 +769,65 @@ Status:
 
 Complete
 
+### Stage 12: Add Feynman Dataset Support to `icbr_benchmark.py`
+
+Goal:
+
+在保持现有 benchmark 导出结构、可视化导出与 teacher cache 机制不退化的前提下，为 `scripts/icbr_benchmark.py` 增加对 Feynman 本地数据集目录的直接支持，覆盖 `In-Context-Symbolic-Regression-KAN-main/README.md` 描述的主要数据读取与 CLI 使用方式。
+
+Target Files:
+
+- `scripts/icbr_benchmark.py`
+- `tests/test_icbr_benchmark_script_smoke.py`
+- `IMPLEMENTATION_PLAN.md`
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- benchmark 支持 Feynman 本地目录参数（与 in-context README 口径对齐）：
+  - `--feynman-root`（默认 `datasets`）
+  - `--feynman-variant`（`Feynman_without_units` / `Feynman_with_units` / `bonus_without_units` / `bonus_with_units`）
+  - `--feynman-equations-csv`（可选；默认尝试 `<feynman_root>/FeynmanEquations.csv`）
+  - `--feynman-max-datasets`
+  - `--feynman-dataset-select-seed`
+  - `--feynman-split-strategy`（`random` / `linspace`）
+- 支持 `README` 的两类数据集选择模式：
+  - 显式 10 个 paper 数据集（`feynman_paper10`）
+  - 随机子集（可复现，受 `dataset_select_seed` 控制）
+- 本地 Feynman 文件加载后应可用于 teacher 训练与 baseline/ICBR 符号化对比。
+- 现有 benchmark 产物结构保持兼容：
+  - `icbr_benchmark_rows.csv`
+  - `icbr_benchmark_summary.json`
+  - `icbr_benchmark_summary.md`
+  - 可视化 PNG（启用绘图时）
+- teacher cache 对 Feynman 任务继续有效，且 cache key 要包含必要数据来源语义（至少任务名、variant、split 策略、训练参数与版本）。
+
+Implementation Constraints:
+
+- 不改动 ICBR 主算法，只扩展 benchmark 数据接入层与 CLI。
+- 不破坏现有非 Feynman 任务（`minimal/combo/poly_cubic/trig_interaction`）行为与测试。
+- 保持 CPU-first 验收口径。
+- 若本地 `datasets/` 尚未准备好，必须在文档中如实记录，并使用最小可执行 smoke 验证证明代码路径可用。
+
+Success Criteria:
+
+- `icbr_benchmark.py` 可直接消费本地 Feynman 文件目录完成训练与符号化流程。
+- 现有导出字段与 teacher cache 字段保持可用；新增 Feynman 来源信息可读可追溯。
+- 脚本测试覆盖至少一个 Feynman 数据加载 smoke 路径并通过。
+
+Validation:
+
+- `python -m py_compile scripts/icbr_benchmark.py tests/test_icbr_benchmark_script_smoke.py`
+- `pytest tests/test_icbr_benchmark_script_smoke.py`
+- `pytest tests/test_icbr_benchmark_smoke.py tests/test_icbr_benchmark_script_smoke.py tests/test_icbr_benchmark_regression_smoke.py`
+- 使用本地数据（若已就绪）运行：
+  - `python -m scripts.icbr_benchmark --tasks feynman_paper10 --profile quality --feynman-root datasets --feynman-variant Feynman_with_units --feynman-max-datasets 10 --feynman-dataset-select-seed 2 --output-dir outputs/icbr_benchmark_stage12_feynman_paper10 --quiet --no-plots`
+- 若数据尚未就绪，运行最小 mock/fallback smoke，验证 Feynman CLI 解析、数据读取与导出路径（已通过 `tests/test_icbr_benchmark_script_smoke.py::test_feynman_dataset_file_loading_smoke`）。
+
+Status:
+
+Complete
+
 ## 5. Acceptance Criteria
 
 Phase I 仅在以下条件全部满足时视为完成:
@@ -804,3 +863,4 @@ Phase I 仅在以下条件全部满足时视为完成:
 9. Stage 9: Add Teacher Quality Gate and Target-Error Metrics
 10. Stage 10: Calibrate Teacher Convergence and Run 10-Seed Full-Task Verification
 11. Stage 11: Add Cross-Run Persistent Teacher Cache
+12. Stage 12: Add Feynman Dataset Support to `icbr_benchmark.py`

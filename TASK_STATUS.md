@@ -4,26 +4,32 @@
 2026-03-29
 
 ## Task
-完成 Stage 11：增加跨脚本多次运行可复用的 teacher 持久缓存，并完成 quality 参数口径验证。
+完成 Stage 12：增强 `icbr_benchmark.py` 支持本地 Feynman 数据集目录（含 variant/选择策略/CLI），并保持现有导出与 teacher cache 功能。
 
 ## Current Stage
-Stage 11: Add Cross-Run Persistent Teacher Cache
+Stage 12: Add Feynman Dataset Support to `icbr_benchmark.py`
 
 ## Status
 Complete
 
 ## Latest Completed Work
-- 在 `scripts/icbr_benchmark.py` 实现 teacher 持久缓存主流程：
-  - 缓存 key（覆盖 task/seed/width/train_num/test_num/train_steps/lr/lamb/profile/cache_version）
-  - 缓存模式（`readwrite`/`readonly`/`refresh`/`off`）
-  - 原子写入与锁文件（`teacher_state.pt`、`teacher_meta.json`、`teacher_cache.lock`）
-  - 行级与汇总可观测字段（`teacher_cache_hit`、`teacher_cache_key`、`teacher_cache_path`、`teacher_cache_mode`、`teacher_cache_status`）
-- benchmark summary 新增 `config.teacher_cache` 配置块，并在 Markdown 报告中展示 cache 状态。
-- 在 `tests/test_icbr_benchmark_script_smoke.py` 增加“首轮 miss + 二轮 hit”测试，验证跨运行缓存命中。
-- 实跑 quality 配置（`train_num=1000, test_num=500, train_steps=80, lr=0.03, lamb=1e-3`）两次同参 benchmark：
-  - run1：`teacher_cache_hit` 全部为 `False`（写入缓存）
-  - run2：`teacher_cache_hit` 全部为 `True`（命中缓存）
-  - `teacher_cache_key` 在 run1/run2 对应 task+seed 保持一致
+- 在 `scripts/icbr_benchmark.py` 增加 Feynman 数据接入层与 CLI：
+  - 新增参数：`--feynman-root`、`--feynman-variant`、`--feynman-equations-csv`、`--feynman-max-datasets`、`--feynman-dataset-select-seed`、`--feynman-split-strategy`、`--feynman-width-mid`、`--feynman-datasets`
+  - 支持 task token：`feynman_paper10`（README 的固定 10 集）与 `feynman_random`（可复现随机子集）
+  - 支持显式任务名（如 `feynman_I_10_7`）从本地文件 `datasets/<variant>/<filename>` 读取
+- 新增 Feynman 数据处理能力：
+  - 本地文件加载与 train/test 切分（`random` / `linspace`）
+  - 自动读取 `FeynmanEquations.csv`（若存在）并写入 `target_formula`
+  - 依据 Feynman 文件列数自动推断 `n_var`，并按 `feynman_width_mid` 构建网络宽度
+- 保持并扩展现有导出结构：
+  - `rows` 新增 `task_kind`、`task_source`、`target_formula`
+  - `summary.config` 新增 `feynman` 配置块
+  - Markdown 报告增加 Feynman 运行配置与每条任务来源信息
+- teacher cache 保持可用且缓存键增强：
+  - 额外纳入 `dataset_kind/dataset_path/dataset_variant/dataset_split_strategy`，避免 Feynman 多来源冲突缓存
+- 新增测试覆盖：
+  - `test_feynman_dataset_file_loading_smoke`（临时 mock 本地 Feynman 文件验证完整路径）
+  - `test_feynman_task_tokens_expand`（验证 `feynman_paper10` token 展开）
 
 ## Files Changed
 - scripts/icbr_benchmark.py
@@ -32,31 +38,30 @@ Complete
 - TASK_STATUS.md
 
 ## Validation Run
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests/test_icbr_benchmark_script_smoke.py`
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.icbr_benchmark --profile quality --tasks minimal,combo,poly_cubic,trig_interaction --seeds 0,1 --output-dir outputs/icbr_benchmark_stage11_cache_run1_qualitydefaults --teacher-cache-dir outputs/teacher_cache_stage11_quality --teacher-cache-mode readwrite --teacher-cache-version stage11_v1 --quiet --no-plots`
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.icbr_benchmark --profile quality --tasks minimal,combo,poly_cubic,trig_interaction --seeds 0,1 --output-dir outputs/icbr_benchmark_stage11_cache_run2_qualitydefaults --teacher-cache-dir outputs/teacher_cache_stage11_quality --teacher-cache-mode readwrite --teacher-cache-version stage11_v1 --quiet --no-plots`
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -c "..."`（对两次 summary 做命中率与 key 一致性核对）
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m py_compile scripts\icbr_benchmark.py tests\test_icbr_benchmark_script_smoke.py`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_benchmark_script_smoke.py`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_benchmark_smoke.py tests\test_icbr_benchmark_script_smoke.py tests\test_icbr_benchmark_regression_smoke.py`
 
 ## Validation Result
-- `pytest` 通过：`5 passed`
-- run1 与 run2 均成功落盘 `icbr_benchmark_summary.json`
-- run1: `teacher_cache_hit_mean = 0.0`，状态计数 `{'miss_write': 8}`
-- run2: `teacher_cache_hit_mean = 1.0`，状态计数 `{'hit': 8}`
-- `keys_consistent = True`（同 task+seed 的缓存 key 一致）
+- `py_compile` 通过
+- `pytest` 通过：`7 passed`
+- benchmark 相关回归测试通过：`10 passed`（`test_icbr_benchmark_smoke + test_icbr_benchmark_script_smoke + test_icbr_benchmark_regression_smoke`）
+- 新增 Feynman smoke 测试通过，证明在本地文件数据模式下：
+  - CLI 参数可解析
+  - 数据可读取并切分
+  - benchmark 可完成导出（CSV/JSON/MD）
+  - teacher cache 与既有导出结构未破坏
 
 ## Decisions
-- 继续维持“只改 benchmark/regression 层，不改 ICBR 主路径”。
-- `quality` 默认训练参数采用：
-  - `train_num=1000`
-  - `test_num=500`
-  - `train_steps=80`
-  - `lr=0.03`
-  - `lamb=1e-3`
-- Stage 11 保持最小可用缓存方案，先交付跨运行复用与可观测性，再考虑更重并发/清理策略。
+- 继续维持“只改 benchmark/数据接入层，不改 ICBR 主算法”。
+- 对 Feynman 任务采用“本地文件优先”的真实数据模式（与你的 `datasets/` 目录约定一致）。
+- 通过 token + 显式列表双通道支持 README 风格操作（固定 10 集 / 随机子集 / 指定集合）。
+- 在你尚未完成数据下载前，先用 mock 数据集完成可执行验证，避免虚报已跑真实 benchmark。
 
 ## Remaining Work
-- Stage 11 范围内无剩余工作。
-- 下一步建议新增后续 stage：基于持久 cache 做更大 seeds/任务规模的回归门禁复验与统计可视化加固。
+- 等你把数据下载到 `datasets/` 后，执行真实 10 集实验（建议命令）：
+  - `python -m scripts.icbr_benchmark --tasks feynman_paper10 --profile quality --feynman-root datasets --feynman-variant Feynman_with_units --feynman-max-datasets 10 --feynman-dataset-select-seed 2 --output-dir outputs/icbr_benchmark_stage12_feynman_paper10 --quiet --no-plots`
+- 完成真实数据实跑后，再进行多 seeds 聚合与回归门禁复验。
 
 ## Blockers
-- 无
+- 本地真实 Feynman 数据尚未下载完成（你已说明将放到仓库相对路径 `datasets/`）。

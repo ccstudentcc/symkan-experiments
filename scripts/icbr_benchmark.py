@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
+import numpy as np
 import torch
 
 from kan.MultKAN import MultKAN
@@ -75,6 +76,24 @@ _BENCHMARK_PROFILES: dict[str, dict[str, float | int]] = {
 }
 
 _TEACHER_CACHE_MODES = {"readwrite", "readonly", "refresh", "off"}
+_FEYNMAN_VARIANTS = (
+    "Feynman_without_units",
+    "Feynman_with_units",
+    "bonus_without_units",
+    "bonus_with_units",
+)
+_FEYNMAN_PAPER10_DATASETS = [
+    "feynman_I_9_18",
+    "feynman_I_10_7",
+    "feynman_I_12_1",
+    "feynman_I_12_4",
+    "feynman_I_13_4",
+    "feynman_I_34_1",
+    "feynman_II_6_15a",
+    "feynman_II_6_15b",
+    "feynman_II_21_32",
+    "feynman_II_34_29a",
+]
 
 
 @dataclass(frozen=True)
@@ -82,11 +101,17 @@ class _TaskSpec:
     name: str
     n_var: int
     width: list[int]
-    target_fn: Callable[[torch.Tensor], torch.Tensor]
+    target_fn: Callable[[torch.Tensor], torch.Tensor] | None
     lib: list[str] | None
     icbr_topk: int | None = None
     teacher_max_test_mse: float | None = None
     teacher_min_test_r2: float | None = None
+    ranges: list[list[float]] | list[float] | None = None
+    dataset_kind: str = "synthetic"
+    dataset_path: str | None = None
+    dataset_variant: str | None = None
+    dataset_split_strategy: str = "random"
+    target_formula: str | None = None
 
 
 def _task_specs() -> dict[str, _TaskSpec]:
@@ -97,6 +122,7 @@ def _task_specs() -> dict[str, _TaskSpec]:
             width=[1, 1],
             target_fn=lambda x: torch.sin(torch.pi * x[:, [0]]),
             lib=None,
+            ranges=[-1, 1],
         ),
         "combo": _TaskSpec(
             name="combo",
@@ -104,6 +130,7 @@ def _task_specs() -> dict[str, _TaskSpec]:
             width=[2, 2, 1],
             target_fn=lambda x: torch.sin(torch.pi * x[:, [0]]) + x[:, [1]] ** 2,
             lib=None,
+            ranges=[-1, 1],
         ),
         "poly_cubic": _TaskSpec(
             name="poly_cubic",
@@ -111,6 +138,7 @@ def _task_specs() -> dict[str, _TaskSpec]:
             width=[2, 3, 1],
             target_fn=lambda x: 0.8 * x[:, [0]] ** 3 - 0.4 * x[:, [0]] + 0.6 * x[:, [1]] ** 2,
             lib=None,
+            ranges=[-1, 1],
         ),
         "trig_interaction": _TaskSpec(
             name="trig_interaction",
@@ -121,8 +149,256 @@ def _task_specs() -> dict[str, _TaskSpec]:
             + x[:, [0]] * x[:, [2]],
             lib=None,
             icbr_topk=5,
+            ranges=[-1, 1],
         ),
     }
+
+
+def _parse_width_mid(text: str) -> list[int]:
+    values = [chunk.strip() for chunk in text.split(",") if chunk.strip()]
+    if not values:
+        raise ValueError("feynman_width_mid must contain at least one integer.")
+    parsed = [int(value) for value in values]
+    if any(value <= 0 for value in parsed):
+        raise ValueError("feynman_width_mid values must be positive.")
+    return parsed
+
+
+def _feynman_cli_to_filename(ds_name: str) -> str:
+    if ds_name.lower().startswith("feynman_"):
+        ds_name = ds_name[len("feynman_") :]
+    parts = ds_name.split("_")
+    return ".".join(parts)
+
+
+def _feynman_filename_to_cli(filename: str) -> str:
+    return "feynman_" + filename.replace(".", "_")
+
+
+def _list_local_feynman_dataset_names(
+    feynman_root: Path,
+    variant: str,
+) -> list[str]:
+    base_dir = feynman_root / variant
+    if not base_dir.is_dir():
+        return []
+    names: list[str] = []
+    for fp in sorted(base_dir.iterdir()):
+        if not fp.is_file() or fp.name.startswith("."):
+            continue
+        names.append(_feynman_filename_to_cli(fp.name))
+    return names
+
+
+def _load_feynman_equations_map(equations_csv_path: Path | None) -> dict[str, str]:
+    if equations_csv_path is None or not equations_csv_path.is_file():
+        return {}
+    with equations_csv_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None:
+            return {}
+        fieldnames = list(reader.fieldnames)
+        lower_to_name = {name.strip().lower(): name for name in fieldnames}
+        name_col = fieldnames[0]
+        for candidate in ("filename", "name", "equation", "id"):
+            if candidate in lower_to_name:
+                name_col = lower_to_name[candidate]
+                break
+        formula_col = fieldnames[-1]
+        for candidate in ("formula", "feynman", "tex", "equation", "rhs", "lhs", "target", "output"):
+            if candidate in lower_to_name:
+                formula_col = lower_to_name[candidate]
+                break
+        mapping: dict[str, str] = {}
+        for row in reader:
+            key = str(row.get(name_col, "")).strip()
+            value = str(row.get(formula_col, "")).strip()
+            if key and key.lower() != "nan":
+                mapping[key] = value
+        return mapping
+
+
+def _load_local_feynman_dataset_as_kan(
+    *,
+    dataset_path: Path,
+    seed: int,
+    train_num: int,
+    test_num: int,
+    split_strategy: str,
+) -> dict[str, torch.Tensor]:
+    if not dataset_path.is_file():
+        raise FileNotFoundError(f"Feynman dataset file not found: {dataset_path}")
+    data = np.loadtxt(dataset_path)
+    if data.ndim == 1:
+        data = data.reshape(-1, 1)
+    if data.shape[1] < 2:
+        raise ValueError(f"Dataset must contain at least one feature and one label column: {dataset_path}")
+
+    x_np = data[:, :-1].astype(np.float32)
+    y_np = data[:, -1:].astype(np.float32)
+    total = int(x_np.shape[0])
+    n_tr = int(min(train_num, total))
+    n_te = int(min(test_num, max(0, total - n_tr)))
+
+    if split_strategy == "linspace":
+        tr_idx = np.unique(np.round(np.linspace(0, total - 1, n_tr)).astype(int))
+        te_all = np.unique(np.round(np.linspace(0, total - 1, n_tr + n_te)).astype(int))
+        te_idx = te_all[~np.isin(te_all, tr_idx)][:n_te]
+    elif split_strategy == "random":
+        rng = np.random.RandomState(seed)
+        perm = rng.permutation(total)
+        tr_idx = perm[:n_tr]
+        te_idx = perm[n_tr : n_tr + n_te] if n_te > 0 else np.array([], dtype=int)
+    else:  # pragma: no cover - argparse constrains this
+        raise ValueError(f"Unknown feynman split strategy: {split_strategy}")
+
+    train_input = torch.from_numpy(x_np[tr_idx]).to(device="cpu", dtype=torch.float32)
+    train_label = torch.from_numpy(y_np[tr_idx]).to(device="cpu", dtype=torch.float32)
+    if n_te > 0:
+        test_input = torch.from_numpy(x_np[te_idx]).to(device="cpu", dtype=torch.float32)
+        test_label = torch.from_numpy(y_np[te_idx]).to(device="cpu", dtype=torch.float32)
+    else:
+        test_input = torch.empty((0, x_np.shape[1]), dtype=torch.float32, device="cpu")
+        test_label = torch.empty((0, 1), dtype=torch.float32, device="cpu")
+
+    return {
+        "train_input": train_input,
+        "train_label": train_label,
+        "test_input": test_input,
+        "test_label": test_label,
+    }
+
+
+def _expand_feynman_task_tokens(
+    tasks: list[str],
+    *,
+    feynman_root: Path,
+    feynman_variant: str,
+    feynman_max_datasets: int,
+    feynman_dataset_select_seed: int,
+) -> list[str]:
+    expanded: list[str] = []
+    for task in tasks:
+        if task == "feynman_paper10":
+            expanded.extend(_FEYNMAN_PAPER10_DATASETS)
+            continue
+        if task == "feynman_random":
+            available = _list_local_feynman_dataset_names(feynman_root, feynman_variant)
+            if not available:
+                raise RuntimeError(
+                    f"No Feynman datasets found in {(feynman_root / feynman_variant)} for token 'feynman_random'."
+                )
+            rng = np.random.RandomState(feynman_dataset_select_seed)
+            shuffled = list(available)
+            rng.shuffle(shuffled)
+            expanded.extend(shuffled[: int(feynman_max_datasets)])
+            continue
+        expanded.append(task)
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for task in expanded:
+        if task in seen:
+            continue
+        seen.add(task)
+        deduped.append(task)
+    return deduped
+
+
+def _build_feynman_task_spec(
+    *,
+    task_name: str,
+    feynman_root: Path,
+    feynman_variant: str,
+    feynman_width_mid: list[int],
+    feynman_split_strategy: str,
+    equations_map: dict[str, str],
+) -> _TaskSpec:
+    filename = _feynman_cli_to_filename(task_name)
+    dataset_path = (feynman_root / feynman_variant / filename).resolve()
+    if not dataset_path.is_file():
+        raise FileNotFoundError(
+            f"Feynman task '{task_name}' requires file '{dataset_path}', but it does not exist."
+        )
+    raw = np.loadtxt(dataset_path)
+    if raw.ndim == 1:
+        raw = raw.reshape(-1, 1)
+    if raw.shape[1] < 2:
+        raise ValueError(f"Invalid Feynman dataset columns (<2): {dataset_path}")
+    n_var = int(raw.shape[1] - 1)
+    width = [n_var, *feynman_width_mid, 1]
+    return _TaskSpec(
+        name=task_name,
+        n_var=n_var,
+        width=width,
+        target_fn=None,
+        lib=None,
+        dataset_kind="feynman_file",
+        dataset_path=str(dataset_path),
+        dataset_variant=feynman_variant,
+        dataset_split_strategy=feynman_split_strategy,
+        target_formula=equations_map.get(filename),
+    )
+
+
+def _resolve_task_specs(
+    *,
+    tasks: list[str],
+    feynman_root: Path,
+    feynman_variant: str,
+    feynman_width_mid: list[int],
+    feynman_split_strategy: str,
+    feynman_max_datasets: int,
+    feynman_dataset_select_seed: int,
+    feynman_equations_csv: Path | None,
+) -> tuple[list[str], dict[str, _TaskSpec], dict[str, str], dict[str, object]]:
+    requested_tasks = _expand_feynman_task_tokens(
+        tasks,
+        feynman_root=feynman_root,
+        feynman_variant=feynman_variant,
+        feynman_max_datasets=feynman_max_datasets,
+        feynman_dataset_select_seed=feynman_dataset_select_seed,
+    )
+    base_specs = _task_specs()
+
+    needs_feynman = any(task.startswith("feynman_") for task in requested_tasks)
+    if needs_feynman:
+        if feynman_equations_csv is None:
+            auto_path = feynman_root / "FeynmanEquations.csv"
+            feynman_equations_csv = auto_path if auto_path.is_file() else None
+        equations_map = _load_feynman_equations_map(feynman_equations_csv)
+    else:
+        equations_map = {}
+
+    resolved_specs: dict[str, _TaskSpec] = {}
+    for task in requested_tasks:
+        if task in base_specs:
+            resolved_specs[task] = base_specs[task]
+            continue
+        if task.startswith("feynman_"):
+            resolved_specs[task] = _build_feynman_task_spec(
+                task_name=task,
+                feynman_root=feynman_root,
+                feynman_variant=feynman_variant,
+                feynman_width_mid=feynman_width_mid,
+                feynman_split_strategy=feynman_split_strategy,
+                equations_map=equations_map,
+            )
+            continue
+        raise ValueError(f"Unknown benchmark task: {task}")
+
+    feynman_config: dict[str, object] = {
+        "enabled": bool(needs_feynman),
+        "root": str(feynman_root),
+        "variant": feynman_variant,
+        "equations_csv": str(feynman_equations_csv) if feynman_equations_csv is not None else None,
+        "split_strategy": feynman_split_strategy,
+        "width_mid": feynman_width_mid,
+        "max_datasets": int(feynman_max_datasets),
+        "dataset_select_seed": int(feynman_dataset_select_seed),
+        "paper10_datasets": list(_FEYNMAN_PAPER10_DATASETS),
+    }
+    return requested_tasks, resolved_specs, equations_map, feynman_config
 
 
 def _build_teacher_dataset(
@@ -133,9 +409,22 @@ def _build_teacher_dataset(
     test_num: int,
 ) -> dict[str, torch.Tensor]:
     torch.manual_seed(seed)
+    if spec.dataset_kind == "feynman_file":
+        if spec.dataset_path is None:
+            raise ValueError(f"Feynman task '{spec.name}' is missing dataset_path.")
+        return _load_local_feynman_dataset_as_kan(
+            dataset_path=Path(spec.dataset_path),
+            seed=seed,
+            train_num=train_num,
+            test_num=test_num,
+            split_strategy=spec.dataset_split_strategy,
+        )
+    if spec.target_fn is None:
+        raise ValueError(f"Synthetic task '{spec.name}' is missing target_fn.")
     return create_dataset(
         spec.target_fn,
         n_var=spec.n_var,
+        ranges=spec.ranges if spec.ranges is not None else [-1, 1],
         train_num=train_num,
         test_num=test_num,
         seed=seed,
@@ -192,6 +481,10 @@ def _build_teacher_cache_identity(
         "seed": int(seed),
         "n_var": int(spec.n_var),
         "width": list(spec.width),
+        "dataset_kind": spec.dataset_kind,
+        "dataset_path": spec.dataset_path,
+        "dataset_variant": spec.dataset_variant,
+        "dataset_split_strategy": spec.dataset_split_strategy,
         "train_num": int(train_num),
         "test_num": int(test_num),
         "train_steps": int(train_steps),
@@ -777,18 +1070,38 @@ def run_benchmark(
     profile_name: str = "custom",
     profile_defaults: dict[str, float | int] | None = None,
     profile_overrides: dict[str, bool] | None = None,
+    feynman_root: Path = Path("datasets"),
+    feynman_variant: str = "Feynman_with_units",
+    feynman_equations_csv: Path | None = None,
+    feynman_split_strategy: str = "random",
+    feynman_width_mid: list[int] | None = None,
+    feynman_max_datasets: int = 10,
+    feynman_dataset_select_seed: int = 2,
     make_plots: bool,
     quiet: bool,
 ) -> dict[str, object]:
-    specs = _task_specs()
-    invalid = [name for name in tasks if name not in specs]
-    if invalid:
-        raise ValueError(f"Unknown benchmark tasks: {invalid}")
+    if feynman_variant not in _FEYNMAN_VARIANTS:
+        raise ValueError(f"Unsupported feynman variant: {feynman_variant}")
+    if feynman_split_strategy not in {"random", "linspace"}:
+        raise ValueError(f"Unsupported feynman split strategy: {feynman_split_strategy}")
+    if feynman_width_mid is None:
+        feynman_width_mid = [5, 2]
+
+    resolved_tasks, specs, _equations_map, feynman_config = _resolve_task_specs(
+        tasks=tasks,
+        feynman_root=feynman_root,
+        feynman_variant=feynman_variant,
+        feynman_width_mid=feynman_width_mid,
+        feynman_split_strategy=feynman_split_strategy,
+        feynman_max_datasets=feynman_max_datasets,
+        feynman_dataset_select_seed=feynman_dataset_select_seed,
+        feynman_equations_csv=feynman_equations_csv,
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, object]] = []
 
-    for task_name in tasks:
+    for task_name in resolved_tasks:
         spec = specs[task_name]
         for seed in seeds:
             effective_topk = int(spec.icbr_topk) if spec.icbr_topk is not None else int(topk)
@@ -851,6 +1164,9 @@ def run_benchmark(
             row = {
                 "task": task_name,
                 "seed": seed,
+                "task_kind": spec.dataset_kind,
+                "task_source": "feynman_file" if spec.dataset_kind == "feynman_file" else "synthetic_formula",
+                "target_formula": spec.target_formula,
                 "n_var": spec.n_var,
                 "width": list(spec.width),
                 "lib": list(spec.lib) if spec.lib is not None else ["__FULL_SYMBOLIC_LIB__"],
@@ -893,6 +1209,9 @@ def run_benchmark(
     row_fieldnames = [
         "task",
         "seed",
+        "task_kind",
+        "task_source",
+        "target_formula",
         "n_var",
         "width",
         "lib",
@@ -944,6 +1263,9 @@ def run_benchmark(
                 {
                     "task": row["task"],
                     "seed": row["seed"],
+                    "task_kind": row["task_kind"],
+                    "task_source": row["task_source"],
+                    "target_formula": row["target_formula"],
                     "n_var": row["n_var"],
                     "width": json.dumps(row["width"], ensure_ascii=False),
                     "lib": json.dumps(row["lib"], ensure_ascii=False),
@@ -989,7 +1311,7 @@ def run_benchmark(
                 }
             )
 
-    by_task_rows = {task_name: [row for row in rows if row["task"] == task_name] for task_name in tasks}
+    by_task_rows = {task_name: [row for row in rows if row["task"] == task_name] for task_name in resolved_tasks}
     by_task_metrics = {task_name: _build_metric_stats(task_rows) for task_name, task_rows in by_task_rows.items()}
     overall_metrics = _build_metric_stats(rows)
     by_task_significance = {
@@ -998,7 +1320,7 @@ def run_benchmark(
     overall_significance = _build_significance(rows, task_label="__overall__")
 
     task_stats_rows = _build_task_stats_rows(
-        tasks=tasks,
+        tasks=resolved_tasks,
         rows=rows,
         by_task_metrics=by_task_metrics,
         overall_metrics=overall_metrics,
@@ -1006,13 +1328,13 @@ def run_benchmark(
     task_stats_csv = output_dir / "icbr_benchmark_task_stats.csv"
     _write_task_stats_csv(task_stats_csv, task_stats_rows)
 
-    significance_rows = _build_significance_rows(tasks=tasks, by_task_significance=by_task_significance)
+    significance_rows = _build_significance_rows(tasks=resolved_tasks, by_task_significance=by_task_significance)
     significance_csv = output_dir / "icbr_benchmark_significance.csv"
     _write_significance_csv(significance_csv, significance_rows)
 
     visualization = {"enabled": False, "error": "Disabled by --no-plots", "files": []}
     if make_plots:
-        visualization = _generate_visualizations(output_dir=output_dir, tasks=tasks, by_task_rows=by_task_rows)
+        visualization = _generate_visualizations(output_dir=output_dir, tasks=resolved_tasks, by_task_rows=by_task_rows)
 
     summary = {
         "metadata": {
@@ -1021,7 +1343,7 @@ def run_benchmark(
             "report_version": "2.0",
         },
         "config": {
-            "tasks": tasks,
+            "tasks": resolved_tasks,
             "seeds": seeds,
             "profile": {
                 "name": profile_name,
@@ -1053,10 +1375,11 @@ def run_benchmark(
                             else float(teacher_min_test_r2)
                         ),
                     }
-                    for task_name in tasks
+                    for task_name in resolved_tasks
                 },
                 "policy": "skip_symbolic_comparison_when_teacher_quality_fails",
             },
+            "feynman": feynman_config,
             "teacher_cache": {
                 "dir": str(teacher_cache_dir),
                 "mode": teacher_cache_mode,
@@ -1067,12 +1390,12 @@ def run_benchmark(
             "plots_enabled": make_plots,
             "task_topk_overrides": {
                 task_name: int(specs[task_name].icbr_topk)
-                for task_name in tasks
+                for task_name in resolved_tasks
                 if specs[task_name].icbr_topk is not None
             },
             "task_lib_mode": {
                 task_name: ("full_symbolic_lib" if specs[task_name].lib is None else "task_subset")
-                for task_name in tasks
+                for task_name in resolved_tasks
             },
         },
         "rows": rows,
@@ -1088,7 +1411,7 @@ def run_benchmark(
                     "metrics": by_task_metrics[task_name],
                     "significance": by_task_significance[task_name],
                 }
-                for task_name in tasks
+                for task_name in resolved_tasks
             },
         },
         "artifacts": {
@@ -1117,7 +1440,7 @@ def run_benchmark(
                 "failure_policy": "Skip baseline/ICBR symbolic comparison for that row and keep explicit gate reason.",
             },
             "teacher_cache": {
-                "cache_key_rule": "hash(task, seed, width, train_num, test_num, train_steps, lr, lamb, profile, cache_version)",
+                "cache_key_rule": "hash(task, seed, width, dataset_kind, dataset_path, dataset_variant, dataset_split_strategy, train_num, test_num, train_steps, lr, lamb, profile, cache_version)",
                 "modes": {
                     "readwrite": "Read cache when available; train+write on miss.",
                     "readonly": "Read cache only; train without writing on miss.",
@@ -1126,7 +1449,7 @@ def run_benchmark(
                 },
             },
             "extensibility": [
-                "Add new tasks in _task_specs() with target_fn, width, and symbolic lib.",
+                "Add new tasks in the resolver layer (core task specs or feynman token expansion).",
                 "Rows-level details are preserved for error bars and downstream statistical tests.",
                 "Task stats CSV and significance CSV can be consumed by external plotting/report tools.",
                 "Teacher cache key version can be bumped with --teacher-cache-version for compatibility control.",
@@ -1142,19 +1465,30 @@ def run_benchmark(
         "## Run Config",
         "",
         f"- Profile: {summary['config']['profile']['name']}",
-        f"- Tasks: {', '.join(tasks)}",
+        f"- Tasks: {', '.join(resolved_tasks)}",
         f"- Seeds: {', '.join(str(seed) for seed in seeds)}",
         f"- Train/Test samples per task: {train_num}/{test_num}",
         f"- Train steps: {train_steps}, lr: {lr}, lamb: {lamb}",
         f"- Teacher cache: mode={teacher_cache_mode}, dir={teacher_cache_dir}, version={teacher_cache_version}",
         f"- ICBR shortlist topk: {topk}, grid_number: {grid_number}, iteration: {iteration}",
+    ]
+    if bool(summary["config"]["feynman"]["enabled"]):
+        md_lines.append(
+            f"- Feynman data: root={summary['config']['feynman']['root']}, "
+            f"variant={summary['config']['feynman']['variant']}, "
+            f"split={summary['config']['feynman']['split_strategy']}, "
+            f"width_mid={summary['config']['feynman']['width_mid']}"
+        )
+    md_lines.extend(
+        [
         "",
         "## Task-Level Aggregate Stats",
         "",
         "| task | n | teacher_cache_hit_mean | teacher_mse_mean | teacher_r2_mean | teacher_gate_pass_mean | baseline_symbolic_mean | icbr_symbolic_mean | delta_mean | delta_median | speedup_mean | speedup_median | mse_shift_mean | target_mse_shift_mean | formula_pass_mean |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
-    ]
-    for task_name in tasks:
+        ]
+    )
+    for task_name in resolved_tasks:
         task_item = summary["aggregates"]["by_task"][task_name]
         metrics = task_item["metrics"]
         md_lines.append(
@@ -1185,7 +1519,7 @@ def run_benchmark(
             "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|",
         ]
     )
-    for task_name in tasks:
+    for task_name in resolved_tasks:
         sig_item = summary["aggregates"]["by_task"][task_name]["significance"]
         for metric_name in ["symbolic_wall_time_delta_s", "final_mse_loss_shift"]:
             metric_sig = sig_item[metric_name]
@@ -1243,6 +1577,8 @@ def run_benchmark(
     for row in rows:
         md_lines.append(f"### task={row['task']} seed={row['seed']}")
         md_lines.append("")
+        md_lines.append(f"- Task source: {row['task_source']}")
+        md_lines.append(f"- Target formula: `{row['target_formula']}`")
         md_lines.append(
             f"- Teacher cache: hit={bool(row['teacher_cache_hit'])}, "
             f"mode={row['teacher_cache_mode']}, status={row['teacher_cache_status']}"
@@ -1284,7 +1620,7 @@ def run_benchmark(
         [
             "## Extensibility Notes",
             "",
-            "- 任务可扩展：在 `_task_specs()` 增加任务定义，即可复用统一导出与统计管线。",
+            "- 任务可扩展：在任务解析层新增 task token 或 task spec，即可复用统一导出与统计管线。",
             "- 统计可扩展：新增 benchmark 指标后，可自动进入 task stats（count/mean/median/std/min/max）。",
             "- 显著性可扩展：可在 `_SIGNIFICANCE_DIRECTIONS` 增加需要方向性判断的 delta 指标。",
             "- 门禁可扩展：可在 `_TaskSpec` 中为单任务覆盖 teacher MSE/R2 阈值。",
@@ -1350,7 +1686,56 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--tasks",
         default="minimal,combo,poly_cubic,trig_interaction",
-        help="Comma-separated tasks: minimal,combo,poly_cubic,trig_interaction",
+        help=(
+            "Comma-separated tasks. "
+            "Supports core tasks (minimal,combo,poly_cubic,trig_interaction), "
+            "explicit feynman task names (e.g. feynman_I_10_7), "
+            "and feynman task tokens (feynman_paper10, feynman_random)."
+        ),
+    )
+    parser.add_argument(
+        "--feynman-datasets",
+        default="",
+        help="Optional comma-separated explicit feynman datasets to append (e.g. feynman_I_10_7,feynman_II_6_15a).",
+    )
+    parser.add_argument(
+        "--feynman-root",
+        default="datasets",
+        help="Root directory containing Feynman variants and optionally FeynmanEquations.csv.",
+    )
+    parser.add_argument(
+        "--feynman-variant",
+        default="Feynman_with_units",
+        choices=list(_FEYNMAN_VARIANTS),
+        help="Feynman dataset variant subdirectory.",
+    )
+    parser.add_argument(
+        "--feynman-equations-csv",
+        default=None,
+        help="Optional FeynmanEquations.csv path. Defaults to <feynman_root>/FeynmanEquations.csv if present.",
+    )
+    parser.add_argument(
+        "--feynman-max-datasets",
+        type=int,
+        default=10,
+        help="Max datasets for feynman_random token.",
+    )
+    parser.add_argument(
+        "--feynman-dataset-select-seed",
+        type=int,
+        default=2,
+        help="Random selection seed for feynman_random token.",
+    )
+    parser.add_argument(
+        "--feynman-split-strategy",
+        default="random",
+        choices=["random", "linspace"],
+        help="Train/test split strategy for local Feynman files.",
+    )
+    parser.add_argument(
+        "--feynman-width-mid",
+        default="5,2",
+        help="Comma-separated hidden widths used for feynman tasks, e.g. 5,2 -> width=[n_var,5,2,1].",
     )
     parser.add_argument("--seeds", default="0,1,2,3,4,5,6,7,8,9", help="Comma-separated integer seeds")
     parser.add_argument("--output-dir", default="outputs/icbr_benchmark_extended", help="Output directory")
@@ -1395,9 +1780,14 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     tasks = _parse_str_list(args.tasks)
+    if args.feynman_datasets.strip():
+        tasks.extend(_parse_str_list(args.feynman_datasets))
     seeds = _parse_int_list(args.seeds)
     output_dir = Path(args.output_dir)
     teacher_cache_dir = Path(args.teacher_cache_dir)
+    feynman_root = Path(args.feynman_root)
+    feynman_equations_csv = Path(args.feynman_equations_csv) if args.feynman_equations_csv else None
+    feynman_width_mid = _parse_width_mid(args.feynman_width_mid)
     resolved_training, profile_overrides = _resolve_training_config(
         profile=args.profile,
         train_num=args.train_num,
@@ -1427,6 +1817,13 @@ def main(argv: list[str] | None = None) -> None:
         profile_name=args.profile,
         profile_defaults=dict(_BENCHMARK_PROFILES[args.profile]),
         profile_overrides=profile_overrides,
+        feynman_root=feynman_root,
+        feynman_variant=args.feynman_variant,
+        feynman_equations_csv=feynman_equations_csv,
+        feynman_split_strategy=args.feynman_split_strategy,
+        feynman_width_mid=feynman_width_mid,
+        feynman_max_datasets=args.feynman_max_datasets,
+        feynman_dataset_select_seed=args.feynman_dataset_select_seed,
         make_plots=not args.no_plots,
         quiet=args.quiet,
     )
