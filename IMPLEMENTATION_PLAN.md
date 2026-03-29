@@ -613,6 +613,63 @@ Status:
 
 Complete
 
+### Stage 9: Add Teacher Quality Gate and Target-Error Metrics
+
+Goal:
+
+新增“数值教师质量门禁”与“符号模型对真实目标函数误差”指标，确保 benchmark 结论不会在教师数值拟合质量不足时被误读。
+
+Target Files:
+
+- `kan/icbr.py`
+- `scripts/icbr_benchmark.py`
+- `scripts/icbr_benchmark_regression.py`
+- `tests/test_icbr_benchmark_smoke.py`
+- `tests/test_icbr_benchmark_script_smoke.py`
+- `tests/test_icbr_benchmark_regression_smoke.py`
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- benchmark 行级结果必须新增真实目标误差指标（至少包含）:
+  - `teacher_target_mse`
+  - `teacher_target_r2`
+  - `baseline_target_mse`
+  - `baseline_target_r2`
+  - `icbr_target_mse`
+  - `icbr_target_r2`
+  - `symbolic_target_mse_shift`
+  - `symbolic_target_r2_shift`
+- benchmark 必须新增 teacher 门禁字段（至少包含）:
+  - `teacher_quality_gate_pass`
+  - `teacher_quality_gate_reason`
+- 当 teacher 质量未通过门禁时，默认不执行 baseline/ICBR 符号化对比，并在导出中如实标记为门禁失败。
+- regression gate 必须新增与 teacher 门禁及 target-error 指标相关的检查项。
+
+Implementation Constraints:
+
+- 不改动 ICBR 主算法路径，只扩展 benchmark 与 regression 验收层。
+- 保持 rows 明细导出；新字段必须贯通 CSV/JSON/Markdown。
+- 对缺失真实标签的调用路径保持兼容（可返回 NaN 或空原因，但不得 silently 伪造通过）。
+
+Success Criteria:
+
+- 多 seed benchmark 导出中可直接读取 teacher 质量门禁结果与 target-error 对照指标。
+- regression gate 可对 teacher 质量与 target-error shift 进行 pass/fail 判定。
+- 相关 smoke 测试覆盖新字段与新门禁逻辑并通过。
+
+Validation:
+
+- `pytest tests/test_icbr_benchmark_smoke.py tests/test_icbr_benchmark_script_smoke.py tests/test_icbr_benchmark_regression_smoke.py`
+- `python -m scripts.icbr_benchmark --tasks minimal,combo --seeds 0,1 --output-dir outputs/icbr_benchmark_stage9_smoke --train-num 24 --test-num 24 --train-steps 4 --lr 0.05 --topk 2 --grid-number 11 --iteration 1 --quiet`
+- `python -m scripts.icbr_benchmark_regression --summary-json outputs/icbr_benchmark_stage9_smoke/icbr_benchmark_summary.json --output-dir outputs/icbr_benchmark_stage9_smoke`（默认门禁下预期 fail，用于验证 teacher 质量门禁生效）
+- `python -m scripts.icbr_benchmark --tasks minimal,combo --seeds 0,1 --output-dir outputs/icbr_benchmark_stage9_smoke_pass --train-num 24 --test-num 24 --train-steps 4 --lr 0.05 --topk 2 --grid-number 11 --iteration 1 --teacher-max-test-mse 1.0 --teacher-min-test-r2 -1.0 --quiet`
+- `python -m scripts.icbr_benchmark_regression --summary-json outputs/icbr_benchmark_stage9_smoke_pass/icbr_benchmark_summary.json --output-dir outputs/icbr_benchmark_stage9_smoke_pass --min-formula-pass-rate 0.0 --min-speedup-median 0.0 --max-mse-shift-mean 1.0 --min-teacher-quality-gate-pass-rate 0.0 --max-target-mse-shift-mean 1.0`（放宽阈值后验证管线可 pass）
+
+Status:
+
+Complete
+
 ## 5. Acceptance Criteria
 
 Phase I 仅在以下条件全部满足时视为完成:
@@ -645,3 +702,4 @@ Phase I 仅在以下条件全部满足时视为完成:
 6. Stage 6: Extended Multi-Seed Benchmark Validation
 7. Stage 7: Regression Gating and Stability Verification
 8. Stage 8: Diagnose and Fix `trig_interaction` Regression
+9. Stage 9: Add Teacher Quality Gate and Target-Error Metrics

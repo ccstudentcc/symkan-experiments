@@ -413,6 +413,34 @@ def _extract_calibration_input(calibration_split: Mapping[str, torch.Tensor] | t
     raise KeyError("calibration_split must provide one of val_input/test_input/train_input")
 
 
+def _extract_calibration_target(
+    calibration_split: Mapping[str, torch.Tensor] | torch.Tensor,
+) -> torch.Tensor | None:
+    if isinstance(calibration_split, torch.Tensor):
+        return None
+
+    if "val_label" in calibration_split:
+        return calibration_split["val_label"]
+    if "test_label" in calibration_split:
+        return calibration_split["test_label"]
+    if "train_label" in calibration_split:
+        return calibration_split["train_label"]
+    return None
+
+
+def _mse_to_target(prediction: torch.Tensor, target: torch.Tensor) -> float:
+    return float(torch.mean((prediction - target).pow(2)).item())
+
+
+def _r2_to_target(prediction: torch.Tensor, target: torch.Tensor) -> float:
+    target_centered = target - torch.mean(target, dim=0, keepdim=True)
+    ss_tot = torch.sum(target_centered.pow(2))
+    if float(ss_tot.item()) <= 1e-12:
+        return float("nan")
+    ss_res = torch.sum((prediction - target).pow(2))
+    return float((1.0 - (ss_res / ss_tot)).item())
+
+
 def replay_rerank_edge_candidates(
     work_model,
     teacher_model,
@@ -738,6 +766,7 @@ def benchmark_icbr_vs_baseline(
     model,
     *,
     calibration_split: Mapping[str, torch.Tensor] | torch.Tensor,
+    calibration_target: torch.Tensor | None = None,
     lib: Iterable[str] | Mapping[str, tuple] | None = None,
     topk: int = 5,
     a_range: tuple[float, float] = (-10.0, 10.0),
@@ -747,6 +776,8 @@ def benchmark_icbr_vs_baseline(
     formula_significant_digits: int = 6,
 ) -> dict[str, object]:
     calibration_input = _extract_calibration_input(calibration_split)
+    if calibration_target is None:
+        calibration_target = _extract_calibration_target(calibration_split)
     input_dim = int(calibration_input.shape[1])
     symbolic_lib = _resolve_symbolic_lib(lib)
     lib_names = list(symbolic_lib.keys())
@@ -759,6 +790,20 @@ def benchmark_icbr_vs_baseline(
     with torch.no_grad():
         teacher_output = teacher_numeric(calibration_input).detach()
 
+    if calibration_target is not None:
+        target = calibration_target.to(device=teacher_output.device, dtype=teacher_output.dtype)
+        if target.shape != teacher_output.shape:
+            raise ValueError(
+                "calibration_target shape must match model output shape; "
+                f"got {tuple(target.shape)} vs {tuple(teacher_output.shape)}"
+            )
+        teacher_target_mse = _mse_to_target(teacher_output, target)
+        teacher_target_r2 = _r2_to_target(teacher_output, target)
+    else:
+        target = None
+        teacher_target_mse = float("nan")
+        teacher_target_r2 = float("nan")
+
     baseline_model = _clone_model_memory(model)
     baseline_model.auto_save = False
     with torch.no_grad():
@@ -769,6 +814,12 @@ def benchmark_icbr_vs_baseline(
     with torch.no_grad():
         baseline_output = baseline_model(calibration_input).detach()
     baseline_mse = torch.mean((baseline_output - teacher_output).pow(2)).item()
+    if target is not None:
+        baseline_target_mse = _mse_to_target(baseline_output, target)
+        baseline_target_r2 = _r2_to_target(baseline_output, target)
+    else:
+        baseline_target_mse = float("nan")
+        baseline_target_r2 = float("nan")
     baseline_formula = _formula_export_details(
         baseline_model,
         input_dim=input_dim,
@@ -794,6 +845,16 @@ def benchmark_icbr_vs_baseline(
     with torch.no_grad():
         icbr_output = work_model(calibration_input).detach()
     icbr_mse = torch.mean((icbr_output - teacher_output).pow(2)).item()
+    if target is not None:
+        icbr_target_mse = _mse_to_target(icbr_output, target)
+        icbr_target_r2 = _r2_to_target(icbr_output, target)
+        symbolic_target_mse_shift = icbr_target_mse - baseline_target_mse
+        symbolic_target_r2_shift = icbr_target_r2 - baseline_target_r2
+    else:
+        icbr_target_mse = float("nan")
+        icbr_target_r2 = float("nan")
+        symbolic_target_mse_shift = float("nan")
+        symbolic_target_r2_shift = float("nan")
     icbr_formula = _formula_export_details(
         work_model,
         input_dim=input_dim,
@@ -826,6 +887,14 @@ def benchmark_icbr_vs_baseline(
         "icbr_formula_error": icbr_formula["error"],
         "baseline_mse": float(baseline_mse),
         "icbr_mse": float(icbr_mse),
+        "teacher_target_mse": float(teacher_target_mse),
+        "teacher_target_r2": float(teacher_target_r2),
+        "baseline_target_mse": float(baseline_target_mse),
+        "baseline_target_r2": float(baseline_target_r2),
+        "icbr_target_mse": float(icbr_target_mse),
+        "icbr_target_r2": float(icbr_target_r2),
+        "symbolic_target_mse_shift": float(symbolic_target_mse_shift),
+        "symbolic_target_r2_shift": float(symbolic_target_r2_shift),
     }
 
 

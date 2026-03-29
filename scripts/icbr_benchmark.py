@@ -19,6 +19,8 @@ from kan.utils import create_dataset
 
 
 _NUMERIC_METRICS = [
+    "teacher_test_mse",
+    "teacher_test_r2",
     "candidate_generation_wall_time_s",
     "replay_rerank_wall_time_s",
     "symbolic_wall_time_s",
@@ -29,9 +31,18 @@ _NUMERIC_METRICS = [
     "final_mse_loss_shift",
     "baseline_mse",
     "icbr_mse",
+    "teacher_target_mse",
+    "teacher_target_r2",
+    "baseline_target_mse",
+    "baseline_target_r2",
+    "icbr_target_mse",
+    "icbr_target_r2",
+    "symbolic_target_mse_shift",
+    "symbolic_target_r2_shift",
 ]
 
 _BOOLEAN_METRICS = [
+    "teacher_quality_gate_pass",
     "formula_validation_result",
     "baseline_formula_validation_result",
     "icbr_formula_validation_result",
@@ -51,6 +62,8 @@ class _TaskSpec:
     target_fn: Callable[[torch.Tensor], torch.Tensor]
     lib: list[str] | None
     icbr_topk: int | None = None
+    teacher_max_test_mse: float | None = None
+    teacher_min_test_r2: float | None = None
 
 
 def _task_specs() -> dict[str, _TaskSpec]:
@@ -132,6 +145,69 @@ def _serialize_formula_list(formulas: list[str]) -> str:
     return " || ".join(formulas)
 
 
+def _compute_target_mse_and_r2(prediction: torch.Tensor, target: torch.Tensor) -> tuple[float, float]:
+    mse = float(torch.mean((prediction - target).pow(2)).item())
+    target_centered = target - torch.mean(target, dim=0, keepdim=True)
+    ss_tot = float(torch.sum(target_centered.pow(2)).item())
+    if ss_tot <= 1e-12:
+        return mse, float("nan")
+    ss_res = float(torch.sum((prediction - target).pow(2)).item())
+    r2 = 1.0 - (ss_res / ss_tot)
+    return mse, float(r2)
+
+
+def _build_teacher_quality_gate_result(
+    *,
+    teacher_test_mse: float,
+    teacher_test_r2: float,
+    max_test_mse: float,
+    min_test_r2: float,
+) -> tuple[bool, str]:
+    gate_failures: list[str] = []
+    if not math.isfinite(teacher_test_mse) or teacher_test_mse > max_test_mse:
+        gate_failures.append(f"teacher_test_mse={teacher_test_mse:.6g} > {max_test_mse:.6g}")
+    if not math.isfinite(teacher_test_r2) or teacher_test_r2 < min_test_r2:
+        gate_failures.append(f"teacher_test_r2={teacher_test_r2:.6g} < {min_test_r2:.6g}")
+    if gate_failures:
+        return False, "; ".join(gate_failures)
+    return True, ""
+
+
+def _build_skipped_symbolic_metrics(*, reason: str) -> dict[str, object]:
+    nan_metrics = {
+        "candidate_generation_wall_time_s": float("nan"),
+        "replay_rerank_wall_time_s": float("nan"),
+        "symbolic_wall_time_s": float("nan"),
+        "baseline_symbolic_wall_time_s": float("nan"),
+        "symbolic_wall_time_delta_s": float("nan"),
+        "symbolic_speedup_vs_baseline": float("nan"),
+        "replay_imitation_gap": float("nan"),
+        "final_mse_loss_shift": float("nan"),
+        "baseline_mse": float("nan"),
+        "icbr_mse": float("nan"),
+        "teacher_target_mse": float("nan"),
+        "teacher_target_r2": float("nan"),
+        "baseline_target_mse": float("nan"),
+        "baseline_target_r2": float("nan"),
+        "icbr_target_mse": float("nan"),
+        "icbr_target_r2": float("nan"),
+        "symbolic_target_mse_shift": float("nan"),
+        "symbolic_target_r2_shift": float("nan"),
+    }
+    return {
+        **nan_metrics,
+        "formula_validation_result": False,
+        "baseline_formula_validation_result": False,
+        "icbr_formula_validation_result": False,
+        "baseline_formula_raw": [],
+        "baseline_formula_display": [],
+        "icbr_formula_raw": [],
+        "icbr_formula_display": [],
+        "baseline_formula_error": f"skipped_by_teacher_quality_gate: {reason}",
+        "icbr_formula_error": f"skipped_by_teacher_quality_gate: {reason}",
+    }
+
+
 def _describe(values: list[float]) -> dict[str, float]:
     if not values:
         return {
@@ -185,7 +261,11 @@ def _sign_test_pvalue_two_sided(successes: int, total: int) -> float:
 def _build_metric_stats(rows: list[dict[str, object]]) -> dict[str, dict[str, float]]:
     stats: dict[str, dict[str, float]] = {}
     for metric in _NUMERIC_METRICS:
-        values = [float(row[metric]) for row in rows]
+        values = []
+        for row in rows:
+            value = float(row[metric])
+            if math.isfinite(value):
+                values.append(value)
         stats[metric] = _describe(values)
     for metric in _BOOLEAN_METRICS:
         values = [1.0 if bool(row[metric]) else 0.0 for row in rows]
@@ -200,7 +280,11 @@ def _build_significance(
 ) -> dict[str, dict[str, float | int | str | list[float]]]:
     by_metric: dict[str, dict[str, float | int | str | list[float]]] = {}
     for metric_name, favorable_direction in _SIGNIFICANCE_DIRECTIONS.items():
-        deltas = [float(row[metric_name]) for row in rows]
+        deltas = []
+        for row in rows:
+            value = float(row[metric_name])
+            if math.isfinite(value):
+                deltas.append(value)
         effective = [value for value in deltas if abs(value) > 1e-12]
         tie_count = len(deltas) - len(effective)
 
@@ -216,7 +300,8 @@ def _build_significance(
 
         by_metric[metric_name] = {
             "favorable_direction": favorable_direction,
-            "sample_count": len(deltas),
+            "sample_count": len(rows),
+            "finite_count": len(deltas),
             "effective_count": len(effective),
             "tie_count": tie_count,
             "improved_count": improved_count,
@@ -276,6 +361,7 @@ def _build_significance_rows(
                     "metric": metric_name,
                     "favorable_direction": item["favorable_direction"],
                     "sample_count": item["sample_count"],
+                    "finite_count": item["finite_count"],
                     "effective_count": item["effective_count"],
                     "tie_count": item["tie_count"],
                     "improved_count": item["improved_count"],
@@ -345,24 +431,38 @@ def _generate_visualizations(
 
     created_files: list[str] = []
 
+    def _finite_metric_values(task: str, metric: str) -> list[float]:
+        values: list[float] = []
+        for row in by_task_rows[task]:
+            value = float(row[metric])
+            if math.isfinite(value):
+                values.append(value)
+        return values
+
+    def _safe_mean_std(values: list[float]) -> tuple[float, float]:
+        if not values:
+            return float("nan"), float("nan")
+        if len(values) == 1:
+            return float(values[0]), 0.0
+        return float(statistics.mean(values)), float(statistics.stdev(values))
+
     fig, ax = plt.subplots(figsize=(10, 4.5))
     x_positions = list(range(len(tasks)))
-    baseline_mean = [
-        float(statistics.mean(float(row["baseline_symbolic_wall_time_s"]) for row in by_task_rows[task])) for task in tasks
-    ]
-    baseline_std = [
-        float(statistics.stdev(float(row["baseline_symbolic_wall_time_s"]) for row in by_task_rows[task]))
-        if len(by_task_rows[task]) > 1
-        else 0.0
-        for task in tasks
-    ]
-    icbr_mean = [float(statistics.mean(float(row["symbolic_wall_time_s"]) for row in by_task_rows[task])) for task in tasks]
-    icbr_std = [
-        float(statistics.stdev(float(row["symbolic_wall_time_s"]) for row in by_task_rows[task]))
-        if len(by_task_rows[task]) > 1
-        else 0.0
-        for task in tasks
-    ]
+    baseline_mean, baseline_std, icbr_mean, icbr_std = [], [], [], []
+    for task in tasks:
+        base_mean, base_std = _safe_mean_std(_finite_metric_values(task, "baseline_symbolic_wall_time_s"))
+        icbr_m, icbr_s = _safe_mean_std(_finite_metric_values(task, "symbolic_wall_time_s"))
+        baseline_mean.append(base_mean)
+        baseline_std.append(base_std)
+        icbr_mean.append(icbr_m)
+        icbr_std.append(icbr_s)
+    if not all(math.isfinite(value) for value in (baseline_mean + baseline_std + icbr_mean + icbr_std)):
+        plt.close(fig)
+        return {
+            "enabled": False,
+            "error": "Insufficient finite symbolic timing metrics for plot generation (likely skipped by teacher quality gate).",
+            "files": created_files,
+        }
     bar_width = 0.36
     ax.bar(
         [x - bar_width / 2.0 for x in x_positions],
@@ -392,7 +492,14 @@ def _generate_visualizations(
     created_files.append(str(time_plot))
 
     fig, ax = plt.subplots(figsize=(10, 4.5))
-    speedup_data = [[float(row["symbolic_speedup_vs_baseline"]) for row in by_task_rows[task]] for task in tasks]
+    speedup_data = [_finite_metric_values(task, "symbolic_speedup_vs_baseline") for task in tasks]
+    if any(len(values) == 0 for values in speedup_data):
+        plt.close(fig)
+        return {
+            "enabled": False,
+            "error": "Insufficient finite symbolic metrics for plot generation (likely skipped by teacher quality gate).",
+            "files": created_files,
+        }
     ax.boxplot(speedup_data, labels=tasks, showmeans=True)
     ax.set_ylabel("speedup x")
     ax.set_title("ICBR Speedup vs Baseline (seed distribution)")
@@ -404,7 +511,14 @@ def _generate_visualizations(
     created_files.append(str(speedup_plot))
 
     fig, ax = plt.subplots(figsize=(10, 4.5))
-    mse_shift_data = [[float(row["final_mse_loss_shift"]) for row in by_task_rows[task]] for task in tasks]
+    mse_shift_data = [_finite_metric_values(task, "final_mse_loss_shift") for task in tasks]
+    if any(len(values) == 0 for values in mse_shift_data):
+        plt.close(fig)
+        return {
+            "enabled": False,
+            "error": "Insufficient finite mse shift metrics for plot generation (likely skipped by teacher quality gate).",
+            "files": created_files,
+        }
     ax.boxplot(mse_shift_data, labels=tasks, showmeans=True)
     ax.axhline(0.0, linestyle="--", linewidth=1.0, color="black", alpha=0.7)
     ax.set_ylabel("icbr_mse - baseline_mse")
@@ -431,6 +545,8 @@ def run_benchmark(
     topk: int,
     grid_number: int,
     iteration: int,
+    teacher_max_test_mse: float,
+    teacher_min_test_r2: float,
     make_plots: bool,
     quiet: bool,
 ) -> dict[str, object]:
@@ -446,6 +562,16 @@ def run_benchmark(
         spec = specs[task_name]
         for seed in seeds:
             effective_topk = int(spec.icbr_topk) if spec.icbr_topk is not None else int(topk)
+            effective_teacher_max_test_mse = (
+                float(spec.teacher_max_test_mse)
+                if spec.teacher_max_test_mse is not None
+                else float(teacher_max_test_mse)
+            )
+            effective_teacher_min_test_r2 = (
+                float(spec.teacher_min_test_r2)
+                if spec.teacher_min_test_r2 is not None
+                else float(teacher_min_test_r2)
+            )
             model, dataset = _fit_teacher_model(
                 spec,
                 seed=seed,
@@ -454,16 +580,39 @@ def run_benchmark(
                 train_steps=train_steps,
                 lr=lr,
             )
-            metrics = benchmark_icbr_vs_baseline(
-                model,
-                calibration_split=dataset["test_input"],
-                lib=spec.lib,
-                topk=effective_topk,
-                a_range=(-5.0, 5.0),
-                b_range=(-5.0, 5.0),
-                grid_number=grid_number,
-                iteration=iteration,
+            with torch.no_grad():
+                teacher_test_pred = model(dataset["test_input"])
+                if isinstance(teacher_test_pred, tuple):
+                    teacher_test_pred = teacher_test_pred[0]
+                teacher_test_pred = teacher_test_pred.detach()
+            teacher_test_mse, teacher_test_r2 = _compute_target_mse_and_r2(
+                teacher_test_pred,
+                dataset["test_label"],
             )
+            teacher_quality_gate_pass, teacher_quality_gate_reason = _build_teacher_quality_gate_result(
+                teacher_test_mse=teacher_test_mse,
+                teacher_test_r2=teacher_test_r2,
+                max_test_mse=effective_teacher_max_test_mse,
+                min_test_r2=effective_teacher_min_test_r2,
+            )
+
+            if teacher_quality_gate_pass:
+                metrics = benchmark_icbr_vs_baseline(
+                    model,
+                    calibration_split={
+                        "test_input": dataset["test_input"],
+                        "test_label": dataset["test_label"],
+                    },
+                    calibration_target=dataset["test_label"],
+                    lib=spec.lib,
+                    topk=effective_topk,
+                    a_range=(-5.0, 5.0),
+                    b_range=(-5.0, 5.0),
+                    grid_number=grid_number,
+                    iteration=iteration,
+                )
+            else:
+                metrics = _build_skipped_symbolic_metrics(reason=teacher_quality_gate_reason)
             row = {
                 "task": task_name,
                 "seed": seed,
@@ -471,17 +620,32 @@ def run_benchmark(
                 "width": list(spec.width),
                 "lib": list(spec.lib) if spec.lib is not None else ["__FULL_SYMBOLIC_LIB__"],
                 "icbr_topk_used": effective_topk,
+                "teacher_test_mse": teacher_test_mse,
+                "teacher_test_r2": teacher_test_r2,
+                "teacher_max_test_mse_threshold": effective_teacher_max_test_mse,
+                "teacher_min_test_r2_threshold": effective_teacher_min_test_r2,
+                "teacher_quality_gate_pass": teacher_quality_gate_pass,
+                "teacher_quality_gate_reason": teacher_quality_gate_reason,
                 **metrics,
             }
             rows.append(row)
             if not quiet:
-                print(
-                    f"[icbr-benchmark] task={task_name} seed={seed} "
-                    f"icbr_symbolic={metrics['symbolic_wall_time_s']:.4f}s "
-                    f"baseline_symbolic={metrics['baseline_symbolic_wall_time_s']:.4f}s "
-                    f"speedup={metrics['symbolic_speedup_vs_baseline']:.2f}x "
-                    f"mse_shift={metrics['final_mse_loss_shift']:.6e}"
-                )
+                if teacher_quality_gate_pass:
+                    print(
+                        f"[icbr-benchmark] task={task_name} seed={seed} "
+                        f"teacher_mse={teacher_test_mse:.6e} teacher_r2={teacher_test_r2:.4f} "
+                        f"icbr_symbolic={metrics['symbolic_wall_time_s']:.4f}s "
+                        f"baseline_symbolic={metrics['baseline_symbolic_wall_time_s']:.4f}s "
+                        f"speedup={metrics['symbolic_speedup_vs_baseline']:.2f}x "
+                        f"mse_shift={metrics['final_mse_loss_shift']:.6e} "
+                        f"target_mse_shift={metrics['symbolic_target_mse_shift']:.6e}"
+                    )
+                else:
+                    print(
+                        f"[icbr-benchmark] task={task_name} seed={seed} "
+                        f"teacher_mse={teacher_test_mse:.6e} teacher_r2={teacher_test_r2:.4f} "
+                        f"skipped_symbolic_by_gate reason={teacher_quality_gate_reason}"
+                    )
 
     rows_csv = output_dir / "icbr_benchmark_rows.csv"
     row_fieldnames = [
@@ -491,6 +655,12 @@ def run_benchmark(
         "width",
         "lib",
         "icbr_topk_used",
+        "teacher_test_mse",
+        "teacher_test_r2",
+        "teacher_max_test_mse_threshold",
+        "teacher_min_test_r2_threshold",
+        "teacher_quality_gate_pass",
+        "teacher_quality_gate_reason",
         "candidate_generation_wall_time_s",
         "replay_rerank_wall_time_s",
         "symbolic_wall_time_s",
@@ -501,6 +671,14 @@ def run_benchmark(
         "final_mse_loss_shift",
         "baseline_mse",
         "icbr_mse",
+        "teacher_target_mse",
+        "teacher_target_r2",
+        "baseline_target_mse",
+        "baseline_target_r2",
+        "icbr_target_mse",
+        "icbr_target_r2",
+        "symbolic_target_mse_shift",
+        "symbolic_target_r2_shift",
         "formula_validation_result",
         "baseline_formula_validation_result",
         "icbr_formula_validation_result",
@@ -523,6 +701,12 @@ def run_benchmark(
                     "width": json.dumps(row["width"], ensure_ascii=False),
                     "lib": json.dumps(row["lib"], ensure_ascii=False),
                     "icbr_topk_used": row["icbr_topk_used"],
+                    "teacher_test_mse": row["teacher_test_mse"],
+                    "teacher_test_r2": row["teacher_test_r2"],
+                    "teacher_max_test_mse_threshold": row["teacher_max_test_mse_threshold"],
+                    "teacher_min_test_r2_threshold": row["teacher_min_test_r2_threshold"],
+                    "teacher_quality_gate_pass": row["teacher_quality_gate_pass"],
+                    "teacher_quality_gate_reason": row["teacher_quality_gate_reason"],
                     "candidate_generation_wall_time_s": row["candidate_generation_wall_time_s"],
                     "replay_rerank_wall_time_s": row["replay_rerank_wall_time_s"],
                     "symbolic_wall_time_s": row["symbolic_wall_time_s"],
@@ -533,6 +717,14 @@ def run_benchmark(
                     "final_mse_loss_shift": row["final_mse_loss_shift"],
                     "baseline_mse": row["baseline_mse"],
                     "icbr_mse": row["icbr_mse"],
+                    "teacher_target_mse": row["teacher_target_mse"],
+                    "teacher_target_r2": row["teacher_target_r2"],
+                    "baseline_target_mse": row["baseline_target_mse"],
+                    "baseline_target_r2": row["baseline_target_r2"],
+                    "icbr_target_mse": row["icbr_target_mse"],
+                    "icbr_target_r2": row["icbr_target_r2"],
+                    "symbolic_target_mse_shift": row["symbolic_target_mse_shift"],
+                    "symbolic_target_r2_shift": row["symbolic_target_r2_shift"],
                     "formula_validation_result": row["formula_validation_result"],
                     "baseline_formula_validation_result": row["baseline_formula_validation_result"],
                     "icbr_formula_validation_result": row["icbr_formula_validation_result"],
@@ -586,6 +778,27 @@ def run_benchmark(
             "topk": topk,
             "grid_number": grid_number,
             "iteration": iteration,
+            "teacher_quality_gate": {
+                "enabled": True,
+                "teacher_max_test_mse_default": float(teacher_max_test_mse),
+                "teacher_min_test_r2_default": float(teacher_min_test_r2),
+                "task_overrides": {
+                    task_name: {
+                        "teacher_max_test_mse": (
+                            float(specs[task_name].teacher_max_test_mse)
+                            if specs[task_name].teacher_max_test_mse is not None
+                            else float(teacher_max_test_mse)
+                        ),
+                        "teacher_min_test_r2": (
+                            float(specs[task_name].teacher_min_test_r2)
+                            if specs[task_name].teacher_min_test_r2 is not None
+                            else float(teacher_min_test_r2)
+                        ),
+                    }
+                    for task_name in tasks
+                },
+                "policy": "skip_symbolic_comparison_when_teacher_quality_fails",
+            },
             "output_dir": str(output_dir),
             "plots_enabled": make_plots,
             "task_topk_overrides": {
@@ -624,11 +837,19 @@ def run_benchmark(
             "field_guide": {
                 "symbolic_wall_time_delta_s": "baseline_symbolic_wall_time_s - icbr_symbolic_wall_time_s",
                 "final_mse_loss_shift": "icbr_mse - baseline_mse; negative means ICBR has lower MSE",
+                "teacher_test_mse": "Teacher numeric model MSE against real test labels before symbolic fitting.",
+                "teacher_test_r2": "Teacher numeric model R2 against real test labels before symbolic fitting.",
+                "symbolic_target_mse_shift": "icbr_target_mse - baseline_target_mse; negative means ICBR is closer to real targets.",
+                "symbolic_target_r2_shift": "icbr_target_r2 - baseline_target_r2; positive means ICBR has higher target R2.",
                 "stats_schema": "Each metric includes count | mean | median | std | min | max",
             },
             "significance_guide": {
                 "sign_test_pvalue_two_sided": "Two-sided sign test p-value on non-tie seeds.",
                 "mean_delta_ci95": "Bootstrap 95% CI of mean delta across seeds.",
+            },
+            "teacher_quality_gate": {
+                "pass_rule": "teacher_test_mse <= threshold_mse AND teacher_test_r2 >= threshold_r2",
+                "failure_policy": "Skip baseline/ICBR symbolic comparison for that row and keep explicit gate reason.",
             },
             "extensibility": [
                 "Add new tasks in _task_specs() with target_fn, width, and symbolic lib.",
@@ -653,8 +874,8 @@ def run_benchmark(
         "",
         "## Task-Level Aggregate Stats",
         "",
-        "| task | n | baseline_symbolic_mean | icbr_symbolic_mean | delta_mean | delta_median | delta_std | speedup_mean | speedup_median | mse_shift_mean | mse_shift_std | formula_pass_mean |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| task | n | teacher_mse_mean | teacher_r2_mean | teacher_gate_pass_mean | baseline_symbolic_mean | icbr_symbolic_mean | delta_mean | delta_median | speedup_mean | speedup_median | mse_shift_mean | target_mse_shift_mean | formula_pass_mean |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for task_name in tasks:
         task_item = summary["aggregates"]["by_task"][task_name]
@@ -663,15 +884,17 @@ def run_benchmark(
             "| "
             + f"{task_name} | "
             + f"{task_item['row_count']} | "
+            + f"{metrics['teacher_test_mse']['mean']:.6e} | "
+            + f"{metrics['teacher_test_r2']['mean']:.6f} | "
+            + f"{metrics['teacher_quality_gate_pass']['mean']:.4f} | "
             + f"{metrics['baseline_symbolic_wall_time_s']['mean']:.6f} | "
             + f"{metrics['symbolic_wall_time_s']['mean']:.6f} | "
             + f"{metrics['symbolic_wall_time_delta_s']['mean']:.6f} | "
             + f"{metrics['symbolic_wall_time_delta_s']['median']:.6f} | "
-            + f"{metrics['symbolic_wall_time_delta_s']['std']:.6f} | "
             + f"{metrics['symbolic_speedup_vs_baseline']['mean']:.4f} | "
             + f"{metrics['symbolic_speedup_vs_baseline']['median']:.4f} | "
             + f"{metrics['final_mse_loss_shift']['mean']:.6e} | "
-            + f"{metrics['final_mse_loss_shift']['std']:.6e} | "
+            + f"{metrics['symbolic_target_mse_shift']['mean']:.6e} | "
             + f"{metrics['formula_validation_result']['mean']:.4f} |"
         )
     md_lines.append("")
@@ -680,8 +903,8 @@ def run_benchmark(
         [
             "## Statistical Significance (by task)",
             "",
-            "| task | metric | favorable_direction | n_effective | improved | worsened | ties | p_value_two_sided | mean_delta_ci95 |",
-            "|---|---|---|---:|---:|---:|---:|---:|---|",
+            "| task | metric | favorable_direction | n_total | n_finite | n_effective | improved | worsened | ties | p_value_two_sided | mean_delta_ci95 |",
+            "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|",
         ]
     )
     for task_name in tasks:
@@ -694,6 +917,8 @@ def run_benchmark(
                 + f"{task_name} | "
                 + f"{metric_name} | "
                 + f"{metric_sig['favorable_direction']} | "
+                + f"{metric_sig['sample_count']} | "
+                + f"{metric_sig['finite_count']} | "
                 + f"{metric_sig['effective_count']} | "
                 + f"{metric_sig['improved_count']} | "
                 + f"{metric_sig['worsened_count']} | "
@@ -707,14 +932,17 @@ def run_benchmark(
         [
             "## Per-Run Performance Details",
             "",
-            "| task | seed | candidate_s | replay_s | baseline_symbolic_s | icbr_symbolic_s | speedup_x | baseline_mse | icbr_mse | mse_shift | formula_ok |",
-            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "| task | seed | teacher_mse | teacher_r2 | teacher_gate | candidate_s | replay_s | baseline_symbolic_s | icbr_symbolic_s | speedup_x | baseline_mse | icbr_mse | mse_shift | baseline_target_mse | icbr_target_mse | target_mse_shift | formula_ok |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for row in rows:
         md_lines.append(
             "| "
             + f"{row['task']} | {row['seed']} | "
+            + f"{float(row['teacher_test_mse']):.6e} | "
+            + f"{float(row['teacher_test_r2']):.6f} | "
+            + f"{bool(row['teacher_quality_gate_pass'])} | "
             + f"{float(row['candidate_generation_wall_time_s']):.6f} | "
             + f"{float(row['replay_rerank_wall_time_s']):.6f} | "
             + f"{float(row['baseline_symbolic_wall_time_s']):.6f} | "
@@ -723,6 +951,9 @@ def run_benchmark(
             + f"{float(row['baseline_mse']):.6e} | "
             + f"{float(row['icbr_mse']):.6e} | "
             + f"{float(row['final_mse_loss_shift']):.6e} | "
+            + f"{float(row['baseline_target_mse']):.6e} | "
+            + f"{float(row['icbr_target_mse']):.6e} | "
+            + f"{float(row['symbolic_target_mse_shift']):.6e} | "
             + f"{bool(row['formula_validation_result'])} |"
         )
     md_lines.append("")
@@ -732,6 +963,14 @@ def run_benchmark(
     for row in rows:
         md_lines.append(f"### task={row['task']} seed={row['seed']}")
         md_lines.append("")
+        md_lines.append(
+            f"- Teacher quality gate: pass={bool(row['teacher_quality_gate_pass'])}; "
+            f"reason=`{row['teacher_quality_gate_reason']}`"
+        )
+        md_lines.append(
+            f"- Teacher target metrics: mse={float(row['teacher_target_mse']):.6e}, "
+            f"r2={float(row['teacher_target_r2']):.6f}"
+        )
         md_lines.append("- Baseline formula (display, rounded):")
         for expr in row["baseline_formula_display"]:
             md_lines.append(f"  - `{expr}`")
@@ -764,6 +1003,7 @@ def run_benchmark(
             "- 任务可扩展：在 `_task_specs()` 增加任务定义，即可复用统一导出与统计管线。",
             "- 统计可扩展：新增 benchmark 指标后，可自动进入 task stats（count/mean/median/std/min/max）。",
             "- 显著性可扩展：可在 `_SIGNIFICANCE_DIRECTIONS` 增加需要方向性判断的 delta 指标。",
+            "- 门禁可扩展：可在 `_TaskSpec` 中为单任务覆盖 teacher MSE/R2 阈值。",
         ]
     )
     (output_dir / "icbr_benchmark_summary.md").write_text("\n".join(md_lines) + "\n", encoding="utf-8")
@@ -801,6 +1041,18 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--topk", type=int, default=3, help="Replay shortlist size")
     parser.add_argument("--grid-number", type=int, default=21, help="Grid size for (a,b) search")
     parser.add_argument("--iteration", type=int, default=2, help="Zoom iterations for (a,b) search")
+    parser.add_argument(
+        "--teacher-max-test-mse",
+        type=float,
+        default=0.10,
+        help="Default teacher quality gate: max allowed teacher test MSE before symbolic fitting.",
+    )
+    parser.add_argument(
+        "--teacher-min-test-r2",
+        type=float,
+        default=0.75,
+        help="Default teacher quality gate: min required teacher test R2 before symbolic fitting.",
+    )
     parser.add_argument("--no-plots", action="store_true", help="Disable plot generation")
     parser.add_argument("--quiet", action="store_true", help="Disable per-run progress prints")
     args = parser.parse_args(argv)
@@ -820,6 +1072,8 @@ def main(argv: list[str] | None = None) -> None:
         topk=args.topk,
         grid_number=args.grid_number,
         iteration=args.iteration,
+        teacher_max_test_mse=args.teacher_max_test_mse,
+        teacher_min_test_r2=args.teacher_min_test_r2,
         make_plots=not args.no_plots,
         quiet=args.quiet,
     )

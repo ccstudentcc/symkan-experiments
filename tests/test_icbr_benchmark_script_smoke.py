@@ -33,6 +33,10 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
             "11",
             "--iteration",
             "1",
+            "--teacher-max-test-mse",
+            "1.0",
+            "--teacher-min-test-r2",
+            "-1.0",
             "--quiet",
         ]
     )
@@ -63,6 +67,18 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
         "symbolic_speedup_vs_baseline",
         "replay_imitation_gap",
         "final_mse_loss_shift",
+        "teacher_test_mse",
+        "teacher_test_r2",
+        "teacher_quality_gate_pass",
+        "teacher_quality_gate_reason",
+        "teacher_target_mse",
+        "teacher_target_r2",
+        "baseline_target_mse",
+        "baseline_target_r2",
+        "icbr_target_mse",
+        "icbr_target_r2",
+        "symbolic_target_mse_shift",
+        "symbolic_target_r2_shift",
         "formula_validation_result",
         "baseline_formula_validation_result",
         "icbr_formula_validation_result",
@@ -84,6 +100,7 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
     assert summary["config"]["tasks"] == ["minimal", "combo"]
     assert "overall" in summary["aggregates"]
     assert "by_task" in summary["aggregates"]
+    assert "teacher_quality_gate" in summary["config"]
     assert summary["config"]["task_lib_mode"]["minimal"] == "full_symbolic_lib"
     assert summary["config"]["task_lib_mode"]["combo"] == "full_symbolic_lib"
     assert "metrics" in summary["aggregates"]["overall"]
@@ -95,6 +112,7 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
     speedup_stats = minimal["metrics"]["symbolic_speedup_vs_baseline"]
     assert {"count", "mean", "median", "std", "min", "max"}.issubset(set(speedup_stats.keys()))
     for row in summary["rows"]:
+        assert row["teacher_quality_gate_pass"] is True
         assert isinstance(row["baseline_formula_raw"], list)
         assert isinstance(row["baseline_formula_display"], list)
         assert isinstance(row["icbr_formula_raw"], list)
@@ -120,6 +138,8 @@ def test_trig_interaction_uses_task_specific_topk_override() -> None:
         topk=3,
         grid_number=11,
         iteration=1,
+        teacher_max_test_mse=1.0,
+        teacher_min_test_r2=-1.0,
         make_plots=False,
         quiet=True,
     )
@@ -129,3 +149,30 @@ def test_trig_interaction_uses_task_specific_topk_override() -> None:
     assert all(int(row["icbr_topk_used"]) == 5 for row in rows)
     assert all(row["lib"] == ["__FULL_SYMBOLIC_LIB__"] for row in rows)
     assert result["summary"]["config"]["task_lib_mode"]["trig_interaction"] == "full_symbolic_lib"
+
+
+def test_teacher_quality_gate_can_skip_symbolic_comparison() -> None:
+    out_dir = Path("tmp") / f"icbr_benchmark_teacher_gate_{uuid.uuid4().hex}"
+    result = run_benchmark(
+        tasks=["minimal"],
+        seeds=[0],
+        output_dir=out_dir,
+        train_num=16,
+        test_num=16,
+        train_steps=2,
+        lr=0.05,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=1e-8,
+        teacher_min_test_r2=0.999999,
+        make_plots=False,
+        quiet=True,
+    )
+
+    row = result["rows"][0]
+    assert row["teacher_quality_gate_pass"] is False
+    assert "teacher_test_mse" in row["teacher_quality_gate_reason"] or "teacher_test_r2" in row["teacher_quality_gate_reason"]
+    assert row["formula_validation_result"] is False
+    assert row["baseline_formula_raw"] == []
+    assert row["icbr_formula_raw"] == []

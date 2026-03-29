@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,8 @@ class RegressionThresholds:
     min_formula_pass_rate: float = 0.95
     min_speedup_median: float = 1.10
     max_mse_shift_mean: float = 5e-4
+    min_teacher_quality_gate_pass_rate: float = 0.95
+    max_target_mse_shift_mean: float = 5e-4
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -28,6 +31,8 @@ def _merge_thresholds(
         "min_formula_pass_rate": defaults.min_formula_pass_rate,
         "min_speedup_median": defaults.min_speedup_median,
         "max_mse_shift_mean": defaults.max_mse_shift_mean,
+        "min_teacher_quality_gate_pass_rate": defaults.min_teacher_quality_gate_pass_rate,
+        "max_target_mse_shift_mean": defaults.max_target_mse_shift_mean,
     }
     per_task_cfg: dict[str, dict[str, float]] = {}
 
@@ -50,6 +55,8 @@ def _merge_thresholds(
             min_formula_pass_rate=float(global_cfg["min_formula_pass_rate"]),
             min_speedup_median=float(global_cfg["min_speedup_median"]),
             max_mse_shift_mean=float(global_cfg["max_mse_shift_mean"]),
+            min_teacher_quality_gate_pass_rate=float(global_cfg["min_teacher_quality_gate_pass_rate"]),
+            max_target_mse_shift_mean=float(global_cfg["max_target_mse_shift_mean"]),
         ),
         per_task_cfg,
     )
@@ -66,6 +73,20 @@ def _evaluate_check(
     value: float,
     description: str,
 ) -> dict[str, Any]:
+    if not math.isfinite(value):
+        return {
+            "scope": scope,
+            "task": task,
+            "metric": metric,
+            "stat": stat,
+            "operator": op,
+            "threshold": float(threshold),
+            "value": float(value),
+            "status": "fail",
+            "description": description,
+            "fail_reason": f"non-finite metric value: {value}",
+        }
+
     if op == ">=":
         passed = value >= threshold
     elif op == "<=":
@@ -99,6 +120,26 @@ def evaluate_regression_gate(
     by_task = summary["aggregates"]["by_task"]
     overall_metrics = summary["aggregates"]["overall"]["metrics"]
 
+    def _metric_value(metric_name: str, stat_name: str, *, task_metrics: dict[str, Any]) -> float:
+        if metric_name not in task_metrics:
+            return float("nan")
+        metric_obj = task_metrics[metric_name]
+        if stat_name not in metric_obj:
+            return float("nan")
+        return float(metric_obj[stat_name])
+
+    checks.append(
+        _evaluate_check(
+            scope="overall",
+            task="__all__",
+            metric="teacher_quality_gate_pass",
+            stat="mean",
+            op=">=",
+            threshold=thresholds.min_teacher_quality_gate_pass_rate,
+            value=_metric_value("teacher_quality_gate_pass", "mean", task_metrics=overall_metrics),
+            description="Overall teacher quality gate pass rate should stay high.",
+        )
+    )
     checks.append(
         _evaluate_check(
             scope="overall",
@@ -107,7 +148,7 @@ def evaluate_regression_gate(
             stat="mean",
             op=">=",
             threshold=thresholds.min_formula_pass_rate,
-            value=float(overall_metrics["formula_validation_result"]["mean"]),
+            value=_metric_value("formula_validation_result", "mean", task_metrics=overall_metrics),
             description="Overall formula validation pass rate should stay high.",
         )
     )
@@ -119,7 +160,7 @@ def evaluate_regression_gate(
             stat="median",
             op=">=",
             threshold=thresholds.min_speedup_median,
-            value=float(overall_metrics["symbolic_speedup_vs_baseline"]["median"]),
+            value=_metric_value("symbolic_speedup_vs_baseline", "median", task_metrics=overall_metrics),
             description="Overall median speedup should stay above baseline threshold.",
         )
     )
@@ -131,20 +172,46 @@ def evaluate_regression_gate(
             stat="mean",
             op="<=",
             threshold=thresholds.max_mse_shift_mean,
-            value=float(overall_metrics["final_mse_loss_shift"]["mean"]),
+            value=_metric_value("final_mse_loss_shift", "mean", task_metrics=overall_metrics),
             description="Overall MSE shift mean should not regress beyond tolerated bound.",
+        )
+    )
+    checks.append(
+        _evaluate_check(
+            scope="overall",
+            task="__all__",
+            metric="symbolic_target_mse_shift",
+            stat="mean",
+            op="<=",
+            threshold=thresholds.max_target_mse_shift_mean,
+            value=_metric_value("symbolic_target_mse_shift", "mean", task_metrics=overall_metrics),
+            description="Overall target MSE shift mean should not regress beyond tolerated bound.",
         )
     )
 
     for task_name, task_item in by_task.items():
         task_metrics = task_item["metrics"]
         task_cfg = {
+            "min_teacher_quality_gate_pass_rate": thresholds.min_teacher_quality_gate_pass_rate,
             "min_formula_pass_rate": thresholds.min_formula_pass_rate,
             "min_speedup_median": thresholds.min_speedup_median,
             "max_mse_shift_mean": thresholds.max_mse_shift_mean,
+            "max_target_mse_shift_mean": thresholds.max_target_mse_shift_mean,
         }
         task_cfg.update(per_task_thresholds.get(task_name, {}))
 
+        checks.append(
+            _evaluate_check(
+                scope="task",
+                task=task_name,
+                metric="teacher_quality_gate_pass",
+                stat="mean",
+                op=">=",
+                threshold=float(task_cfg["min_teacher_quality_gate_pass_rate"]),
+                value=_metric_value("teacher_quality_gate_pass", "mean", task_metrics=task_metrics),
+                description="Task teacher quality gate pass rate should stay high.",
+            )
+        )
         checks.append(
             _evaluate_check(
                 scope="task",
@@ -153,7 +220,7 @@ def evaluate_regression_gate(
                 stat="mean",
                 op=">=",
                 threshold=float(task_cfg["min_formula_pass_rate"]),
-                value=float(task_metrics["formula_validation_result"]["mean"]),
+                value=_metric_value("formula_validation_result", "mean", task_metrics=task_metrics),
                 description="Task formula validation pass rate should stay high.",
             )
         )
@@ -165,7 +232,7 @@ def evaluate_regression_gate(
                 stat="median",
                 op=">=",
                 threshold=float(task_cfg["min_speedup_median"]),
-                value=float(task_metrics["symbolic_speedup_vs_baseline"]["median"]),
+                value=_metric_value("symbolic_speedup_vs_baseline", "median", task_metrics=task_metrics),
                 description="Task median speedup should stay above threshold.",
             )
         )
@@ -177,8 +244,20 @@ def evaluate_regression_gate(
                 stat="mean",
                 op="<=",
                 threshold=float(task_cfg["max_mse_shift_mean"]),
-                value=float(task_metrics["final_mse_loss_shift"]["mean"]),
+                value=_metric_value("final_mse_loss_shift", "mean", task_metrics=task_metrics),
                 description="Task MSE shift mean should stay below tolerated bound.",
+            )
+        )
+        checks.append(
+            _evaluate_check(
+                scope="task",
+                task=task_name,
+                metric="symbolic_target_mse_shift",
+                stat="mean",
+                op="<=",
+                threshold=float(task_cfg["max_target_mse_shift_mean"]),
+                value=_metric_value("symbolic_target_mse_shift", "mean", task_metrics=task_metrics),
+                description="Task target MSE shift mean should stay below tolerated bound.",
             )
         )
 
@@ -238,6 +317,8 @@ def run_regression_gate(
     min_formula_pass_rate: float = 0.95,
     min_speedup_median: float = 1.10,
     max_mse_shift_mean: float = 5e-4,
+    min_teacher_quality_gate_pass_rate: float = 0.95,
+    max_target_mse_shift_mean: float = 5e-4,
 ) -> dict[str, Any]:
     summary = _load_json(summary_json_path)
     threshold_override = _load_json(threshold_override_path) if threshold_override_path else None
@@ -246,6 +327,8 @@ def run_regression_gate(
         min_formula_pass_rate=float(min_formula_pass_rate),
         min_speedup_median=float(min_speedup_median),
         max_mse_shift_mean=float(max_mse_shift_mean),
+        min_teacher_quality_gate_pass_rate=float(min_teacher_quality_gate_pass_rate),
+        max_target_mse_shift_mean=float(max_target_mse_shift_mean),
     )
     thresholds, per_task_thresholds = _merge_thresholds(defaults=defaults, override_json=threshold_override)
 
@@ -303,6 +386,18 @@ def main(argv: list[str] | None = None) -> int:
         default=5e-4,
         help="Global maximum mean mse shift threshold.",
     )
+    parser.add_argument(
+        "--min-teacher-quality-gate-pass-rate",
+        type=float,
+        default=0.95,
+        help="Global minimum teacher-quality-gate pass-rate threshold.",
+    )
+    parser.add_argument(
+        "--max-target-mse-shift-mean",
+        type=float,
+        default=5e-4,
+        help="Global maximum mean target mse shift threshold.",
+    )
     args = parser.parse_args(argv)
 
     result = run_regression_gate(
@@ -312,6 +407,8 @@ def main(argv: list[str] | None = None) -> int:
         min_formula_pass_rate=float(args.min_formula_pass_rate),
         min_speedup_median=float(args.min_speedup_median),
         max_mse_shift_mean=float(args.max_mse_shift_mean),
+        min_teacher_quality_gate_pass_rate=float(args.min_teacher_quality_gate_pass_rate),
+        max_target_mse_shift_mean=float(args.max_target_mse_shift_mean),
     )
     report = result["report"]
     print(f"overall_status={report['overall_status']}")
