@@ -305,7 +305,7 @@ Validation:
 
 Status:
 
-Not Started
+Complete
 
 ### Stage 3: Add Explicit Commit Helper
 
@@ -475,4 +475,4 @@ Phase I 仅在以下条件全部满足时视为完成:
 
 当前建议开工点:
 
-**Stage 1: Add CPU Batched Candidate Evaluation**
+**Stage 3: Add Explicit Commit Helper**

@@ -4,40 +4,48 @@
 按 `IMPLEMENTATION_PLAN.md` 推进 ICBR-KAN Phase I，并完成当前首个可执行 stage。
 
 ## Current Stage
-Stage 1: Add CPU Batched Candidate Evaluation
+Stage 2: Add Safe Replay Evaluator
 
 ## Status
 Complete
 
 ## Latest Completed Work
-- 新增 `kan/icbr.py`，实现无状态的 CPU batched 候选生成入口 `generate_layer_candidates(...)`。
-- 在固定函数下复用 `fit_params` 的参数化边界（`a_range/b_range/grid/iteration`），并按边输出 `fun_name/(a,b,c,d)/r2/complexity`。
-- 增加最小诊断量输出：`boundary_hit`、`nan_to_num_trigger`、`top1_top2_margin`。
-- 确认候选生成流程不触碰模型 symbolic state 或 masks（由测试覆盖）。
-- 新增 `tests/test_icbr_candidates.py`，覆盖语义兼容、无副作用、wall-time smoke 三类最小验证。
+- 在 `kan/icbr.py` 新增 `replay_rerank_edge_candidates(...)`，实现内存态 replay 排序，默认评分为 squared imitation loss。
+- 新增边级 `snapshot/apply/restore` helper，replay 前后完整恢复：
+  - `funs`
+  - `funs_sympy`
+  - `funs_avoid_singularity`
+  - `funs_name`
+  - `affine`
+  - numeric mask
+  - symbolic mask
+- 实现 `calibration_split` 输入抽取（`val_input/test_input/train_input`）并支持直接张量输入。
+- replay 内环不调用 `MultKAN.copy()`、`fix_symbolic(..., log_history=True)`、`unfix_symbolic()` 或 checkpoint 落盘路径。
+- 新增 `tests/test_icbr_replay.py`，覆盖：
+  - replay 后目标边状态完整恢复
+  - `state_id/history/checkpoint` 无副作用
+  - replay 排序可与 local `r2` top-1 不同
 
 ## Files Changed
 - kan/icbr.py
-- tests/test_icbr_candidates.py
+- tests/test_icbr_replay.py
 - IMPLEMENTATION_PLAN.md
 - TASK_STATUS.md
 
 ## Validation Run
-- `python -m pytest tests\test_icbr_candidates.py`（系统 Python，失败：缺少 `sklearn`）
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_candidates.py`（首次失败：参数等价解导致断言过严）
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_candidates.py`（最终通过）
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_candidates.py tests\test_icbr_replay.py`（首次：`tmp_path` 锁文件权限错误）
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_candidates.py tests\test_icbr_replay.py`（修复后通过）
 
 ## Validation Result
-- 通过：`tests/test_icbr_candidates.py` 共 3 项，3 项通过。
-- 失败已处理：首轮环境不匹配与断言鲁棒性问题均已修复并复测通过。
+- 通过：`tests/test_icbr_candidates.py` + `tests/test_icbr_replay.py` 共 6 项，6 项通过。
+- 失败已处理：`tmp_path` 在当前环境出现 lock 权限错误，改为仓库内 `tmp/` 唯一路径后复测通过。
 
 ## Decisions
-- Stage 1 只实现 `kan/icbr.py` + 最小测试，不提前引入 Stage 2/3 的 replay/commit 逻辑。
-- 不修改 `MultKAN.py` 入口，先保持 opt-in 的模块级 helper 形式，减少当前阶段耦合。
-- 兼容性测试以“重建曲线 + r2”对齐 `fit_params` 语义，避免 `x^3` 参数符号等价解造成误报。
+- Stage 2 继续保持最小侵入：仅扩展 `kan/icbr.py` 与 replay 专属测试，不提前做 Stage 3 commit helper。
+- replay 采用“直接写入目标边 + 立即恢复”的内存态路径，避免 `log_history/state_id/checkpoint` 副作用。
+- 为验证“contextual rerank 可不同于 local r2”，增加轻量 toy model 测试，避免依赖复杂训练态构造。
 
 ## Remaining Work
-- Stage 2: Add Safe Replay Evaluator（内存态回放与无副作用恢复）。
 - Stage 3: Add Explicit Commit Helper。
 - Stage 4: 串接 `auto_symbolic_icbr(...)` 入口。
 - Stage 5: CPU 基准与主张验证。

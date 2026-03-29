@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from time import perf_counter
 from typing import Iterable, Mapping
 
@@ -278,4 +279,151 @@ def generate_layer_candidates(
     }
 
 
-__all__ = ["generate_layer_candidates"]
+def _snapshot_symbolic_edge_state(work_model, layer_idx: int, input_idx: int, output_idx: int) -> dict[str, object]:
+    symbolic_layer = work_model.symbolic_fun[layer_idx]
+    return {
+        "fun": symbolic_layer.funs[output_idx][input_idx],
+        "fun_sympy": symbolic_layer.funs_sympy[output_idx][input_idx],
+        "fun_avoid_singularity": symbolic_layer.funs_avoid_singularity[output_idx][input_idx],
+        "fun_name": symbolic_layer.funs_name[output_idx][input_idx],
+        "affine": symbolic_layer.affine.data[output_idx, input_idx].detach().clone(),
+        "numeric_mask": work_model.act_fun[layer_idx].mask.data[input_idx][output_idx].detach().clone(),
+        "symbolic_mask": symbolic_layer.mask.data[output_idx][input_idx].detach().clone(),
+    }
+
+
+def _restore_symbolic_edge_state(
+    work_model,
+    layer_idx: int,
+    input_idx: int,
+    output_idx: int,
+    snapshot: dict[str, object],
+) -> None:
+    symbolic_layer = work_model.symbolic_fun[layer_idx]
+    symbolic_layer.funs[output_idx][input_idx] = snapshot["fun"]
+    symbolic_layer.funs_sympy[output_idx][input_idx] = snapshot["fun_sympy"]
+    symbolic_layer.funs_avoid_singularity[output_idx][input_idx] = snapshot["fun_avoid_singularity"]
+    symbolic_layer.funs_name[output_idx][input_idx] = snapshot["fun_name"]
+    symbolic_layer.affine.data[output_idx, input_idx] = snapshot["affine"]
+    work_model.act_fun[layer_idx].mask.data[input_idx][output_idx] = snapshot["numeric_mask"]
+    symbolic_layer.mask.data[output_idx][input_idx] = snapshot["symbolic_mask"]
+
+
+def _apply_candidate_for_replay(
+    work_model,
+    layer_idx: int,
+    input_idx: int,
+    output_idx: int,
+    candidate: Mapping[str, object],
+) -> None:
+    fun_name = str(candidate["fun_name"])
+    if fun_name not in SYMBOLIC_LIB:
+        raise KeyError(f"Unknown symbolic function: {fun_name}")
+
+    symbolic_layer = work_model.symbolic_fun[layer_idx]
+    params = torch.as_tensor(
+        candidate["params"],
+        dtype=symbolic_layer.affine.dtype,
+        device=symbolic_layer.affine.device,
+    )
+    if params.shape != (4,):
+        raise ValueError("candidate['params'] must contain exactly 4 values: (a, b, c, d)")
+
+    symbolic_layer.funs[output_idx][input_idx] = SYMBOLIC_LIB[fun_name][0]
+    symbolic_layer.funs_sympy[output_idx][input_idx] = SYMBOLIC_LIB[fun_name][1]
+    symbolic_layer.funs_avoid_singularity[output_idx][input_idx] = SYMBOLIC_LIB[fun_name][3]
+    symbolic_layer.funs_name[output_idx][input_idx] = fun_name
+    symbolic_layer.affine.data[output_idx, input_idx] = params
+    work_model.act_fun[layer_idx].mask.data[input_idx][output_idx] = 0.0
+    symbolic_layer.mask.data[output_idx][input_idx] = 1.0
+
+
+def _extract_calibration_input(calibration_split: Mapping[str, torch.Tensor] | torch.Tensor) -> torch.Tensor:
+    if isinstance(calibration_split, torch.Tensor):
+        return calibration_split
+
+    if "val_input" in calibration_split:
+        return calibration_split["val_input"]
+    if "test_input" in calibration_split:
+        return calibration_split["test_input"]
+    if "train_input" in calibration_split:
+        return calibration_split["train_input"]
+    raise KeyError("calibration_split must provide one of val_input/test_input/train_input")
+
+
+def replay_rerank_edge_candidates(
+    work_model,
+    teacher_model,
+    calibration_split: Mapping[str, torch.Tensor] | torch.Tensor,
+    *,
+    layer_idx: int,
+    input_idx: int,
+    output_idx: int,
+    shortlist: list[Mapping[str, object]],
+    singularity_avoiding: bool = False,
+    y_th: float = 10.0,
+) -> dict[str, object]:
+    """
+    Replay shortlisted symbolic candidates on ``work_model`` and rank by imitation loss.
+
+    The target edge state is always restored after replay. This helper does not call
+    ``log_history``/checkpoint primitives and is designed for in-memory evaluation only.
+    """
+
+    if not shortlist:
+        raise ValueError("shortlist must not be empty")
+
+    calibration_input = _extract_calibration_input(calibration_split)
+    state_id_before = getattr(work_model, "state_id", None)
+    teacher_state_id_before = getattr(teacher_model, "state_id", None)
+    edge_snapshot = _snapshot_symbolic_edge_state(work_model, layer_idx, input_idx, output_idx)
+
+    with torch.no_grad():
+        teacher_output = teacher_model(calibration_input, singularity_avoiding=singularity_avoiding, y_th=y_th)
+        if isinstance(teacher_output, tuple):
+            teacher_output = teacher_output[0]
+        teacher_output = teacher_output.detach()
+
+    ranking: list[dict[str, object]] = []
+    replay_start = perf_counter()
+    try:
+        for candidate_index, candidate in enumerate(shortlist):
+            _apply_candidate_for_replay(work_model, layer_idx, input_idx, output_idx, candidate)
+
+            with torch.no_grad():
+                work_output = work_model(calibration_input, singularity_avoiding=singularity_avoiding, y_th=y_th)
+                if isinstance(work_output, tuple):
+                    work_output = work_output[0]
+                work_output = work_output.detach()
+
+            replay_loss = torch.mean((work_output - teacher_output).pow(2)).item()
+            ranking.append(
+                {
+                    "candidate_index": candidate_index,
+                    "fun_name": str(candidate["fun_name"]),
+                    "params": torch.as_tensor(candidate["params"]).detach().clone(),
+                    "local_r2": float(candidate.get("r2", float("nan"))),
+                    "complexity": float(candidate.get("complexity", float("nan"))),
+                    "replay_score": float(replay_loss),
+                }
+            )
+            _restore_symbolic_edge_state(work_model, layer_idx, input_idx, output_idx, edge_snapshot)
+    finally:
+        _restore_symbolic_edge_state(work_model, layer_idx, input_idx, output_idx, edge_snapshot)
+
+    if state_id_before is not None and getattr(work_model, "state_id", None) != state_id_before:
+        raise RuntimeError("replay evaluator changed work_model.state_id")
+    if teacher_state_id_before is not None and getattr(teacher_model, "state_id", None) != teacher_state_id_before:
+        raise RuntimeError("replay evaluator changed teacher_model.state_id")
+
+    ranking.sort(key=lambda item: item["replay_score"])
+    return {
+        "edge": {"layer_idx": layer_idx, "input_idx": input_idx, "output_idx": output_idx},
+        "ranked_candidates": ranking,
+        "best_candidate": copy.deepcopy(ranking[0]),
+        "score_name": "squared_imitation_loss",
+        "replay_rerank_wall_time_s": perf_counter() - replay_start,
+    }
+
+
+__all__ = ["generate_layer_candidates", "replay_rerank_edge_candidates"]
