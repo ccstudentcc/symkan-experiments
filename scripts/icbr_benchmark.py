@@ -73,6 +73,13 @@ _BENCHMARK_PROFILES: dict[str, dict[str, float | int]] = {
         "lr": 0.03,
         "lamb": 1e-3,
     },
+    "feynman_reference": {
+        "train_num": 2000,
+        "test_num": 1000,
+        "train_steps": 200,
+        "lr": 1e-2,
+        "lamb": 1e-2,
+    },
 }
 
 _TEACHER_CACHE_MODES = {"readwrite", "readonly", "refresh", "off"}
@@ -112,6 +119,19 @@ class _TaskSpec:
     dataset_variant: str | None = None
     dataset_split_strategy: str = "random"
     target_formula: str | None = None
+    teacher_grid: int = 5
+    teacher_k: int = 3
+    teacher_fit_opt: str = "Adam"
+    teacher_post_train_prune: bool = False
+    teacher_prune_node_th: float = 1e-2
+    teacher_prune_edge_th: float = 3e-2
+    teacher_post_prune_steps: int = 0
+    teacher_post_prune_lr: float = 1e-3
+    teacher_post_prune_lamb: float = 1e-2
+    teacher_post_prune_early_stop: bool = False
+    teacher_post_prune_eval_every: int = 5
+    teacher_post_prune_min_delta: float = 1e-6
+    teacher_post_prune_patience: int = 2
 
 
 def _task_specs() -> dict[str, _TaskSpec]:
@@ -338,6 +358,19 @@ def _build_feynman_task_spec(
         dataset_variant=feynman_variant,
         dataset_split_strategy=feynman_split_strategy,
         target_formula=equations_map.get(filename),
+        teacher_grid=20,
+        teacher_k=3,
+        teacher_fit_opt="Adam",
+        teacher_post_train_prune=True,
+        teacher_prune_node_th=1e-2,
+        teacher_prune_edge_th=1e-2,
+        teacher_post_prune_steps=100,
+        teacher_post_prune_lr=1e-3,
+        teacher_post_prune_lamb=1e-2,
+        teacher_post_prune_early_stop=True,
+        teacher_post_prune_eval_every=5,
+        teacher_post_prune_min_delta=1e-6,
+        teacher_post_prune_patience=2,
     )
 
 
@@ -435,8 +468,8 @@ def _build_teacher_dataset(
 def _build_teacher_model(spec: _TaskSpec) -> MultKAN:
     return MultKAN(
         width=spec.width,
-        grid=5,
-        k=3,
+        grid=int(spec.teacher_grid),
+        k=int(spec.teacher_k),
         auto_save=False,
         device="cpu",
     )
@@ -453,7 +486,7 @@ def _train_teacher_model(
     model = _build_teacher_model(spec)
     model.fit(
         dataset,
-        opt="Adam",
+        opt=spec.teacher_fit_opt,
         steps=train_steps,
         lr=lr,
         update_grid=False,
@@ -461,6 +494,59 @@ def _train_teacher_model(
         lamb=lamb,
         log=max(train_steps + 1, 999999),
     )
+    if spec.teacher_post_train_prune:
+        model = model.prune(
+            node_th=float(spec.teacher_prune_node_th),
+            edge_th=float(spec.teacher_prune_edge_th),
+        )
+        post_prune_steps = int(spec.teacher_post_prune_steps)
+        if post_prune_steps > 0:
+            post_prune_lr = float(spec.teacher_post_prune_lr)
+            post_prune_lamb = float(spec.teacher_post_prune_lamb)
+            if bool(spec.teacher_post_prune_early_stop):
+                eval_every = max(1, int(spec.teacher_post_prune_eval_every))
+                patience = max(1, int(spec.teacher_post_prune_patience))
+                min_delta = float(spec.teacher_post_prune_min_delta)
+                remaining_steps = post_prune_steps
+                prev_train_mse: float | None = None
+                stable_checks = 0
+                while remaining_steps > 0:
+                    chunk_steps = min(eval_every, remaining_steps)
+                    model.fit(
+                        dataset,
+                        opt=spec.teacher_fit_opt,
+                        steps=chunk_steps,
+                        lr=post_prune_lr,
+                        update_grid=False,
+                        batch=-1,
+                        lamb=post_prune_lamb,
+                        log=max(chunk_steps + 1, 999999),
+                    )
+                    remaining_steps -= chunk_steps
+                    with torch.no_grad():
+                        train_pred = model(dataset["train_input"])
+                        train_mse = float(
+                            torch.mean((train_pred - dataset["train_label"]).pow(2)).item()
+                        )
+                    if prev_train_mse is not None:
+                        if abs(prev_train_mse - train_mse) <= min_delta:
+                            stable_checks += 1
+                        else:
+                            stable_checks = 0
+                    prev_train_mse = train_mse
+                    if stable_checks >= patience:
+                        break
+            else:
+                model.fit(
+                    dataset,
+                    opt=spec.teacher_fit_opt,
+                    steps=post_prune_steps,
+                    lr=post_prune_lr,
+                    update_grid=False,
+                    batch=-1,
+                    lamb=post_prune_lamb,
+                    log=max(post_prune_steps + 1, 999999),
+                )
     return model
 
 
@@ -485,6 +571,19 @@ def _build_teacher_cache_identity(
         "dataset_path": spec.dataset_path,
         "dataset_variant": spec.dataset_variant,
         "dataset_split_strategy": spec.dataset_split_strategy,
+        "teacher_grid": int(spec.teacher_grid),
+        "teacher_k": int(spec.teacher_k),
+        "teacher_fit_opt": spec.teacher_fit_opt,
+        "teacher_post_train_prune": bool(spec.teacher_post_train_prune),
+        "teacher_prune_node_th": float(spec.teacher_prune_node_th),
+        "teacher_prune_edge_th": float(spec.teacher_prune_edge_th),
+        "teacher_post_prune_steps": int(spec.teacher_post_prune_steps),
+        "teacher_post_prune_lr": float(spec.teacher_post_prune_lr),
+        "teacher_post_prune_lamb": float(spec.teacher_post_prune_lamb),
+        "teacher_post_prune_early_stop": bool(spec.teacher_post_prune_early_stop),
+        "teacher_post_prune_eval_every": int(spec.teacher_post_prune_eval_every),
+        "teacher_post_prune_min_delta": float(spec.teacher_post_prune_min_delta),
+        "teacher_post_prune_patience": int(spec.teacher_post_prune_patience),
         "train_num": int(train_num),
         "test_num": int(test_num),
         "train_steps": int(train_steps),
@@ -1379,6 +1478,24 @@ def run_benchmark(
                 },
                 "policy": "skip_symbolic_comparison_when_teacher_quality_fails",
             },
+            "teacher_training": {
+                task_name: {
+                    "grid": int(specs[task_name].teacher_grid),
+                    "k": int(specs[task_name].teacher_k),
+                    "opt": specs[task_name].teacher_fit_opt,
+                    "post_train_prune": bool(specs[task_name].teacher_post_train_prune),
+                    "prune_node_th": float(specs[task_name].teacher_prune_node_th),
+                    "prune_edge_th": float(specs[task_name].teacher_prune_edge_th),
+                    "post_prune_steps": int(specs[task_name].teacher_post_prune_steps),
+                    "post_prune_lr": float(specs[task_name].teacher_post_prune_lr),
+                    "post_prune_lamb": float(specs[task_name].teacher_post_prune_lamb),
+                    "post_prune_early_stop": bool(specs[task_name].teacher_post_prune_early_stop),
+                    "post_prune_eval_every": int(specs[task_name].teacher_post_prune_eval_every),
+                    "post_prune_min_delta": float(specs[task_name].teacher_post_prune_min_delta),
+                    "post_prune_patience": int(specs[task_name].teacher_post_prune_patience),
+                }
+                for task_name in resolved_tasks
+            },
             "feynman": feynman_config,
             "teacher_cache": {
                 "dir": str(teacher_cache_dir),
@@ -1440,13 +1557,16 @@ def run_benchmark(
                 "failure_policy": "Skip baseline/ICBR symbolic comparison for that row and keep explicit gate reason.",
             },
             "teacher_cache": {
-                "cache_key_rule": "hash(task, seed, width, dataset_kind, dataset_path, dataset_variant, dataset_split_strategy, train_num, test_num, train_steps, lr, lamb, profile, cache_version)",
+                "cache_key_rule": "hash(task, seed, width, dataset_kind, dataset_path, dataset_variant, dataset_split_strategy, teacher_grid, teacher_k, teacher_fit_opt, teacher_post_train_prune, teacher_prune_node_th, teacher_prune_edge_th, teacher_post_prune_steps, teacher_post_prune_lr, teacher_post_prune_lamb, teacher_post_prune_early_stop, teacher_post_prune_eval_every, teacher_post_prune_min_delta, teacher_post_prune_patience, train_num, test_num, train_steps, lr, lamb, profile, cache_version)",
                 "modes": {
                     "readwrite": "Read cache when available; train+write on miss.",
                     "readonly": "Read cache only; train without writing on miss.",
                     "refresh": "Ignore old cache and retrain, then overwrite cache.",
                     "off": "Disable cache and always train.",
                 },
+            },
+            "teacher_training": {
+                "feynman_reference_policy": "For feynman_file tasks: train -> prune(node_th=1e-2, edge_th=1e-2) -> refit(steps=100, lr=1e-3, lamb=1e-2, early_stop_check_every=5) -> cache.",
             },
             "extensibility": [
                 "Add new tasks in the resolver layer (core task specs or feynman token expansion).",
@@ -1645,6 +1765,31 @@ def _parse_str_list(text: str) -> list[str]:
     return values
 
 
+def _resolve_default_tasks_and_seeds(
+    *,
+    profile: str,
+    tasks_raw: str | None,
+    seeds_raw: str | None,
+) -> tuple[list[str], list[int]]:
+    if tasks_raw is None:
+        if profile == "feynman_reference":
+            tasks = ["feynman_paper10"]
+        else:
+            tasks = ["minimal", "combo", "poly_cubic", "trig_interaction"]
+    else:
+        tasks = _parse_str_list(tasks_raw)
+
+    if seeds_raw is None:
+        if profile == "feynman_reference":
+            seeds = [1]
+        else:
+            seeds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    else:
+        seeds = _parse_int_list(seeds_raw)
+
+    return tasks, seeds
+
+
 def _resolve_training_config(
     *,
     profile: str,
@@ -1681,11 +1826,14 @@ def main(argv: list[str] | None = None) -> None:
         "--profile",
         default="quick",
         choices=sorted(_BENCHMARK_PROFILES.keys()),
-        help="Benchmark run profile: quick for smoke, quality for teacher-convergence verification.",
+        help=(
+            "Benchmark run profile: quick for smoke, quality for teacher-convergence verification, "
+            "feynman_reference for README-style Feynman defaults."
+        ),
     )
     parser.add_argument(
         "--tasks",
-        default="minimal,combo,poly_cubic,trig_interaction",
+        default=None,
         help=(
             "Comma-separated tasks. "
             "Supports core tasks (minimal,combo,poly_cubic,trig_interaction), "
@@ -1737,7 +1885,11 @@ def main(argv: list[str] | None = None) -> None:
         default="5,2",
         help="Comma-separated hidden widths used for feynman tasks, e.g. 5,2 -> width=[n_var,5,2,1].",
     )
-    parser.add_argument("--seeds", default="0,1,2,3,4,5,6,7,8,9", help="Comma-separated integer seeds")
+    parser.add_argument(
+        "--seeds",
+        default=None,
+        help="Comma-separated integer seeds. If omitted, profile-dependent defaults are used.",
+    )
     parser.add_argument("--output-dir", default="outputs/icbr_benchmark_extended", help="Output directory")
     parser.add_argument("--train-num", type=int, default=None, help="Training sample count per task")
     parser.add_argument("--test-num", type=int, default=None, help="Test/calibration sample count per task")
@@ -1779,10 +1931,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--quiet", action="store_true", help="Disable per-run progress prints")
     args = parser.parse_args(argv)
 
-    tasks = _parse_str_list(args.tasks)
+    tasks, seeds = _resolve_default_tasks_and_seeds(
+        profile=args.profile,
+        tasks_raw=args.tasks,
+        seeds_raw=args.seeds,
+    )
     if args.feynman_datasets.strip():
         tasks.extend(_parse_str_list(args.feynman_datasets))
-    seeds = _parse_int_list(args.seeds)
     output_dir = Path(args.output_dir)
     teacher_cache_dir = Path(args.teacher_cache_dir)
     feynman_root = Path(args.feynman_root)

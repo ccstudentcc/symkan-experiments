@@ -7,7 +7,13 @@ from pathlib import Path
 
 import numpy as np
 
-from scripts.icbr_benchmark import _expand_feynman_task_tokens, _resolve_training_config, main, run_benchmark
+from scripts.icbr_benchmark import (
+    _expand_feynman_task_tokens,
+    _resolve_default_tasks_and_seeds,
+    _resolve_training_config,
+    main,
+    run_benchmark,
+)
 
 
 def test_icbr_benchmark_script_generates_outputs() -> None:
@@ -164,6 +170,39 @@ def test_quality_profile_resolves_expected_defaults() -> None:
         "lr": False,
         "lamb": False,
     }
+
+
+def test_feynman_reference_profile_resolves_expected_defaults() -> None:
+    resolved, overrides = _resolve_training_config(
+        profile="feynman_reference",
+        train_num=None,
+        test_num=None,
+        train_steps=None,
+        lr=None,
+        lamb=None,
+    )
+    assert resolved["train_num"] == 2000
+    assert resolved["test_num"] == 1000
+    assert resolved["train_steps"] == 200
+    assert resolved["lr"] == 1e-2
+    assert resolved["lamb"] == 1e-2
+    assert overrides == {
+        "train_num": False,
+        "test_num": False,
+        "train_steps": False,
+        "lr": False,
+        "lamb": False,
+    }
+
+
+def test_feynman_reference_defaults_task_and_seed() -> None:
+    tasks, seeds = _resolve_default_tasks_and_seeds(
+        profile="feynman_reference",
+        tasks_raw=None,
+        seeds_raw=None,
+    )
+    assert tasks == ["feynman_paper10"]
+    assert seeds == [1]
 
 
 def test_trig_interaction_uses_task_specific_topk_override() -> None:
@@ -349,6 +388,16 @@ def test_feynman_dataset_file_loading_smoke() -> None:
     assert summary["config"]["tasks"] == ["feynman_I_10_7"]
     assert summary["config"]["feynman"]["enabled"] is True
     assert summary["config"]["feynman"]["variant"] == "Feynman_with_units"
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["grid"] == 20
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["k"] == 3
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_train_prune"] is True
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_steps"] == 100
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_lr"] == 1e-3
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_lamb"] == 1e-2
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_early_stop"] is True
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_eval_every"] == 5
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_min_delta"] == 1e-6
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_patience"] == 2
     row = summary["rows"][0]
     assert row["task"] == "feynman_I_10_7"
     assert row["task_kind"] == "feynman_file"

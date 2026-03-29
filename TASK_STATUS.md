@@ -4,32 +4,40 @@
 2026-03-29
 
 ## Task
-完成 Stage 12：增强 `icbr_benchmark.py` 支持本地 Feynman 数据集目录（含 variant/选择策略/CLI），并保持现有导出与 teacher cache 功能。
+完成 Stage 13 收口：在 Feynman 参考流程中补齐“剪枝后微调早停机制”，并固定微调超参（`lr=1e-3`, `lamb=1e-2`）。
 
 ## Current Stage
-Stage 12: Add Feynman Dataset Support to `icbr_benchmark.py`
+Stage 13: Add Feynman Reference Preset and Prune-Refit Teacher Flow
 
 ## Status
 Complete
 
 ## Latest Completed Work
-- 在 `scripts/icbr_benchmark.py` 增加 Feynman 数据接入层与 CLI：
-  - 新增参数：`--feynman-root`、`--feynman-variant`、`--feynman-equations-csv`、`--feynman-max-datasets`、`--feynman-dataset-select-seed`、`--feynman-split-strategy`、`--feynman-width-mid`、`--feynman-datasets`
-  - 支持 task token：`feynman_paper10`（README 的固定 10 集）与 `feynman_random`（可复现随机子集）
-  - 支持显式任务名（如 `feynman_I_10_7`）从本地文件 `datasets/<variant>/<filename>` 读取
-- 新增 Feynman 数据处理能力：
-  - 本地文件加载与 train/test 切分（`random` / `linspace`）
-  - 自动读取 `FeynmanEquations.csv`（若存在）并写入 `target_formula`
-  - 依据 Feynman 文件列数自动推断 `n_var`，并按 `feynman_width_mid` 构建网络宽度
-- 保持并扩展现有导出结构：
-  - `rows` 新增 `task_kind`、`task_source`、`target_formula`
-  - `summary.config` 新增 `feynman` 配置块
-  - Markdown 报告增加 Feynman 运行配置与每条任务来源信息
-- teacher cache 保持可用且缓存键增强：
-  - 额外纳入 `dataset_kind/dataset_path/dataset_variant/dataset_split_strategy`，避免 Feynman 多来源冲突缓存
-- 新增测试覆盖：
-  - `test_feynman_dataset_file_loading_smoke`（临时 mock 本地 Feynman 文件验证完整路径）
-  - `test_feynman_task_tokens_expand`（验证 `feynman_paper10` token 展开）
+- 增加 `feynman_reference` 参考 profile，参数与目标口径：
+  - `train_num=2000`
+  - `test_num=1000`
+  - `train_steps=200`
+  - `lr=1e-2`
+  - `lamb=1e-2`
+- 默认调用增强（便于直接使用参考配置）：
+  - 当 `--profile feynman_reference` 且未显式给 `--tasks/--seeds` 时，默认：
+    - `tasks=["feynman_paper10"]`
+    - `seeds=[1]`
+- Feynman teacher 训练流已升级为：
+  - 初始训练（`opt=Adam`）
+  - `model.prune(node_th=1e-2, edge_th=1e-2)`
+  - 微调最多 `100` 步（`lr=1e-3`, `lamb=1e-2`）
+  - 微调阶段启用早停：每 `5` 步检查一次 train MSE 变化，若连续若干次变化不超过 `min_delta` 则提前停止
+  - 再落入持久 cache，并用于 baseline/ICBR 符号化对比
+- Feynman 模型结构口径已固定在 task 规格中：
+  - `grid=20`
+  - `k=3`
+  - `width_mid=5,2`（通过 `--feynman-width-mid` 默认值）
+  - `device=cpu`
+- cache key 继续增强，纳入 teacher 结构与 prune/refit 语义，避免错命中：
+  - `teacher_grid/teacher_k/teacher_fit_opt/teacher_post_train_prune/prune_th/post_prune_steps/post_prune_lr/post_prune_lamb/post_prune_early_stop/eval_every/min_delta/patience`
+- summary 输出新增 `config.teacher_training`，每个 task 可追踪 teacher 训练与 prune/refit 配置。
+- 测试更新：Feynman smoke 额外校验 `post_prune_lr/post_prune_lamb/post_prune_early_stop/post_prune_eval_every/post_prune_min_delta/post_prune_patience` 字段。
 
 ## Files Changed
 - scripts/icbr_benchmark.py
@@ -44,23 +52,18 @@ Complete
 
 ## Validation Result
 - `py_compile` 通过
-- `pytest` 通过：`7 passed`
-- benchmark 相关回归测试通过：`10 passed`（`test_icbr_benchmark_smoke + test_icbr_benchmark_script_smoke + test_icbr_benchmark_regression_smoke`）
-- 新增 Feynman smoke 测试通过，证明在本地文件数据模式下：
-  - CLI 参数可解析
-  - 数据可读取并切分
-  - benchmark 可完成导出（CSV/JSON/MD）
-  - teacher cache 与既有导出结构未破坏
+- 脚本 smoke 测试通过：`9 passed`
+- benchmark 回归相关测试通过：`12 passed`
+- Feynman smoke 路径与旧路径均可运行，导出字段与 cache 语义无回归
 
 ## Decisions
-- 继续维持“只改 benchmark/数据接入层，不改 ICBR 主算法”。
-- 对 Feynman 任务采用“本地文件优先”的真实数据模式（与你的 `datasets/` 目录约定一致）。
-- 通过 token + 显式列表双通道支持 README 风格操作（固定 10 集 / 随机子集 / 指定集合）。
-- 在你尚未完成数据下载前，先用 mock 数据集完成可执行验证，避免虚报已跑真实 benchmark。
+- 继续维持“只改 benchmark 层，不改 ICBR 主算法”。
+- prune 阈值按你提供口径采用 `1e-2`（通过 `model.prune(node_th=1e-2, edge_th=1e-2)` 显式固定）。
+- 剪枝后微调默认超参固定为 `lr=1e-3`, `lamb=1e-2`，并启用“每 5 步检测变化”的早停策略。
 
 ## Remaining Work
-- 等你把数据下载到 `datasets/` 后，执行真实 10 集实验（建议命令）：
-  - `python -m scripts.icbr_benchmark --tasks feynman_paper10 --profile quality --feynman-root datasets --feynman-variant Feynman_with_units --feynman-max-datasets 10 --feynman-dataset-select-seed 2 --output-dir outputs/icbr_benchmark_stage12_feynman_paper10 --quiet --no-plots`
+- 等你把真实数据下载到 `datasets/` 后，可直接参考调用：
+  - `python -m scripts.icbr_benchmark --profile feynman_reference --feynman-root datasets --feynman-variant Feynman_with_units --output-dir outputs/icbr_benchmark_feynman_reference --quiet --no-plots`
 - 完成真实数据实跑后，再进行多 seeds 聚合与回归门禁复验。
 
 ## Blockers

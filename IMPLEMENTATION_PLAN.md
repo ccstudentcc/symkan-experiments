@@ -828,6 +828,64 @@ Status:
 
 Complete
 
+### Stage 13: Add Feynman Reference Preset and Prune-Refit Teacher Flow
+
+Goal:
+
+为 Feynman 实验提供可直接调用的参考配置（对齐 `In-Context-Symbolic-Regression-KAN-main/README.md` 与 `ablation.py` 的核心设定），并将 teacher 训练流程调整为“先训练 -> 自动剪枝 -> 微调 100 步 -> 缓存 -> baseline/ICBR 符号化对比”。
+
+Target Files:
+
+- `scripts/icbr_benchmark.py`
+- `tests/test_icbr_benchmark_script_smoke.py`
+- `IMPLEMENTATION_PLAN.md`
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- benchmark 提供 Feynman 参考配置入口，默认参数至少包含：
+  - `train_num=2000`
+  - `test_num=1000`
+  - `lamb=1e-2`
+  - `lr=1e-2`
+  - `train_steps=200`
+  - `seed=1`（参考调用默认）
+  - `feynman_width_mid=5,2`
+  - `grid=20`
+  - `k=3`
+  - `device=cpu`
+  - `opt=Adam`
+- Feynman teacher 训练完成后，执行：
+  - `model.prune(...)`（阈值采用参考口径 `1e-2`）
+  - 再微调 `100` 步（`lr=1e-3`，`lamb=1e-2`）
+  - 微调阶段启用早停：每 `5` 步检查一次训练误差变化
+- teacher cache 写入的是“剪枝 + 微调”后的 teacher，并保持 cache key 语义完备。
+- 保持 Stage 12 既有导出与可视化能力不退化。
+
+Implementation Constraints:
+
+- 不改动 ICBR 主算法路径，只改 benchmark teacher 训练与配置层。
+- 不破坏非 Feynman 任务默认行为。
+- 保持 CPU-first 口径。
+
+Success Criteria:
+
+- 一条参考调用命令可在不额外指定大量参数时落到上述配置。
+- Feynman teacher 路径确实执行 prune + refit（含每 5 步检查的早停逻辑，非文档声称）。
+- 脚本测试通过，且现有 benchmark 相关测试不回归。
+
+Validation:
+
+- `python -m py_compile scripts/icbr_benchmark.py tests/test_icbr_benchmark_script_smoke.py`
+- `pytest tests/test_icbr_benchmark_script_smoke.py`
+- `pytest tests/test_icbr_benchmark_smoke.py tests/test_icbr_benchmark_script_smoke.py tests/test_icbr_benchmark_regression_smoke.py`
+- 数据就绪后参考调用：
+  - `python -m scripts.icbr_benchmark --profile feynman_reference --feynman-root datasets --feynman-variant Feynman_with_units --quiet --no-plots`
+
+Status:
+
+Complete
+
 ## 5. Acceptance Criteria
 
 Phase I 仅在以下条件全部满足时视为完成:
@@ -864,3 +922,4 @@ Phase I 仅在以下条件全部满足时视为完成:
 10. Stage 10: Calibrate Teacher Convergence and Run 10-Seed Full-Task Verification
 11. Stage 11: Add Cross-Run Persistent Teacher Cache
 12. Stage 12: Add Feynman Dataset Support to `icbr_benchmark.py`
+13. Stage 13: Add Feynman Reference Preset and Prune-Refit Teacher Flow
