@@ -5,6 +5,7 @@ from time import perf_counter
 from typing import Iterable, Mapping
 
 import numpy as np
+import sympy
 import torch
 from sklearn.linear_model import LinearRegression
 
@@ -703,6 +704,36 @@ def auto_symbolic_icbr(
     )
 
 
+def _round_sympy_expr(expr, significant_digits: int = 6):
+    rounded = expr
+    for atom in sympy.preorder_traversal(expr):
+        if isinstance(atom, sympy.Float):
+            rounded_value = f"{float(atom):.{significant_digits}g}"
+            rounded = rounded.subs(atom, sympy.Float(rounded_value))
+    return rounded
+
+
+def _formula_export_details(
+    model,
+    *,
+    input_dim: int,
+    significant_digits: int = 6,
+) -> dict[str, object]:
+    try:
+        formulas, _ = model.symbolic_formula(var=[f"x_{idx + 1}" for idx in range(input_dim)])
+    except Exception as exc:
+        return {
+            "ok": False,
+            "raw": [],
+            "display": [],
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    raw = [str(expr) for expr in formulas]
+    display = [str(_round_sympy_expr(expr, significant_digits=significant_digits)) for expr in formulas]
+    return {"ok": True, "raw": raw, "display": display, "error": None}
+
+
 def benchmark_icbr_vs_baseline(
     model,
     *,
@@ -713,8 +744,10 @@ def benchmark_icbr_vs_baseline(
     b_range: tuple[float, float] = (-10.0, 10.0),
     grid_number: int = 101,
     iteration: int = 3,
+    formula_significant_digits: int = 6,
 ) -> dict[str, object]:
     calibration_input = _extract_calibration_input(calibration_split)
+    input_dim = int(calibration_input.shape[1])
     symbolic_lib = _resolve_symbolic_lib(lib)
     lib_names = list(symbolic_lib.keys())
     if not lib_names:
@@ -736,14 +769,12 @@ def benchmark_icbr_vs_baseline(
     with torch.no_grad():
         baseline_output = baseline_model(calibration_input).detach()
     baseline_mse = torch.mean((baseline_output - teacher_output).pow(2)).item()
-    baseline_formula_ok = False
-    try:
-        formulas, _ = baseline_model.symbolic_formula(
-            var=[f"x_{idx + 1}" for idx in range(int(calibration_input.shape[1]))]
-        )
-        baseline_formula_ok = len(formulas) == int(baseline_output.shape[1])
-    except Exception:
-        baseline_formula_ok = False
+    baseline_formula = _formula_export_details(
+        baseline_model,
+        input_dim=input_dim,
+        significant_digits=formula_significant_digits,
+    )
+    baseline_formula_ok = bool(baseline_formula["ok"]) and len(baseline_formula["raw"]) == int(baseline_output.shape[1])
 
     teacher_model = _clone_model_memory(model)
     work_model = _clone_model_memory(model)
@@ -763,28 +794,36 @@ def benchmark_icbr_vs_baseline(
     with torch.no_grad():
         icbr_output = work_model(calibration_input).detach()
     icbr_mse = torch.mean((icbr_output - teacher_output).pow(2)).item()
-    icbr_formula_ok = False
-    try:
-        formulas, _ = work_model.symbolic_formula(
-            var=[f"x_{idx + 1}" for idx in range(int(calibration_input.shape[1]))]
-        )
-        icbr_formula_ok = len(formulas) == int(icbr_output.shape[1])
-    except Exception:
-        icbr_formula_ok = False
+    icbr_formula = _formula_export_details(
+        work_model,
+        input_dim=input_dim,
+        significant_digits=formula_significant_digits,
+    )
+    icbr_formula_ok = bool(icbr_formula["ok"]) and len(icbr_formula["raw"]) == int(icbr_output.shape[1])
+
+    icbr_symbolic_wall_time_s = float(icbr_timing["symbolic_wall_time_s"])
+    baseline_symbolic_wall_time_s_f = float(baseline_symbolic_wall_time_s)
+    symbolic_speedup_vs_baseline = baseline_symbolic_wall_time_s_f / max(icbr_symbolic_wall_time_s, 1e-12)
+    symbolic_wall_time_delta_s = baseline_symbolic_wall_time_s_f - icbr_symbolic_wall_time_s
 
     return {
         "candidate_generation_wall_time_s": float(icbr_timing["candidate_generation_wall_time_s"]),
         "replay_rerank_wall_time_s": float(icbr_timing["replay_rerank_wall_time_s"]),
-        "symbolic_wall_time_s": float(icbr_timing["symbolic_wall_time_s"]),
-        "baseline_symbolic_wall_time_s": float(baseline_symbolic_wall_time_s),
-        "symbolic_speedup_vs_baseline": float(
-            baseline_symbolic_wall_time_s / max(float(icbr_timing["symbolic_wall_time_s"]), 1e-12)
-        ),
+        "symbolic_wall_time_s": icbr_symbolic_wall_time_s,
+        "baseline_symbolic_wall_time_s": baseline_symbolic_wall_time_s_f,
+        "symbolic_wall_time_delta_s": float(symbolic_wall_time_delta_s),
+        "symbolic_speedup_vs_baseline": float(symbolic_speedup_vs_baseline),
         "replay_imitation_gap": float(icbr_mse),
         "final_mse_loss_shift": float(icbr_mse - baseline_mse),
         "formula_validation_result": bool(icbr_formula_ok and baseline_formula_ok),
         "baseline_formula_validation_result": bool(baseline_formula_ok),
         "icbr_formula_validation_result": bool(icbr_formula_ok),
+        "baseline_formula_raw": baseline_formula["raw"],
+        "baseline_formula_display": baseline_formula["display"],
+        "icbr_formula_raw": icbr_formula["raw"],
+        "icbr_formula_display": icbr_formula["display"],
+        "baseline_formula_error": baseline_formula["error"],
+        "icbr_formula_error": icbr_formula["error"],
         "baseline_mse": float(baseline_mse),
         "icbr_mse": float(icbr_mse),
     }

@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -81,6 +82,16 @@ def _fit_teacher_model(
     return model, dataset
 
 
+def _mean(values: list[float]) -> float:
+    if not values:
+        return float("nan")
+    return float(sum(values) / len(values))
+
+
+def _serialize_formula_list(formulas: list[str]) -> str:
+    return " || ".join(formulas)
+
+
 def run_benchmark(
     *,
     tasks: list[str],
@@ -124,14 +135,21 @@ def run_benchmark(
                 grid_number=grid_number,
                 iteration=iteration,
             )
-            row = {"task": task_name, "seed": seed, **metrics}
+            row = {
+                "task": task_name,
+                "seed": seed,
+                "n_var": spec.n_var,
+                "width": list(spec.width),
+                "lib": list(spec.lib),
+                **metrics,
+            }
             rows.append(row)
             if not quiet:
                 print(
                     f"[icbr-benchmark] task={task_name} seed={seed} "
-                    f"candidate={metrics['candidate_generation_wall_time_s']:.4f}s "
-                    f"replay={metrics['replay_rerank_wall_time_s']:.4f}s "
-                    f"symbolic={metrics['symbolic_wall_time_s']:.4f}s "
+                    f"icbr_symbolic={metrics['symbolic_wall_time_s']:.4f}s "
+                    f"baseline_symbolic={metrics['baseline_symbolic_wall_time_s']:.4f}s "
+                    f"speedup={metrics['symbolic_speedup_vs_baseline']:.2f}x "
                     f"mse_shift={metrics['final_mse_loss_shift']:.6e}"
                 )
 
@@ -139,65 +157,132 @@ def run_benchmark(
     fieldnames = [
         "task",
         "seed",
+        "n_var",
+        "width",
+        "lib",
         "candidate_generation_wall_time_s",
         "replay_rerank_wall_time_s",
         "symbolic_wall_time_s",
         "baseline_symbolic_wall_time_s",
+        "symbolic_wall_time_delta_s",
         "symbolic_speedup_vs_baseline",
         "replay_imitation_gap",
         "final_mse_loss_shift",
+        "baseline_mse",
+        "icbr_mse",
         "formula_validation_result",
         "baseline_formula_validation_result",
         "icbr_formula_validation_result",
-        "baseline_mse",
-        "icbr_mse",
+        "baseline_formula_error",
+        "icbr_formula_error",
+        "baseline_formula_raw",
+        "baseline_formula_display",
+        "icbr_formula_raw",
+        "icbr_formula_display",
     ]
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(rows)
+        for row in rows:
+            writer.writerow(
+                {
+                    "task": row["task"],
+                    "seed": row["seed"],
+                    "n_var": row["n_var"],
+                    "width": json.dumps(row["width"], ensure_ascii=False),
+                    "lib": json.dumps(row["lib"], ensure_ascii=False),
+                    "candidate_generation_wall_time_s": row["candidate_generation_wall_time_s"],
+                    "replay_rerank_wall_time_s": row["replay_rerank_wall_time_s"],
+                    "symbolic_wall_time_s": row["symbolic_wall_time_s"],
+                    "baseline_symbolic_wall_time_s": row["baseline_symbolic_wall_time_s"],
+                    "symbolic_wall_time_delta_s": row["symbolic_wall_time_delta_s"],
+                    "symbolic_speedup_vs_baseline": row["symbolic_speedup_vs_baseline"],
+                    "replay_imitation_gap": row["replay_imitation_gap"],
+                    "final_mse_loss_shift": row["final_mse_loss_shift"],
+                    "baseline_mse": row["baseline_mse"],
+                    "icbr_mse": row["icbr_mse"],
+                    "formula_validation_result": row["formula_validation_result"],
+                    "baseline_formula_validation_result": row["baseline_formula_validation_result"],
+                    "icbr_formula_validation_result": row["icbr_formula_validation_result"],
+                    "baseline_formula_error": row["baseline_formula_error"],
+                    "icbr_formula_error": row["icbr_formula_error"],
+                    "baseline_formula_raw": _serialize_formula_list(row["baseline_formula_raw"]),
+                    "baseline_formula_display": _serialize_formula_list(row["baseline_formula_display"]),
+                    "icbr_formula_raw": _serialize_formula_list(row["icbr_formula_raw"]),
+                    "icbr_formula_display": _serialize_formula_list(row["icbr_formula_display"]),
+                }
+            )
 
     summary_by_task: dict[str, dict[str, float]] = {}
     for task_name in tasks:
         task_rows = [row for row in rows if row["task"] == task_name]
-        count = float(len(task_rows))
         summary_by_task[task_name] = {
-            "candidate_generation_wall_time_s_mean": float(
-                sum(float(row["candidate_generation_wall_time_s"]) for row in task_rows) / count
+            "candidate_generation_wall_time_s_mean": _mean(
+                [float(row["candidate_generation_wall_time_s"]) for row in task_rows]
             ),
-            "replay_rerank_wall_time_s_mean": float(
-                sum(float(row["replay_rerank_wall_time_s"]) for row in task_rows) / count
+            "replay_rerank_wall_time_s_mean": _mean([float(row["replay_rerank_wall_time_s"]) for row in task_rows]),
+            "icbr_symbolic_wall_time_s_mean": _mean([float(row["symbolic_wall_time_s"]) for row in task_rows]),
+            "baseline_symbolic_wall_time_s_mean": _mean(
+                [float(row["baseline_symbolic_wall_time_s"]) for row in task_rows]
             ),
-            "symbolic_wall_time_s_mean": float(
-                sum(float(row["symbolic_wall_time_s"]) for row in task_rows) / count
+            "symbolic_wall_time_delta_s_mean": _mean([float(row["symbolic_wall_time_delta_s"]) for row in task_rows]),
+            "symbolic_speedup_vs_baseline_mean": _mean(
+                [float(row["symbolic_speedup_vs_baseline"]) for row in task_rows]
             ),
-            "baseline_symbolic_wall_time_s_mean": float(
-                sum(float(row["baseline_symbolic_wall_time_s"]) for row in task_rows) / count
+            "final_mse_loss_shift_mean": _mean([float(row["final_mse_loss_shift"]) for row in task_rows]),
+            "baseline_mse_mean": _mean([float(row["baseline_mse"]) for row in task_rows]),
+            "icbr_mse_mean": _mean([float(row["icbr_mse"]) for row in task_rows]),
+            "formula_validation_pass_rate": _mean(
+                [1.0 if bool(row["formula_validation_result"]) else 0.0 for row in task_rows]
             ),
-            "symbolic_speedup_vs_baseline_mean": float(
-                sum(float(row["symbolic_speedup_vs_baseline"]) for row in task_rows) / count
+            "baseline_formula_validation_pass_rate": _mean(
+                [1.0 if bool(row["baseline_formula_validation_result"]) else 0.0 for row in task_rows]
             ),
-            "final_mse_loss_shift_mean": float(
-                sum(float(row["final_mse_loss_shift"]) for row in task_rows) / count
+            "icbr_formula_validation_pass_rate": _mean(
+                [1.0 if bool(row["icbr_formula_validation_result"]) else 0.0 for row in task_rows]
             ),
-            "formula_validation_pass_rate": float(
-                sum(1.0 if bool(row["formula_validation_result"]) else 0.0 for row in task_rows) / count
-            ),
-            "baseline_formula_validation_pass_rate": float(
-                sum(1.0 if bool(row["baseline_formula_validation_result"]) else 0.0 for row in task_rows) / count
-            ),
-            "icbr_formula_validation_pass_rate": float(
-                sum(1.0 if bool(row["icbr_formula_validation_result"]) else 0.0 for row in task_rows) / count
-            ),
-            "baseline_mse_mean": float(sum(float(row["baseline_mse"]) for row in task_rows) / count),
-            "icbr_mse_mean": float(sum(float(row["icbr_mse"]) for row in task_rows) / count),
         }
 
-    summary = {
-        "tasks": tasks,
-        "seeds": seeds,
+    overall = {
+        "candidate_generation_wall_time_s_mean": _mean([float(row["candidate_generation_wall_time_s"]) for row in rows]),
+        "replay_rerank_wall_time_s_mean": _mean([float(row["replay_rerank_wall_time_s"]) for row in rows]),
+        "icbr_symbolic_wall_time_s_mean": _mean([float(row["symbolic_wall_time_s"]) for row in rows]),
+        "baseline_symbolic_wall_time_s_mean": _mean([float(row["baseline_symbolic_wall_time_s"]) for row in rows]),
+        "symbolic_speedup_vs_baseline_mean": _mean([float(row["symbolic_speedup_vs_baseline"]) for row in rows]),
+        "final_mse_loss_shift_mean": _mean([float(row["final_mse_loss_shift"]) for row in rows]),
         "row_count": len(rows),
-        "summary_by_task": summary_by_task,
+    }
+
+    summary = {
+        "metadata": {
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "benchmark_name": "icbr_phase1_cpu_smoke",
+        },
+        "config": {
+            "tasks": tasks,
+            "seeds": seeds,
+            "train_num": train_num,
+            "test_num": test_num,
+            "train_steps": train_steps,
+            "lr": lr,
+            "topk": topk,
+            "grid_number": grid_number,
+            "iteration": iteration,
+            "output_dir": str(output_dir),
+        },
+        "rows": rows,
+        "aggregates": {"overall": overall, "by_task": summary_by_task},
+        "notes": {
+            "field_guide": {
+                "symbolic_wall_time_delta_s": "baseline_symbolic_wall_time_s - icbr_symbolic_wall_time_s",
+                "final_mse_loss_shift": "icbr_mse - baseline_mse; negative means ICBR has lower MSE",
+            },
+            "extensibility": [
+                "Add new tasks in _task_specs() with target_fn, width, and symbolic lib.",
+                "For larger studies, run with multiple seeds and aggregate via summary JSON.",
+                "For complex formula post-processing, consume formula lists from summary JSON rows.",
+            ],
+        },
     }
     summary_json_path = output_dir / "icbr_benchmark_summary.json"
     summary_json_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -205,31 +290,90 @@ def run_benchmark(
     md_lines: list[str] = [
         "# ICBR Benchmark Summary",
         "",
-        f"- tasks: {', '.join(tasks)}",
-        f"- seeds: {', '.join(str(seed) for seed in seeds)}",
+        "## Run Config",
         "",
-        "## Per-Task Means",
+        f"- Tasks: {', '.join(tasks)}",
+        f"- Seeds: {', '.join(str(seed) for seed in seeds)}",
+        f"- Train/Test samples per task: {train_num}/{test_num}",
+        f"- Train steps: {train_steps}, lr: {lr}",
+        f"- ICBR shortlist topk: {topk}, grid_number: {grid_number}, iteration: {iteration}",
         "",
-        "| task | candidate_generation_wall_time_s | replay_rerank_wall_time_s | icbr_symbolic_wall_time_s | baseline_symbolic_wall_time_s | symbolic_speedup_vs_baseline | final_mse_loss_shift | baseline_mse | icbr_mse | baseline_formula_pass_rate | icbr_formula_pass_rate |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "## Task-Level Comparison (Mean over seeds)",
+        "",
+        "| task | baseline_symbolic_s | icbr_symbolic_s | delta_s (baseline-icbr) | speedup_x | baseline_mse | icbr_mse | mse_shift (icbr-baseline) | baseline_formula_pass | icbr_formula_pass |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for task_name in tasks:
         item = summary_by_task[task_name]
         md_lines.append(
             "| "
             + f"{task_name} | "
-            + f"{item['candidate_generation_wall_time_s_mean']:.6f} | "
-            + f"{item['replay_rerank_wall_time_s_mean']:.6f} | "
-            + f"{item['symbolic_wall_time_s_mean']:.6f} | "
             + f"{item['baseline_symbolic_wall_time_s_mean']:.6f} | "
+            + f"{item['icbr_symbolic_wall_time_s_mean']:.6f} | "
+            + f"{item['symbolic_wall_time_delta_s_mean']:.6f} | "
             + f"{item['symbolic_speedup_vs_baseline_mean']:.4f} | "
-            + f"{item['final_mse_loss_shift_mean']:.6e} | "
             + f"{item['baseline_mse_mean']:.6e} | "
             + f"{item['icbr_mse_mean']:.6e} | "
+            + f"{item['final_mse_loss_shift_mean']:.6e} | "
             + f"{item['baseline_formula_validation_pass_rate']:.4f} | "
             + f"{item['icbr_formula_validation_pass_rate']:.4f} |"
         )
     md_lines.append("")
+
+    md_lines.extend(
+        [
+            "## Per-Run Performance Details",
+            "",
+            "| task | seed | candidate_s | replay_s | baseline_symbolic_s | icbr_symbolic_s | speedup_x | baseline_mse | icbr_mse | mse_shift | formula_ok |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for row in rows:
+        md_lines.append(
+            "| "
+            + f"{row['task']} | {row['seed']} | "
+            + f"{float(row['candidate_generation_wall_time_s']):.6f} | "
+            + f"{float(row['replay_rerank_wall_time_s']):.6f} | "
+            + f"{float(row['baseline_symbolic_wall_time_s']):.6f} | "
+            + f"{float(row['symbolic_wall_time_s']):.6f} | "
+            + f"{float(row['symbolic_speedup_vs_baseline']):.4f} | "
+            + f"{float(row['baseline_mse']):.6e} | "
+            + f"{float(row['icbr_mse']):.6e} | "
+            + f"{float(row['final_mse_loss_shift']):.6e} | "
+            + f"{bool(row['formula_validation_result'])} |"
+        )
+    md_lines.append("")
+
+    md_lines.append("## Formula Comparison")
+    md_lines.append("")
+    for row in rows:
+        md_lines.append(f"### task={row['task']} seed={row['seed']}")
+        md_lines.append("")
+        md_lines.append("- Baseline formula (display, rounded):")
+        for expr in row["baseline_formula_display"]:
+            md_lines.append(f"  - `{expr}`")
+        md_lines.append("- ICBR formula (display, rounded):")
+        for expr in row["icbr_formula_display"]:
+            md_lines.append(f"  - `{expr}`")
+        md_lines.append("- Baseline formula (raw):")
+        for expr in row["baseline_formula_raw"]:
+            md_lines.append(f"  - `{expr}`")
+        md_lines.append("- ICBR formula (raw):")
+        for expr in row["icbr_formula_raw"]:
+            md_lines.append(f"  - `{expr}`")
+        if row["baseline_formula_error"] or row["icbr_formula_error"]:
+            md_lines.append(f"- Formula export error baseline={row['baseline_formula_error']}, icbr={row['icbr_formula_error']}")
+        md_lines.append("")
+
+    md_lines.extend(
+        [
+            "## Extensibility Notes",
+            "",
+            "- 任务可扩展：在 `scripts/icbr_benchmark.py::_task_specs()` 新增任务条目即可接入同一导出链路。",
+            "- 指标可扩展：`kan.icbr.benchmark_icbr_vs_baseline` 返回字段会原样进入 JSON rows；CSV/MD 仅需补字段映射。",
+            "- 大规模实验建议：增加 seeds 并按 task 聚合，同时保留 rows 级明细用于误差条或统计检验。",
+        ]
+    )
     (output_dir / "icbr_benchmark_summary.md").write_text("\n".join(md_lines) + "\n", encoding="utf-8")
 
     return {"rows": rows, "summary": summary, "output_dir": str(output_dir)}

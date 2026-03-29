@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import uuid
 from pathlib import Path
 
@@ -53,11 +54,32 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
         "replay_rerank_wall_time_s",
         "symbolic_wall_time_s",
         "baseline_symbolic_wall_time_s",
+        "symbolic_wall_time_delta_s",
         "symbolic_speedup_vs_baseline",
         "replay_imitation_gap",
         "final_mse_loss_shift",
         "formula_validation_result",
         "baseline_formula_validation_result",
         "icbr_formula_validation_result",
+        "baseline_formula_raw",
+        "baseline_formula_display",
+        "icbr_formula_raw",
+        "icbr_formula_display",
     }
     assert required_cols.issubset(set(rows[0].keys()))
+
+    summary = json.loads(summary_json.read_text(encoding="utf-8"))
+    assert "metadata" in summary
+    assert "config" in summary
+    assert "rows" in summary
+    assert "aggregates" in summary
+    assert "notes" in summary
+    assert len(summary["rows"]) == 2
+    assert summary["config"]["tasks"] == ["minimal", "combo"]
+    assert "overall" in summary["aggregates"]
+    assert "by_task" in summary["aggregates"]
+    for row in summary["rows"]:
+        assert isinstance(row["baseline_formula_raw"], list)
+        assert isinstance(row["baseline_formula_display"], list)
+        assert isinstance(row["icbr_formula_raw"], list)
+        assert isinstance(row["icbr_formula_display"], list)
