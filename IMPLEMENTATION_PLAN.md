@@ -473,6 +473,4 @@ Phase I 仅在以下条件全部满足时视为完成:
 4. Stage 4: Add `auto_symbolic_icbr(...)` Entry
 5. Stage 5: Benchmark and Verify Phase I Claims
 
-当前建议开工点:
 
-**Stage 3: Add Explicit Commit Helper**

@@ -11,6 +11,61 @@ from sklearn.linear_model import LinearRegression
 from .utils import SYMBOLIC_LIB
 
 
+def _clone_model_memory(source_model):
+    from .MultKAN import MultKAN
+
+    cloned = MultKAN(
+        width=copy.deepcopy(source_model.width),
+        grid=source_model.grid,
+        k=source_model.k,
+        mult_arity=copy.deepcopy(source_model.mult_arity),
+        noise_scale=0.0,
+        base_fun=source_model.base_fun_name,
+        symbolic_enabled=source_model.symbolic_enabled,
+        affine_trainable=source_model.affine_trainable,
+        grid_eps=source_model.grid_eps,
+        grid_range=copy.deepcopy(source_model.grid_range),
+        sp_trainable=source_model.sp_trainable,
+        sb_trainable=source_model.sb_trainable,
+        save_act=source_model.save_act,
+        auto_save=False,
+        first_init=False,
+        ckpt_path=source_model.ckpt_path,
+        state_id=source_model.state_id,
+        round=source_model.round,
+        device=source_model.device,
+        numeric_basis=getattr(source_model, "numeric_basis", "bspline"),
+    )
+    cloned.load_state_dict(source_model.state_dict())
+    cloned.input_id = source_model.input_id.detach().clone()
+    if source_model.cache_data is None:
+        cloned.cache_data = None
+    else:
+        cloned.cache_data = source_model.cache_data.detach().clone()
+    cloned.auto_save = False
+
+    for layer_idx in range(len(source_model.symbolic_fun)):
+        out_dim = source_model.symbolic_fun[layer_idx].out_dim
+        in_dim = source_model.symbolic_fun[layer_idx].in_dim
+        for output_idx in range(out_dim):
+            for input_idx in range(in_dim):
+                cloned.symbolic_fun[layer_idx].funs[output_idx][input_idx] = source_model.symbolic_fun[layer_idx].funs[
+                    output_idx
+                ][input_idx]
+                cloned.symbolic_fun[layer_idx].funs_sympy[output_idx][input_idx] = source_model.symbolic_fun[
+                    layer_idx
+                ].funs_sympy[output_idx][input_idx]
+                cloned.symbolic_fun[layer_idx].funs_avoid_singularity[output_idx][input_idx] = source_model.symbolic_fun[
+                    layer_idx
+                ].funs_avoid_singularity[output_idx][input_idx]
+                cloned.symbolic_fun[layer_idx].funs_name[output_idx][input_idx] = source_model.symbolic_fun[layer_idx].funs_name[
+                    output_idx
+                ][input_idx]
+
+    cloned.acts = None
+    return cloned
+
+
 def _resolve_symbolic_lib(
     lib: Iterable[str] | Mapping[str, tuple] | None,
 ) -> dict[str, tuple]:
@@ -632,8 +687,8 @@ def auto_symbolic_icbr(
     if not lib_names:
         raise ValueError("symbolic library must not be empty")
 
-    teacher_model = copy.deepcopy(model)
-    work_model = copy.deepcopy(model)
+    teacher_model = _clone_model_memory(model)
+    work_model = _clone_model_memory(model)
     return _run_auto_symbolic_icbr_with_models(
         teacher_model,
         work_model,
@@ -665,13 +720,13 @@ def benchmark_icbr_vs_baseline(
     if not lib_names:
         raise ValueError("symbolic library must not be empty")
 
-    teacher_numeric = copy.deepcopy(model)
+    teacher_numeric = _clone_model_memory(model)
     _set_teacher_numeric_mode(teacher_numeric)
     teacher_numeric.auto_save = False
     with torch.no_grad():
         teacher_output = teacher_numeric(calibration_input).detach()
 
-    baseline_model = copy.deepcopy(model)
+    baseline_model = _clone_model_memory(model)
     baseline_model.auto_save = False
     with torch.no_grad():
         baseline_model(calibration_input)
@@ -690,8 +745,8 @@ def benchmark_icbr_vs_baseline(
     except Exception:
         baseline_formula_ok = False
 
-    teacher_model = copy.deepcopy(model)
-    work_model = copy.deepcopy(model)
+    teacher_model = _clone_model_memory(model)
+    work_model = _clone_model_memory(model)
     work_model, icbr_timing = _run_auto_symbolic_icbr_with_models(
         teacher_model,
         work_model,
@@ -722,9 +777,14 @@ def benchmark_icbr_vs_baseline(
         "replay_rerank_wall_time_s": float(icbr_timing["replay_rerank_wall_time_s"]),
         "symbolic_wall_time_s": float(icbr_timing["symbolic_wall_time_s"]),
         "baseline_symbolic_wall_time_s": float(baseline_symbolic_wall_time_s),
+        "symbolic_speedup_vs_baseline": float(
+            baseline_symbolic_wall_time_s / max(float(icbr_timing["symbolic_wall_time_s"]), 1e-12)
+        ),
         "replay_imitation_gap": float(icbr_mse),
         "final_mse_loss_shift": float(icbr_mse - baseline_mse),
         "formula_validation_result": bool(icbr_formula_ok and baseline_formula_ok),
+        "baseline_formula_validation_result": bool(baseline_formula_ok),
+        "icbr_formula_validation_result": bool(icbr_formula_ok),
         "baseline_mse": float(baseline_mse),
         "icbr_mse": float(icbr_mse),
     }

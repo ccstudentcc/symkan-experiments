@@ -27,9 +27,15 @@ def test_icbr_benchmark_smoke_reports_core_metrics() -> None:
     assert math.isfinite(metrics["candidate_generation_wall_time_s"])
     assert math.isfinite(metrics["replay_rerank_wall_time_s"])
     assert math.isfinite(metrics["symbolic_wall_time_s"])
+    assert math.isfinite(metrics["baseline_symbolic_wall_time_s"])
+    assert math.isfinite(metrics["symbolic_speedup_vs_baseline"])
     assert math.isfinite(metrics["replay_imitation_gap"])
     assert math.isfinite(metrics["final_mse_loss_shift"])
     assert metrics["candidate_generation_wall_time_s"] >= 0.0
     assert metrics["replay_rerank_wall_time_s"] >= 0.0
     assert metrics["symbolic_wall_time_s"] >= 0.0
+    assert metrics["baseline_symbolic_wall_time_s"] >= 0.0
+    assert metrics["symbolic_speedup_vs_baseline"] >= 0.0
     assert isinstance(metrics["formula_validation_result"], bool)
+    assert isinstance(metrics["baseline_formula_validation_result"], bool)
+    assert isinstance(metrics["icbr_formula_validation_result"], bool)
