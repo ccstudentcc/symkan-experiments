@@ -71,6 +71,11 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
     assert {row["task"] for row in rows} == {"minimal", "combo"}
     assert all(row["lib"] == "[\"__FULL_SYMBOLIC_LIB__\"]" for row in rows)
     required_cols = {
+        "feynman_dataset_filename",
+        "feynman_dataset_rows",
+        "feynman_dataset_columns",
+        "feynman_split_seed",
+        "feynman_equation_metadata",
         "candidate_generation_wall_time_s",
         "replay_rerank_wall_time_s",
         "symbolic_wall_time_s",
@@ -388,6 +393,8 @@ def test_feynman_dataset_file_loading_smoke() -> None:
     assert summary["config"]["tasks"] == ["feynman_I_10_7"]
     assert summary["config"]["feynman"]["enabled"] is True
     assert summary["config"]["feynman"]["variant"] == "Feynman_with_units"
+    assert summary["config"]["feynman"]["dataset_select_seed"] == 1
+    assert summary["config"]["feynman"]["split_strategy_seed"] == 1
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["grid"] == 20
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["k"] == 3
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_train_prune"] is True
@@ -403,6 +410,18 @@ def test_feynman_dataset_file_loading_smoke() -> None:
     assert row["task_kind"] == "feynman_file"
     assert row["task_source"] == "feynman_file"
     assert row["target_formula"] == "m0/sqrt(1-v^2/c^2)"
+    assert row["feynman_dataset_filename"] == "I.10.7"
+    assert row["feynman_dataset_rows"] == 96
+    assert row["feynman_dataset_columns"] == 4
+    assert row["feynman_split_seed"] == 1
+    assert row["feynman_equation_metadata"]["Filename"] == "I.10.7"
+    assert row["feynman_equation_metadata"]["Formula"] == "m0/sqrt(1-v^2/c^2)"
+    task_meta = summary["config"]["feynman"]["task_metadata"]["feynman_I_10_7"]
+    assert task_meta["filename"] == "I.10.7"
+    assert task_meta["total_rows"] == 96
+    assert task_meta["total_columns"] == 4
+    assert task_meta["n_var"] == 3
+    assert task_meta["target_formula"] == "m0/sqrt(1-v^2/c^2)"
 
 
 def test_feynman_task_tokens_expand() -> None:

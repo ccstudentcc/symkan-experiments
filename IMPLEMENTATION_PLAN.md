@@ -855,11 +855,14 @@ Required Behavior:
   - `k=3`
   - `device=cpu`
   - `opt=Adam`
+  - `feynman_dataset_select_seed=1`
+  - `feynman_split_strategy_seed=1`
 - Feynman teacher 训练完成后，执行：
   - `model.prune(...)`（阈值采用参考口径 `1e-2`）
   - 再微调 `100` 步（`lr=1e-3`，`lamb=1e-2`）
   - 微调阶段启用早停：每 `5` 步检查一次训练误差变化
 - teacher cache 写入的是“剪枝 + 微调”后的 teacher，并保持 cache key 语义完备。
+- benchmark 导出与报告需传递 Feynman 任务元数据（公式名、数据文件名、样本规模、变量数、切分参数、`FeynmanEquations.csv` 对应元信息），并在 `icbr_benchmark_summary.md` 中展示。
 - 保持 Stage 12 既有导出与可视化能力不退化。
 
 Implementation Constraints:

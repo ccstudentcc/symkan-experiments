@@ -4,7 +4,7 @@
 2026-03-29
 
 ## Task
-完成 Stage 13 收口：在 Feynman 参考流程中补齐“剪枝后微调早停机制”，并固定微调超参（`lr=1e-3`, `lamb=1e-2`）。
+完成 Stage 13 收口补充：固定 Feynman 数据随机种子默认值，并把公式/数据集元数据贯通到 benchmark 导出与 Markdown 报告。
 
 ## Current Stage
 Stage 13: Add Feynman Reference Preset and Prune-Refit Teacher Flow
@@ -13,31 +13,26 @@ Stage 13: Add Feynman Reference Preset and Prune-Refit Teacher Flow
 Complete
 
 ## Latest Completed Work
-- 增加 `feynman_reference` 参考 profile，参数与目标口径：
-  - `train_num=2000`
-  - `test_num=1000`
-  - `train_steps=200`
-  - `lr=1e-2`
-  - `lamb=1e-2`
-- 默认调用增强（便于直接使用参考配置）：
-  - 当 `--profile feynman_reference` 且未显式给 `--tasks/--seeds` 时，默认：
-    - `tasks=["feynman_paper10"]`
-    - `seeds=[1]`
-- Feynman teacher 训练流已升级为：
-  - 初始训练（`opt=Adam`）
-  - `model.prune(node_th=1e-2, edge_th=1e-2)`
-  - 微调最多 `100` 步（`lr=1e-3`, `lamb=1e-2`）
-  - 微调阶段启用早停：每 `5` 步检查一次 train MSE 变化，若连续若干次变化不超过 `min_delta` 则提前停止
-  - 再落入持久 cache，并用于 baseline/ICBR 符号化对比
-- Feynman 模型结构口径已固定在 task 规格中：
-  - `grid=20`
-  - `k=3`
-  - `width_mid=5,2`（通过 `--feynman-width-mid` 默认值）
-  - `device=cpu`
-- cache key 继续增强，纳入 teacher 结构与 prune/refit 语义，避免错命中：
-  - `teacher_grid/teacher_k/teacher_fit_opt/teacher_post_train_prune/prune_th/post_prune_steps/post_prune_lr/post_prune_lamb/post_prune_early_stop/eval_every/min_delta/patience`
-- summary 输出新增 `config.teacher_training`，每个 task 可追踪 teacher 训练与 prune/refit 配置。
-- 测试更新：Feynman smoke 额外校验 `post_prune_lr/post_prune_lamb/post_prune_early_stop/post_prune_eval_every/post_prune_min_delta/post_prune_patience` 字段。
+- 将 Feynman 随机相关默认值固定为可复现口径：
+  - `feynman_dataset_select_seed=1`
+  - `feynman_split_strategy_seed=1`
+- 将 Feynman train/test 切分随机性从运行 seed 解耦：
+  - random split 使用 `feynman_split_strategy_seed`
+  - run seed 继续用于模型训练随机性
+- 扩展 Feynman 任务规格与导出字段，新增并贯通：
+  - `feynman_dataset_filename`
+  - `feynman_dataset_rows`
+  - `feynman_dataset_columns`
+  - `feynman_split_seed`
+  - `feynman_equation_metadata`
+- 增强 `FeynmanEquations.csv` 解析：
+  - 保留按公式文件名匹配公式表达式
+  - 透传整行元数据到 summary/rows
+  - 清理 BOM 字段名，避免 `﻿Filename` 污染报告字段
+- 增强 `icbr_benchmark_summary.md`：
+  - Run Config 显示 `split_seed` / `select_seed`
+  - 新增 `Feynman Dataset Metadata` 章节，展示每个公式任务的数据文件、样本规模、变量数、切分参数与 CSV 元信息
+- 完成真实本地数据链路验证（`datasets/Feynman_with_units` + `datasets/FeynmanEquations.csv`）并生成报告产物。
 
 ## Files Changed
 - scripts/icbr_benchmark.py
@@ -49,22 +44,27 @@ Complete
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m py_compile scripts\icbr_benchmark.py tests\test_icbr_benchmark_script_smoke.py`
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_benchmark_script_smoke.py`
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_benchmark_smoke.py tests\test_icbr_benchmark_script_smoke.py tests\test_icbr_benchmark_regression_smoke.py`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.icbr_benchmark --tasks feynman_I_10_7 --seeds 1 --output-dir outputs/icbr_benchmark_feynman_metadata_smoke --train-num 64 --test-num 32 --train-steps 4 --lr 0.03 --lamb 1e-3 --topk 2 --grid-number 11 --iteration 1 --teacher-max-test-mse 10 --teacher-min-test-r2 -10 --feynman-root datasets --feynman-variant Feynman_with_units --feynman-split-strategy random --quiet --no-plots`
 
 ## Validation Result
 - `py_compile` 通过
 - 脚本 smoke 测试通过：`9 passed`
-- benchmark 回归相关测试通过：`12 passed`
-- Feynman smoke 路径与旧路径均可运行，导出字段与 cache 语义无回归
+- benchmark 回归 smoke 测试通过：`12 passed`
+- 真实数据最小实跑成功，报告产物已生成：
+  - `outputs/icbr_benchmark_feynman_metadata_smoke/icbr_benchmark_summary.json`
+  - `outputs/icbr_benchmark_feynman_metadata_smoke/icbr_benchmark_summary.md`
+- 已确认 Markdown 报告包含：
+  - `Feynman Dataset Metadata` 章节
+  - 公式任务名、目标公式、数据文件名、样本规模、切分 seed 与 CSV 元数据
 
 ## Decisions
-- 继续维持“只改 benchmark 层，不改 ICBR 主算法”。
-- prune 阈值按你提供口径采用 `1e-2`（通过 `model.prune(node_th=1e-2, edge_th=1e-2)` 显式固定）。
-- 剪枝后微调默认超参固定为 `lr=1e-3`, `lamb=1e-2`，并启用“每 5 步检测变化”的早停策略。
+- 保持“只改 benchmark 层，不改 ICBR 主算法路径”。
+- 为保证多次运行与跨任务可复现，Feynman 数据子集选择 seed 与随机切分 seed 默认统一为 `1`。
+- 将 Feynman 元数据直接进 `summary.config.feynman.task_metadata` 与 rows 级字段，保证 JSON/CSV/MD 三种导出一致可追溯。
 
 ## Remaining Work
-- 等你把真实数据下载到 `datasets/` 后，可直接参考调用：
-  - `python -m scripts.icbr_benchmark --profile feynman_reference --feynman-root datasets --feynman-variant Feynman_with_units --output-dir outputs/icbr_benchmark_feynman_reference --quiet --no-plots`
-- 完成真实数据实跑后，再进行多 seeds 聚合与回归门禁复验。
+- 使用 `--profile feynman_reference` 对 `feynman_paper10` 执行完整参考配置实跑（2000/1000, steps=200, prune+refit）。
+- 在完整 Feynman 多任务结果上执行后续多 seed 聚合与回归门禁复验。
 
 ## Blockers
-- 本地真实 Feynman 数据尚未下载完成（你已说明将放到仓库相对路径 `datasets/`）。
+- 无

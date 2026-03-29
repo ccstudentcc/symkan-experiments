@@ -118,7 +118,12 @@ class _TaskSpec:
     dataset_path: str | None = None
     dataset_variant: str | None = None
     dataset_split_strategy: str = "random"
+    dataset_split_seed: int | None = None
+    dataset_filename: str | None = None
+    dataset_total_rows: int | None = None
+    dataset_total_columns: int | None = None
     target_formula: str | None = None
+    equation_metadata: dict[str, str] | None = None
     teacher_grid: int = 5
     teacher_k: int = 3
     teacher_fit_opt: str = "Adam"
@@ -210,15 +215,19 @@ def _list_local_feynman_dataset_names(
     return names
 
 
-def _load_feynman_equations_map(equations_csv_path: Path | None) -> dict[str, str]:
+def _load_feynman_equations_map(
+    equations_csv_path: Path | None,
+) -> tuple[dict[str, str], dict[str, dict[str, str]], list[str]]:
     if equations_csv_path is None or not equations_csv_path.is_file():
-        return {}
+        return {}, {}, []
     with equations_csv_path.open("r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         if reader.fieldnames is None:
-            return {}
-        fieldnames = list(reader.fieldnames)
-        lower_to_name = {name.strip().lower(): name for name in fieldnames}
+            return {}, {}, []
+        raw_fieldnames = list(reader.fieldnames)
+        fieldnames = [name.lstrip("\ufeff").strip() for name in raw_fieldnames]
+        clean_to_raw = {clean: raw for clean, raw in zip(fieldnames, raw_fieldnames)}
+        lower_to_name = {name.lower(): name for name in fieldnames}
         name_col = fieldnames[0]
         for candidate in ("filename", "name", "equation", "id"):
             if candidate in lower_to_name:
@@ -230,18 +239,25 @@ def _load_feynman_equations_map(equations_csv_path: Path | None) -> dict[str, st
                 formula_col = lower_to_name[candidate]
                 break
         mapping: dict[str, str] = {}
+        metadata_map: dict[str, dict[str, str]] = {}
         for row in reader:
-            key = str(row.get(name_col, "")).strip()
-            value = str(row.get(formula_col, "")).strip()
+            key = str(row.get(clean_to_raw[name_col], "")).strip()
+            value = str(row.get(clean_to_raw[formula_col], "")).strip()
             if key and key.lower() != "nan":
                 mapping[key] = value
-        return mapping
+                normalized_row: dict[str, str] = {}
+                for field in fieldnames:
+                    field_value = str(row.get(clean_to_raw[field], "")).strip()
+                    if field_value and field_value.lower() != "nan":
+                        normalized_row[field] = field_value
+                metadata_map[key] = normalized_row
+        return mapping, metadata_map, fieldnames
 
 
 def _load_local_feynman_dataset_as_kan(
     *,
     dataset_path: Path,
-    seed: int,
+    split_seed: int,
     train_num: int,
     test_num: int,
     split_strategy: str,
@@ -265,7 +281,7 @@ def _load_local_feynman_dataset_as_kan(
         te_all = np.unique(np.round(np.linspace(0, total - 1, n_tr + n_te)).astype(int))
         te_idx = te_all[~np.isin(te_all, tr_idx)][:n_te]
     elif split_strategy == "random":
-        rng = np.random.RandomState(seed)
+        rng = np.random.RandomState(split_seed)
         perm = rng.permutation(total)
         tr_idx = perm[:n_tr]
         te_idx = perm[n_tr : n_tr + n_te] if n_te > 0 else np.array([], dtype=int)
@@ -332,7 +348,9 @@ def _build_feynman_task_spec(
     feynman_variant: str,
     feynman_width_mid: list[int],
     feynman_split_strategy: str,
+    feynman_split_strategy_seed: int,
     equations_map: dict[str, str],
+    equations_metadata_map: dict[str, dict[str, str]],
 ) -> _TaskSpec:
     filename = _feynman_cli_to_filename(task_name)
     dataset_path = (feynman_root / feynman_variant / filename).resolve()
@@ -357,7 +375,12 @@ def _build_feynman_task_spec(
         dataset_path=str(dataset_path),
         dataset_variant=feynman_variant,
         dataset_split_strategy=feynman_split_strategy,
+        dataset_split_seed=int(feynman_split_strategy_seed),
+        dataset_filename=filename,
+        dataset_total_rows=int(raw.shape[0]),
+        dataset_total_columns=int(raw.shape[1]),
         target_formula=equations_map.get(filename),
+        equation_metadata=dict(equations_metadata_map.get(filename, {})),
         teacher_grid=20,
         teacher_k=3,
         teacher_fit_opt="Adam",
@@ -381,6 +404,7 @@ def _resolve_task_specs(
     feynman_variant: str,
     feynman_width_mid: list[int],
     feynman_split_strategy: str,
+    feynman_split_strategy_seed: int,
     feynman_max_datasets: int,
     feynman_dataset_select_seed: int,
     feynman_equations_csv: Path | None,
@@ -399,9 +423,13 @@ def _resolve_task_specs(
         if feynman_equations_csv is None:
             auto_path = feynman_root / "FeynmanEquations.csv"
             feynman_equations_csv = auto_path if auto_path.is_file() else None
-        equations_map = _load_feynman_equations_map(feynman_equations_csv)
+        equations_map, equations_metadata_map, equations_metadata_columns = _load_feynman_equations_map(
+            feynman_equations_csv
+        )
     else:
         equations_map = {}
+        equations_metadata_map = {}
+        equations_metadata_columns = []
 
     resolved_specs: dict[str, _TaskSpec] = {}
     for task in requested_tasks:
@@ -415,21 +443,40 @@ def _resolve_task_specs(
                 feynman_variant=feynman_variant,
                 feynman_width_mid=feynman_width_mid,
                 feynman_split_strategy=feynman_split_strategy,
+                feynman_split_strategy_seed=feynman_split_strategy_seed,
                 equations_map=equations_map,
+                equations_metadata_map=equations_metadata_map,
             )
             continue
         raise ValueError(f"Unknown benchmark task: {task}")
+
+    feynman_task_metadata: dict[str, dict[str, object]] = {}
+    for task_name, spec in resolved_specs.items():
+        if spec.dataset_kind != "feynman_file":
+            continue
+        feynman_task_metadata[task_name] = {
+            "filename": spec.dataset_filename,
+            "dataset_path": spec.dataset_path,
+            "total_rows": spec.dataset_total_rows,
+            "total_columns": spec.dataset_total_columns,
+            "n_var": spec.n_var,
+            "target_formula": spec.target_formula,
+            "equation_metadata": dict(spec.equation_metadata or {}),
+        }
 
     feynman_config: dict[str, object] = {
         "enabled": bool(needs_feynman),
         "root": str(feynman_root),
         "variant": feynman_variant,
         "equations_csv": str(feynman_equations_csv) if feynman_equations_csv is not None else None,
+        "equations_metadata_columns": equations_metadata_columns,
         "split_strategy": feynman_split_strategy,
+        "split_strategy_seed": int(feynman_split_strategy_seed),
         "width_mid": feynman_width_mid,
         "max_datasets": int(feynman_max_datasets),
         "dataset_select_seed": int(feynman_dataset_select_seed),
         "paper10_datasets": list(_FEYNMAN_PAPER10_DATASETS),
+        "task_metadata": feynman_task_metadata,
     }
     return requested_tasks, resolved_specs, equations_map, feynman_config
 
@@ -447,7 +494,7 @@ def _build_teacher_dataset(
             raise ValueError(f"Feynman task '{spec.name}' is missing dataset_path.")
         return _load_local_feynman_dataset_as_kan(
             dataset_path=Path(spec.dataset_path),
-            seed=seed,
+            split_seed=int(spec.dataset_split_seed) if spec.dataset_split_seed is not None else int(seed),
             train_num=train_num,
             test_num=test_num,
             split_strategy=spec.dataset_split_strategy,
@@ -571,6 +618,9 @@ def _build_teacher_cache_identity(
         "dataset_path": spec.dataset_path,
         "dataset_variant": spec.dataset_variant,
         "dataset_split_strategy": spec.dataset_split_strategy,
+        "dataset_split_seed": (
+            int(spec.dataset_split_seed) if spec.dataset_split_seed is not None else None
+        ),
         "teacher_grid": int(spec.teacher_grid),
         "teacher_k": int(spec.teacher_k),
         "teacher_fit_opt": spec.teacher_fit_opt,
@@ -1173,9 +1223,10 @@ def run_benchmark(
     feynman_variant: str = "Feynman_with_units",
     feynman_equations_csv: Path | None = None,
     feynman_split_strategy: str = "random",
+    feynman_split_strategy_seed: int = 1,
     feynman_width_mid: list[int] | None = None,
     feynman_max_datasets: int = 10,
-    feynman_dataset_select_seed: int = 2,
+    feynman_dataset_select_seed: int = 1,
     make_plots: bool,
     quiet: bool,
 ) -> dict[str, object]:
@@ -1183,6 +1234,8 @@ def run_benchmark(
         raise ValueError(f"Unsupported feynman variant: {feynman_variant}")
     if feynman_split_strategy not in {"random", "linspace"}:
         raise ValueError(f"Unsupported feynman split strategy: {feynman_split_strategy}")
+    if int(feynman_split_strategy_seed) < 0:
+        raise ValueError("feynman_split_strategy_seed must be >= 0.")
     if feynman_width_mid is None:
         feynman_width_mid = [5, 2]
 
@@ -1192,6 +1245,7 @@ def run_benchmark(
         feynman_variant=feynman_variant,
         feynman_width_mid=feynman_width_mid,
         feynman_split_strategy=feynman_split_strategy,
+        feynman_split_strategy_seed=int(feynman_split_strategy_seed),
         feynman_max_datasets=feynman_max_datasets,
         feynman_dataset_select_seed=feynman_dataset_select_seed,
         feynman_equations_csv=feynman_equations_csv,
@@ -1266,6 +1320,11 @@ def run_benchmark(
                 "task_kind": spec.dataset_kind,
                 "task_source": "feynman_file" if spec.dataset_kind == "feynman_file" else "synthetic_formula",
                 "target_formula": spec.target_formula,
+                "feynman_dataset_filename": spec.dataset_filename,
+                "feynman_dataset_rows": spec.dataset_total_rows,
+                "feynman_dataset_columns": spec.dataset_total_columns,
+                "feynman_split_seed": spec.dataset_split_seed,
+                "feynman_equation_metadata": dict(spec.equation_metadata or {}),
                 "n_var": spec.n_var,
                 "width": list(spec.width),
                 "lib": list(spec.lib) if spec.lib is not None else ["__FULL_SYMBOLIC_LIB__"],
@@ -1311,6 +1370,11 @@ def run_benchmark(
         "task_kind",
         "task_source",
         "target_formula",
+        "feynman_dataset_filename",
+        "feynman_dataset_rows",
+        "feynman_dataset_columns",
+        "feynman_split_seed",
+        "feynman_equation_metadata",
         "n_var",
         "width",
         "lib",
@@ -1365,6 +1429,11 @@ def run_benchmark(
                     "task_kind": row["task_kind"],
                     "task_source": row["task_source"],
                     "target_formula": row["target_formula"],
+                    "feynman_dataset_filename": row["feynman_dataset_filename"],
+                    "feynman_dataset_rows": row["feynman_dataset_rows"],
+                    "feynman_dataset_columns": row["feynman_dataset_columns"],
+                    "feynman_split_seed": row["feynman_split_seed"],
+                    "feynman_equation_metadata": json.dumps(row["feynman_equation_metadata"], ensure_ascii=False),
                     "n_var": row["n_var"],
                     "width": json.dumps(row["width"], ensure_ascii=False),
                     "lib": json.dumps(row["lib"], ensure_ascii=False),
@@ -1557,7 +1626,7 @@ def run_benchmark(
                 "failure_policy": "Skip baseline/ICBR symbolic comparison for that row and keep explicit gate reason.",
             },
             "teacher_cache": {
-                "cache_key_rule": "hash(task, seed, width, dataset_kind, dataset_path, dataset_variant, dataset_split_strategy, teacher_grid, teacher_k, teacher_fit_opt, teacher_post_train_prune, teacher_prune_node_th, teacher_prune_edge_th, teacher_post_prune_steps, teacher_post_prune_lr, teacher_post_prune_lamb, teacher_post_prune_early_stop, teacher_post_prune_eval_every, teacher_post_prune_min_delta, teacher_post_prune_patience, train_num, test_num, train_steps, lr, lamb, profile, cache_version)",
+                "cache_key_rule": "hash(task, seed, width, dataset_kind, dataset_path, dataset_variant, dataset_split_strategy, dataset_split_seed, teacher_grid, teacher_k, teacher_fit_opt, teacher_post_train_prune, teacher_prune_node_th, teacher_prune_edge_th, teacher_post_prune_steps, teacher_post_prune_lr, teacher_post_prune_lamb, teacher_post_prune_early_stop, teacher_post_prune_eval_every, teacher_post_prune_min_delta, teacher_post_prune_patience, train_num, test_num, train_steps, lr, lamb, profile, cache_version)",
                 "modes": {
                     "readwrite": "Read cache when available; train+write on miss.",
                     "readonly": "Read cache only; train without writing on miss.",
@@ -1597,6 +1666,8 @@ def run_benchmark(
             f"- Feynman data: root={summary['config']['feynman']['root']}, "
             f"variant={summary['config']['feynman']['variant']}, "
             f"split={summary['config']['feynman']['split_strategy']}, "
+            f"split_seed={summary['config']['feynman']['split_strategy_seed']}, "
+            f"select_seed={summary['config']['feynman']['dataset_select_seed']}, "
             f"width_mid={summary['config']['feynman']['width_mid']}"
         )
     md_lines.extend(
@@ -1691,6 +1762,30 @@ def run_benchmark(
             + f"{bool(row['formula_validation_result'])} |"
         )
     md_lines.append("")
+
+    if bool(summary["config"]["feynman"]["enabled"]):
+        md_lines.extend(["## Feynman Dataset Metadata", ""])
+        for task_name in resolved_tasks:
+            spec = specs[task_name]
+            if spec.dataset_kind != "feynman_file":
+                continue
+            md_lines.append(f"### {task_name}")
+            md_lines.append("")
+            md_lines.append(f"- Dataset file: `{spec.dataset_filename}`")
+            md_lines.append(f"- Dataset path: `{spec.dataset_path}`")
+            md_lines.append(
+                f"- Raw data shape: rows={spec.dataset_total_rows}, columns={spec.dataset_total_columns}, n_var={spec.n_var}"
+            )
+            md_lines.append(
+                f"- Split setting: strategy={spec.dataset_split_strategy}, split_seed={spec.dataset_split_seed}, train_num={train_num}, test_num={test_num}"
+            )
+            md_lines.append(f"- Target formula: `{spec.target_formula}`")
+            metadata = dict(spec.equation_metadata or {})
+            if metadata:
+                md_lines.append("- Equation metadata (from FeynmanEquations.csv):")
+                for key, value in metadata.items():
+                    md_lines.append(f"  - {key}: `{value}`")
+            md_lines.append("")
 
     md_lines.append("## Formula Comparison")
     md_lines.append("")
@@ -1871,7 +1966,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--feynman-dataset-select-seed",
         type=int,
-        default=2,
+        default=1,
         help="Random selection seed for feynman_random token.",
     )
     parser.add_argument(
@@ -1879,6 +1974,12 @@ def main(argv: list[str] | None = None) -> None:
         default="random",
         choices=["random", "linspace"],
         help="Train/test split strategy for local Feynman files.",
+    )
+    parser.add_argument(
+        "--feynman-split-strategy-seed",
+        type=int,
+        default=1,
+        help="Random seed used by feynman random split strategy.",
     )
     parser.add_argument(
         "--feynman-width-mid",
@@ -1976,6 +2077,7 @@ def main(argv: list[str] | None = None) -> None:
         feynman_variant=args.feynman_variant,
         feynman_equations_csv=feynman_equations_csv,
         feynman_split_strategy=args.feynman_split_strategy,
+        feynman_split_strategy_seed=args.feynman_split_strategy_seed,
         feynman_width_mid=feynman_width_mid,
         feynman_max_datasets=args.feynman_max_datasets,
         feynman_dataset_select_seed=args.feynman_dataset_select_seed,
