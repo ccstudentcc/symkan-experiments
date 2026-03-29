@@ -10,7 +10,7 @@ __pycache__/
 outputs/test_tmp/
 outputs/pytest_tmp_run_01/
 
-#In-Context-Symbolic-Regression-KAN-main/
+In-Context-Symbolic-Regression-KAN-main/
 
 MNIST/raw/
 outputs/benchmark_runs/
@@ -23,3 +23,5 @@ _safe_copy_temp*
 .vscode/
 
 AGENTS.md
+
+datasets/

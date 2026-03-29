@@ -1,0 +1,31 @@
+{
+  "cache_key": "combo_seed1_a43183c19916392a",
+  "cache_payload": {
+    "task": "combo",
+    "seed": 1,
+    "n_var": 2,
+    "width": [
+      [
+        2,
+        0
+      ],
+      [
+        2,
+        0
+      ],
+      [
+        1,
+        0
+      ]
+    ],
+    "train_num": 1000,
+    "test_num": 500,
+    "train_steps": 80,
+    "lr": 0.03,
+    "lamb": 0.001,
+    "profile": "quality",
+    "cache_version": "stage11_v1"
+  },
+  "cache_mode_written_by": "readwrite",
+  "generated_at_utc": "2026-03-29T06:51:50.536725+00:00"
+}
