@@ -309,7 +309,7 @@ def _restore_symbolic_edge_state(
     symbolic_layer.mask.data[output_idx][input_idx] = snapshot["symbolic_mask"]
 
 
-def _apply_candidate_for_replay(
+def _apply_symbolic_candidate_state(
     work_model,
     layer_idx: int,
     input_idx: int,
@@ -321,11 +321,17 @@ def _apply_candidate_for_replay(
         raise KeyError(f"Unknown symbolic function: {fun_name}")
 
     symbolic_layer = work_model.symbolic_fun[layer_idx]
-    params = torch.as_tensor(
-        candidate["params"],
-        dtype=symbolic_layer.affine.dtype,
-        device=symbolic_layer.affine.device,
-    )
+    if "params" in candidate:
+        params = torch.as_tensor(
+            candidate["params"],
+            dtype=symbolic_layer.affine.dtype,
+            device=symbolic_layer.affine.device,
+        )
+    elif fun_name == "0":
+        params = torch.tensor([1.0, 0.0, 1.0, 0.0], dtype=symbolic_layer.affine.dtype, device=symbolic_layer.affine.device)
+    else:
+        raise KeyError("candidate must include 'params' unless committing the zero function")
+
     if params.shape != (4,):
         raise ValueError("candidate['params'] must contain exactly 4 values: (a, b, c, d)")
 
@@ -388,7 +394,7 @@ def replay_rerank_edge_candidates(
     replay_start = perf_counter()
     try:
         for candidate_index, candidate in enumerate(shortlist):
-            _apply_candidate_for_replay(work_model, layer_idx, input_idx, output_idx, candidate)
+            _apply_symbolic_candidate_state(work_model, layer_idx, input_idx, output_idx, candidate)
 
             with torch.no_grad():
                 work_output = work_model(calibration_input, singularity_avoiding=singularity_avoiding, y_th=y_th)
@@ -426,4 +432,22 @@ def replay_rerank_edge_candidates(
     }
 
 
-__all__ = ["generate_layer_candidates", "replay_rerank_edge_candidates"]
+def commit_symbolic_candidate(
+    work_model,
+    *,
+    layer_idx: int,
+    input_idx: int,
+    output_idx: int,
+    candidate: Mapping[str, object],
+) -> None:
+    """
+    Commit an externally selected symbolic candidate directly to model symbolic state.
+
+    This helper writes ``funs/funs_sympy/funs_avoid_singularity/funs_name/affine`` and
+    switches masks to symbolic mode without re-fitting via ``fix_symbolic``.
+    """
+
+    _apply_symbolic_candidate_state(work_model, layer_idx, input_idx, output_idx, candidate)
+
+
+__all__ = ["commit_symbolic_candidate", "generate_layer_candidates", "replay_rerank_edge_candidates"]
