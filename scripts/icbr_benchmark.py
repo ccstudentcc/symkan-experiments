@@ -3,6 +3,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
+import random
+import statistics
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +16,31 @@ import torch
 from kan.MultKAN import MultKAN
 from kan.icbr import benchmark_icbr_vs_baseline
 from kan.utils import create_dataset
+
+
+_NUMERIC_METRICS = [
+    "candidate_generation_wall_time_s",
+    "replay_rerank_wall_time_s",
+    "symbolic_wall_time_s",
+    "baseline_symbolic_wall_time_s",
+    "symbolic_wall_time_delta_s",
+    "symbolic_speedup_vs_baseline",
+    "replay_imitation_gap",
+    "final_mse_loss_shift",
+    "baseline_mse",
+    "icbr_mse",
+]
+
+_BOOLEAN_METRICS = [
+    "formula_validation_result",
+    "baseline_formula_validation_result",
+    "icbr_formula_validation_result",
+]
+
+_SIGNIFICANCE_DIRECTIONS = {
+    "symbolic_wall_time_delta_s": "positive",
+    "final_mse_loss_shift": "negative",
+}
 
 
 @dataclass(frozen=True)
@@ -39,6 +67,22 @@ def _task_specs() -> dict[str, _TaskSpec]:
             width=[2, 2, 1],
             target_fn=lambda x: torch.sin(torch.pi * x[:, [0]]) + x[:, [1]] ** 2,
             lib=["x", "x^2", "sin", "cos", "gaussian"],
+        ),
+        "poly_cubic": _TaskSpec(
+            name="poly_cubic",
+            n_var=2,
+            width=[2, 3, 1],
+            target_fn=lambda x: 0.8 * x[:, [0]] ** 3 - 0.4 * x[:, [0]] + 0.6 * x[:, [1]] ** 2,
+            lib=["x", "x^2", "x^3", "sin", "cos"],
+        ),
+        "trig_interaction": _TaskSpec(
+            name="trig_interaction",
+            n_var=3,
+            width=[3, 4, 1],
+            target_fn=lambda x: torch.sin(torch.pi * x[:, [0]])
+            + 0.5 * torch.cos(torch.pi * x[:, [1]])
+            + x[:, [0]] * x[:, [2]],
+            lib=["x", "x^2", "x^3", "sin", "cos", "gaussian"],
         ),
     }
 
@@ -82,14 +126,295 @@ def _fit_teacher_model(
     return model, dataset
 
 
-def _mean(values: list[float]) -> float:
-    if not values:
-        return float("nan")
-    return float(sum(values) / len(values))
-
-
 def _serialize_formula_list(formulas: list[str]) -> str:
     return " || ".join(formulas)
+
+
+def _describe(values: list[float]) -> dict[str, float]:
+    if not values:
+        return {
+            "count": 0.0,
+            "mean": float("nan"),
+            "median": float("nan"),
+            "std": float("nan"),
+            "min": float("nan"),
+            "max": float("nan"),
+        }
+    return {
+        "count": float(len(values)),
+        "mean": float(statistics.mean(values)),
+        "median": float(statistics.median(values)),
+        "std": float(statistics.stdev(values)) if len(values) > 1 else 0.0,
+        "min": float(min(values)),
+        "max": float(max(values)),
+    }
+
+
+def _bootstrap_mean_ci(
+    values: list[float],
+    *,
+    iterations: int = 2000,
+    alpha: float = 0.05,
+    seed: int = 0,
+) -> tuple[float, float]:
+    if not values:
+        return float("nan"), float("nan")
+
+    rng = random.Random(seed)
+    n = len(values)
+    bootstrap_means: list[float] = []
+    for _ in range(iterations):
+        sample = [values[rng.randrange(n)] for _ in range(n)]
+        bootstrap_means.append(float(statistics.mean(sample)))
+    bootstrap_means.sort()
+
+    lower_idx = int((alpha / 2.0) * (iterations - 1))
+    upper_idx = int((1.0 - alpha / 2.0) * (iterations - 1))
+    return bootstrap_means[lower_idx], bootstrap_means[upper_idx]
+
+
+def _sign_test_pvalue_two_sided(successes: int, total: int) -> float:
+    if total <= 0:
+        return float("nan")
+    tail_count = sum(math.comb(total, k) for k in range(0, min(successes, total - successes) + 1))
+    return float(min(1.0, 2.0 * tail_count / (2**total)))
+
+
+def _build_metric_stats(rows: list[dict[str, object]]) -> dict[str, dict[str, float]]:
+    stats: dict[str, dict[str, float]] = {}
+    for metric in _NUMERIC_METRICS:
+        values = [float(row[metric]) for row in rows]
+        stats[metric] = _describe(values)
+    for metric in _BOOLEAN_METRICS:
+        values = [1.0 if bool(row[metric]) else 0.0 for row in rows]
+        stats[metric] = _describe(values)
+    return stats
+
+
+def _build_significance(
+    rows: list[dict[str, object]],
+    *,
+    task_label: str,
+) -> dict[str, dict[str, float | int | str | list[float]]]:
+    by_metric: dict[str, dict[str, float | int | str | list[float]]] = {}
+    for metric_name, favorable_direction in _SIGNIFICANCE_DIRECTIONS.items():
+        deltas = [float(row[metric_name]) for row in rows]
+        effective = [value for value in deltas if abs(value) > 1e-12]
+        tie_count = len(deltas) - len(effective)
+
+        if favorable_direction == "positive":
+            improved_count = sum(1 for value in effective if value > 0.0)
+        else:
+            improved_count = sum(1 for value in effective if value < 0.0)
+        worsened_count = len(effective) - improved_count
+
+        ci_seed = sum(ord(ch) for ch in f"{task_label}:{metric_name}") + len(deltas) * 97
+        ci_low, ci_high = _bootstrap_mean_ci(deltas, seed=ci_seed)
+        p_value = _sign_test_pvalue_two_sided(improved_count, len(effective))
+
+        by_metric[metric_name] = {
+            "favorable_direction": favorable_direction,
+            "sample_count": len(deltas),
+            "effective_count": len(effective),
+            "tie_count": tie_count,
+            "improved_count": improved_count,
+            "worsened_count": worsened_count,
+            "delta_stats": _describe(deltas),
+            "mean_delta_ci95": [float(ci_low), float(ci_high)],
+            "sign_test_pvalue_two_sided": float(p_value),
+        }
+    return by_metric
+
+
+def _build_task_stats_rows(
+    *,
+    tasks: list[str],
+    rows: list[dict[str, object]],
+    by_task_metrics: dict[str, dict[str, dict[str, float]]],
+    overall_metrics: dict[str, dict[str, float]],
+) -> list[dict[str, object]]:
+    stats_rows: list[dict[str, object]] = []
+    for metric_name, metric_stats in overall_metrics.items():
+        stats_rows.append(
+            {
+                "scope": "overall",
+                "task": "__all__",
+                "metric": metric_name,
+                **metric_stats,
+            }
+        )
+    for task in tasks:
+        task_rows = [row for row in rows if row["task"] == task]
+        for metric_name, metric_stats in by_task_metrics[task].items():
+            stats_rows.append(
+                {
+                    "scope": "task",
+                    "task": task,
+                    "metric": metric_name,
+                    "seed_count": len(task_rows),
+                    **metric_stats,
+                }
+            )
+    return stats_rows
+
+
+def _build_significance_rows(
+    *,
+    tasks: list[str],
+    by_task_significance: dict[str, dict[str, dict[str, float | int | str | list[float]]]],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for task in tasks:
+        task_sig = by_task_significance[task]
+        for metric_name, item in task_sig.items():
+            ci = item["mean_delta_ci95"]
+            rows.append(
+                {
+                    "task": task,
+                    "metric": metric_name,
+                    "favorable_direction": item["favorable_direction"],
+                    "sample_count": item["sample_count"],
+                    "effective_count": item["effective_count"],
+                    "tie_count": item["tie_count"],
+                    "improved_count": item["improved_count"],
+                    "worsened_count": item["worsened_count"],
+                    "mean_delta": item["delta_stats"]["mean"],
+                    "median_delta": item["delta_stats"]["median"],
+                    "std_delta": item["delta_stats"]["std"],
+                    "min_delta": item["delta_stats"]["min"],
+                    "max_delta": item["delta_stats"]["max"],
+                    "mean_delta_ci95_low": ci[0],
+                    "mean_delta_ci95_high": ci[1],
+                    "sign_test_pvalue_two_sided": item["sign_test_pvalue_two_sided"],
+                }
+            )
+    return rows
+
+
+def _write_task_stats_csv(
+    path: Path,
+    stats_rows: list[dict[str, object]],
+) -> None:
+    fieldnames = [
+        "scope",
+        "task",
+        "metric",
+        "seed_count",
+        "count",
+        "mean",
+        "median",
+        "std",
+        "min",
+        "max",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in stats_rows:
+            writer.writerow({name: row.get(name, "") for name in fieldnames})
+
+
+def _write_significance_csv(
+    path: Path,
+    significance_rows: list[dict[str, object]],
+) -> None:
+    if not significance_rows:
+        return
+    fieldnames = list(significance_rows[0].keys())
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(significance_rows)
+
+
+def _generate_visualizations(
+    *,
+    output_dir: Path,
+    tasks: list[str],
+    by_task_rows: dict[str, list[dict[str, object]]],
+) -> dict[str, object]:
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception as exc:  # pragma: no cover - depends on local matplotlib availability
+        return {"enabled": False, "error": f"{type(exc).__name__}: {exc}", "files": []}
+
+    created_files: list[str] = []
+
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+    x_positions = list(range(len(tasks)))
+    baseline_mean = [
+        float(statistics.mean(float(row["baseline_symbolic_wall_time_s"]) for row in by_task_rows[task])) for task in tasks
+    ]
+    baseline_std = [
+        float(statistics.stdev(float(row["baseline_symbolic_wall_time_s"]) for row in by_task_rows[task]))
+        if len(by_task_rows[task]) > 1
+        else 0.0
+        for task in tasks
+    ]
+    icbr_mean = [float(statistics.mean(float(row["symbolic_wall_time_s"]) for row in by_task_rows[task])) for task in tasks]
+    icbr_std = [
+        float(statistics.stdev(float(row["symbolic_wall_time_s"]) for row in by_task_rows[task]))
+        if len(by_task_rows[task]) > 1
+        else 0.0
+        for task in tasks
+    ]
+    bar_width = 0.36
+    ax.bar(
+        [x - bar_width / 2.0 for x in x_positions],
+        baseline_mean,
+        width=bar_width,
+        yerr=baseline_std,
+        capsize=4,
+        label="Baseline symbolic time",
+    )
+    ax.bar(
+        [x + bar_width / 2.0 for x in x_positions],
+        icbr_mean,
+        width=bar_width,
+        yerr=icbr_std,
+        capsize=4,
+        label="ICBR symbolic time",
+    )
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(tasks, rotation=20)
+    ax.set_ylabel("seconds")
+    ax.set_title("Symbolic Wall Time by Task (mean ± std)")
+    ax.legend()
+    time_plot = output_dir / "icbr_benchmark_symbolic_time_errorbar.png"
+    fig.tight_layout()
+    fig.savefig(time_plot, dpi=160)
+    plt.close(fig)
+    created_files.append(str(time_plot))
+
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+    speedup_data = [[float(row["symbolic_speedup_vs_baseline"]) for row in by_task_rows[task]] for task in tasks]
+    ax.boxplot(speedup_data, labels=tasks, showmeans=True)
+    ax.set_ylabel("speedup x")
+    ax.set_title("ICBR Speedup vs Baseline (seed distribution)")
+    ax.grid(axis="y", alpha=0.3)
+    speedup_plot = output_dir / "icbr_benchmark_speedup_boxplot.png"
+    fig.tight_layout()
+    fig.savefig(speedup_plot, dpi=160)
+    plt.close(fig)
+    created_files.append(str(speedup_plot))
+
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+    mse_shift_data = [[float(row["final_mse_loss_shift"]) for row in by_task_rows[task]] for task in tasks]
+    ax.boxplot(mse_shift_data, labels=tasks, showmeans=True)
+    ax.axhline(0.0, linestyle="--", linewidth=1.0, color="black", alpha=0.7)
+    ax.set_ylabel("icbr_mse - baseline_mse")
+    ax.set_title("MSE Shift by Task (seed distribution)")
+    ax.grid(axis="y", alpha=0.3)
+    mse_plot = output_dir / "icbr_benchmark_mse_shift_boxplot.png"
+    fig.tight_layout()
+    fig.savefig(mse_plot, dpi=160)
+    plt.close(fig)
+    created_files.append(str(mse_plot))
+
+    return {"enabled": True, "error": None, "files": created_files}
 
 
 def run_benchmark(
@@ -104,6 +429,7 @@ def run_benchmark(
     topk: int,
     grid_number: int,
     iteration: int,
+    make_plots: bool,
     quiet: bool,
 ) -> dict[str, object]:
     specs = _task_specs()
@@ -153,8 +479,8 @@ def run_benchmark(
                     f"mse_shift={metrics['final_mse_loss_shift']:.6e}"
                 )
 
-    csv_path = output_dir / "icbr_benchmark_rows.csv"
-    fieldnames = [
+    rows_csv = output_dir / "icbr_benchmark_rows.csv"
+    row_fieldnames = [
         "task",
         "seed",
         "n_var",
@@ -180,8 +506,8 @@ def run_benchmark(
         "icbr_formula_raw",
         "icbr_formula_display",
     ]
-    with csv_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+    with rows_csv.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=row_fieldnames)
         writer.writeheader()
         for row in rows:
             writer.writerow(
@@ -213,50 +539,36 @@ def run_benchmark(
                 }
             )
 
-    summary_by_task: dict[str, dict[str, float]] = {}
-    for task_name in tasks:
-        task_rows = [row for row in rows if row["task"] == task_name]
-        summary_by_task[task_name] = {
-            "candidate_generation_wall_time_s_mean": _mean(
-                [float(row["candidate_generation_wall_time_s"]) for row in task_rows]
-            ),
-            "replay_rerank_wall_time_s_mean": _mean([float(row["replay_rerank_wall_time_s"]) for row in task_rows]),
-            "icbr_symbolic_wall_time_s_mean": _mean([float(row["symbolic_wall_time_s"]) for row in task_rows]),
-            "baseline_symbolic_wall_time_s_mean": _mean(
-                [float(row["baseline_symbolic_wall_time_s"]) for row in task_rows]
-            ),
-            "symbolic_wall_time_delta_s_mean": _mean([float(row["symbolic_wall_time_delta_s"]) for row in task_rows]),
-            "symbolic_speedup_vs_baseline_mean": _mean(
-                [float(row["symbolic_speedup_vs_baseline"]) for row in task_rows]
-            ),
-            "final_mse_loss_shift_mean": _mean([float(row["final_mse_loss_shift"]) for row in task_rows]),
-            "baseline_mse_mean": _mean([float(row["baseline_mse"]) for row in task_rows]),
-            "icbr_mse_mean": _mean([float(row["icbr_mse"]) for row in task_rows]),
-            "formula_validation_pass_rate": _mean(
-                [1.0 if bool(row["formula_validation_result"]) else 0.0 for row in task_rows]
-            ),
-            "baseline_formula_validation_pass_rate": _mean(
-                [1.0 if bool(row["baseline_formula_validation_result"]) else 0.0 for row in task_rows]
-            ),
-            "icbr_formula_validation_pass_rate": _mean(
-                [1.0 if bool(row["icbr_formula_validation_result"]) else 0.0 for row in task_rows]
-            ),
-        }
-
-    overall = {
-        "candidate_generation_wall_time_s_mean": _mean([float(row["candidate_generation_wall_time_s"]) for row in rows]),
-        "replay_rerank_wall_time_s_mean": _mean([float(row["replay_rerank_wall_time_s"]) for row in rows]),
-        "icbr_symbolic_wall_time_s_mean": _mean([float(row["symbolic_wall_time_s"]) for row in rows]),
-        "baseline_symbolic_wall_time_s_mean": _mean([float(row["baseline_symbolic_wall_time_s"]) for row in rows]),
-        "symbolic_speedup_vs_baseline_mean": _mean([float(row["symbolic_speedup_vs_baseline"]) for row in rows]),
-        "final_mse_loss_shift_mean": _mean([float(row["final_mse_loss_shift"]) for row in rows]),
-        "row_count": len(rows),
+    by_task_rows = {task_name: [row for row in rows if row["task"] == task_name] for task_name in tasks}
+    by_task_metrics = {task_name: _build_metric_stats(task_rows) for task_name, task_rows in by_task_rows.items()}
+    overall_metrics = _build_metric_stats(rows)
+    by_task_significance = {
+        task_name: _build_significance(task_rows, task_label=task_name) for task_name, task_rows in by_task_rows.items()
     }
+    overall_significance = _build_significance(rows, task_label="__overall__")
+
+    task_stats_rows = _build_task_stats_rows(
+        tasks=tasks,
+        rows=rows,
+        by_task_metrics=by_task_metrics,
+        overall_metrics=overall_metrics,
+    )
+    task_stats_csv = output_dir / "icbr_benchmark_task_stats.csv"
+    _write_task_stats_csv(task_stats_csv, task_stats_rows)
+
+    significance_rows = _build_significance_rows(tasks=tasks, by_task_significance=by_task_significance)
+    significance_csv = output_dir / "icbr_benchmark_significance.csv"
+    _write_significance_csv(significance_csv, significance_rows)
+
+    visualization = {"enabled": False, "error": "Disabled by --no-plots", "files": []}
+    if make_plots:
+        visualization = _generate_visualizations(output_dir=output_dir, tasks=tasks, by_task_rows=by_task_rows)
 
     summary = {
         "metadata": {
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-            "benchmark_name": "icbr_phase1_cpu_smoke",
+            "benchmark_name": "icbr_phase1_cpu_extended_validation",
+            "report_version": "2.0",
         },
         "config": {
             "tasks": tasks,
@@ -269,18 +581,44 @@ def run_benchmark(
             "grid_number": grid_number,
             "iteration": iteration,
             "output_dir": str(output_dir),
+            "plots_enabled": make_plots,
         },
         "rows": rows,
-        "aggregates": {"overall": overall, "by_task": summary_by_task},
+        "aggregates": {
+            "overall": {
+                "row_count": len(rows),
+                "metrics": overall_metrics,
+                "significance": overall_significance,
+            },
+            "by_task": {
+                task_name: {
+                    "row_count": len(by_task_rows[task_name]),
+                    "metrics": by_task_metrics[task_name],
+                    "significance": by_task_significance[task_name],
+                }
+                for task_name in tasks
+            },
+        },
+        "artifacts": {
+            "rows_csv": str(rows_csv),
+            "task_stats_csv": str(task_stats_csv),
+            "significance_csv": str(significance_csv),
+            "visualizations": visualization,
+        },
         "notes": {
             "field_guide": {
                 "symbolic_wall_time_delta_s": "baseline_symbolic_wall_time_s - icbr_symbolic_wall_time_s",
                 "final_mse_loss_shift": "icbr_mse - baseline_mse; negative means ICBR has lower MSE",
+                "stats_schema": "Each metric includes count | mean | median | std | min | max",
+            },
+            "significance_guide": {
+                "sign_test_pvalue_two_sided": "Two-sided sign test p-value on non-tie seeds.",
+                "mean_delta_ci95": "Bootstrap 95% CI of mean delta across seeds.",
             },
             "extensibility": [
                 "Add new tasks in _task_specs() with target_fn, width, and symbolic lib.",
-                "For larger studies, run with multiple seeds and aggregate via summary JSON.",
-                "For complex formula post-processing, consume formula lists from summary JSON rows.",
+                "Rows-level details are preserved for error bars and downstream statistical tests.",
+                "Task stats CSV and significance CSV can be consumed by external plotting/report tools.",
             ],
         },
     }
@@ -298,26 +636,56 @@ def run_benchmark(
         f"- Train steps: {train_steps}, lr: {lr}",
         f"- ICBR shortlist topk: {topk}, grid_number: {grid_number}, iteration: {iteration}",
         "",
-        "## Task-Level Comparison (Mean over seeds)",
+        "## Task-Level Aggregate Stats",
         "",
-        "| task | baseline_symbolic_s | icbr_symbolic_s | delta_s (baseline-icbr) | speedup_x | baseline_mse | icbr_mse | mse_shift (icbr-baseline) | baseline_formula_pass | icbr_formula_pass |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| task | n | baseline_symbolic_mean | icbr_symbolic_mean | delta_mean | delta_median | delta_std | speedup_mean | speedup_median | mse_shift_mean | mse_shift_std | formula_pass_mean |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for task_name in tasks:
-        item = summary_by_task[task_name]
+        task_item = summary["aggregates"]["by_task"][task_name]
+        metrics = task_item["metrics"]
         md_lines.append(
             "| "
             + f"{task_name} | "
-            + f"{item['baseline_symbolic_wall_time_s_mean']:.6f} | "
-            + f"{item['icbr_symbolic_wall_time_s_mean']:.6f} | "
-            + f"{item['symbolic_wall_time_delta_s_mean']:.6f} | "
-            + f"{item['symbolic_speedup_vs_baseline_mean']:.4f} | "
-            + f"{item['baseline_mse_mean']:.6e} | "
-            + f"{item['icbr_mse_mean']:.6e} | "
-            + f"{item['final_mse_loss_shift_mean']:.6e} | "
-            + f"{item['baseline_formula_validation_pass_rate']:.4f} | "
-            + f"{item['icbr_formula_validation_pass_rate']:.4f} |"
+            + f"{task_item['row_count']} | "
+            + f"{metrics['baseline_symbolic_wall_time_s']['mean']:.6f} | "
+            + f"{metrics['symbolic_wall_time_s']['mean']:.6f} | "
+            + f"{metrics['symbolic_wall_time_delta_s']['mean']:.6f} | "
+            + f"{metrics['symbolic_wall_time_delta_s']['median']:.6f} | "
+            + f"{metrics['symbolic_wall_time_delta_s']['std']:.6f} | "
+            + f"{metrics['symbolic_speedup_vs_baseline']['mean']:.4f} | "
+            + f"{metrics['symbolic_speedup_vs_baseline']['median']:.4f} | "
+            + f"{metrics['final_mse_loss_shift']['mean']:.6e} | "
+            + f"{metrics['final_mse_loss_shift']['std']:.6e} | "
+            + f"{metrics['formula_validation_result']['mean']:.4f} |"
         )
+    md_lines.append("")
+
+    md_lines.extend(
+        [
+            "## Statistical Significance (by task)",
+            "",
+            "| task | metric | favorable_direction | n_effective | improved | worsened | ties | p_value_two_sided | mean_delta_ci95 |",
+            "|---|---|---|---:|---:|---:|---:|---:|---|",
+        ]
+    )
+    for task_name in tasks:
+        sig_item = summary["aggregates"]["by_task"][task_name]["significance"]
+        for metric_name in ["symbolic_wall_time_delta_s", "final_mse_loss_shift"]:
+            metric_sig = sig_item[metric_name]
+            ci = metric_sig["mean_delta_ci95"]
+            md_lines.append(
+                "| "
+                + f"{task_name} | "
+                + f"{metric_name} | "
+                + f"{metric_sig['favorable_direction']} | "
+                + f"{metric_sig['effective_count']} | "
+                + f"{metric_sig['improved_count']} | "
+                + f"{metric_sig['worsened_count']} | "
+                + f"{metric_sig['tie_count']} | "
+                + f"{metric_sig['sign_test_pvalue_two_sided']:.6f} | "
+                + f"[{float(ci[0]):.6e}, {float(ci[1]):.6e}] |"
+            )
     md_lines.append("")
 
     md_lines.extend(
@@ -365,13 +733,22 @@ def run_benchmark(
             md_lines.append(f"- Formula export error baseline={row['baseline_formula_error']}, icbr={row['icbr_formula_error']}")
         md_lines.append("")
 
+    md_lines.extend(["## Visualization Summary", ""])
+    if visualization["enabled"]:
+        for path in visualization["files"]:
+            rel = str(Path(path).relative_to(output_dir))
+            md_lines.append(f"- `{rel}`")
+    else:
+        md_lines.append(f"- Visualization disabled: {visualization['error']}")
+    md_lines.append("")
+
     md_lines.extend(
         [
             "## Extensibility Notes",
             "",
-            "- 任务可扩展：在 `scripts/icbr_benchmark.py::_task_specs()` 新增任务条目即可接入同一导出链路。",
-            "- 指标可扩展：`kan.icbr.benchmark_icbr_vs_baseline` 返回字段会原样进入 JSON rows；CSV/MD 仅需补字段映射。",
-            "- 大规模实验建议：增加 seeds 并按 task 聚合，同时保留 rows 级明细用于误差条或统计检验。",
+            "- 任务可扩展：在 `_task_specs()` 增加任务定义，即可复用统一导出与统计管线。",
+            "- 统计可扩展：新增 benchmark 指标后，可自动进入 task stats（count/mean/median/std/min/max）。",
+            "- 显著性可扩展：可在 `_SIGNIFICANCE_DIRECTIONS` 增加需要方向性判断的 delta 指标。",
         ]
     )
     (output_dir / "icbr_benchmark_summary.md").write_text("\n".join(md_lines) + "\n", encoding="utf-8")
@@ -394,10 +771,14 @@ def _parse_str_list(text: str) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Run a minimal CPU benchmark for ICBR Phase I.")
-    parser.add_argument("--tasks", default="minimal,combo", help="Comma-separated tasks: minimal,combo")
-    parser.add_argument("--seeds", default="0", help="Comma-separated integer seeds")
-    parser.add_argument("--output-dir", default="outputs/icbr_benchmark_smoke", help="Output directory")
+    parser = argparse.ArgumentParser(description="Run CPU benchmark for ICBR Phase I with extended multi-seed reporting.")
+    parser.add_argument(
+        "--tasks",
+        default="minimal,combo,poly_cubic,trig_interaction",
+        help="Comma-separated tasks: minimal,combo,poly_cubic,trig_interaction",
+    )
+    parser.add_argument("--seeds", default="0,1,2,3,4", help="Comma-separated integer seeds")
+    parser.add_argument("--output-dir", default="outputs/icbr_benchmark_extended", help="Output directory")
     parser.add_argument("--train-num", type=int, default=64, help="Training sample count per task")
     parser.add_argument("--test-num", type=int, default=64, help="Test/calibration sample count per task")
     parser.add_argument("--train-steps", type=int, default=20, help="Teacher training steps")
@@ -405,6 +786,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--topk", type=int, default=3, help="Replay shortlist size")
     parser.add_argument("--grid-number", type=int, default=21, help="Grid size for (a,b) search")
     parser.add_argument("--iteration", type=int, default=2, help="Zoom iterations for (a,b) search")
+    parser.add_argument("--no-plots", action="store_true", help="Disable plot generation")
     parser.add_argument("--quiet", action="store_true", help="Disable per-run progress prints")
     args = parser.parse_args(argv)
 
@@ -423,6 +805,7 @@ def main(argv: list[str] | None = None) -> None:
         topk=args.topk,
         grid_number=args.grid_number,
         iteration=args.iteration,
+        make_plots=not args.no_plots,
         quiet=args.quiet,
     )
 

@@ -16,7 +16,7 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
             "--tasks",
             "minimal,combo",
             "--seeds",
-            "0",
+            "0,1",
             "--output-dir",
             str(out_dir),
             "--train-num",
@@ -38,16 +38,20 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
     )
 
     rows_path = out_dir / "icbr_benchmark_rows.csv"
+    task_stats_csv = out_dir / "icbr_benchmark_task_stats.csv"
+    significance_csv = out_dir / "icbr_benchmark_significance.csv"
     summary_json = out_dir / "icbr_benchmark_summary.json"
     summary_md = out_dir / "icbr_benchmark_summary.md"
 
     assert rows_path.exists()
+    assert task_stats_csv.exists()
+    assert significance_csv.exists()
     assert summary_json.exists()
     assert summary_md.exists()
 
     with rows_path.open("r", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
-    assert len(rows) == 2
+    assert len(rows) == 4
     assert {row["task"] for row in rows} == {"minimal", "combo"}
     required_cols = {
         "candidate_generation_wall_time_s",
@@ -73,13 +77,28 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
     assert "config" in summary
     assert "rows" in summary
     assert "aggregates" in summary
+    assert "artifacts" in summary
     assert "notes" in summary
-    assert len(summary["rows"]) == 2
+    assert len(summary["rows"]) == 4
     assert summary["config"]["tasks"] == ["minimal", "combo"]
     assert "overall" in summary["aggregates"]
     assert "by_task" in summary["aggregates"]
+    assert "metrics" in summary["aggregates"]["overall"]
+    assert "significance" in summary["aggregates"]["overall"]
+    minimal = summary["aggregates"]["by_task"]["minimal"]
+    assert minimal["row_count"] == 2
+    assert "metrics" in minimal
+    assert "significance" in minimal
+    speedup_stats = minimal["metrics"]["symbolic_speedup_vs_baseline"]
+    assert {"count", "mean", "median", "std", "min", "max"}.issubset(set(speedup_stats.keys()))
     for row in summary["rows"]:
         assert isinstance(row["baseline_formula_raw"], list)
         assert isinstance(row["baseline_formula_display"], list)
         assert isinstance(row["icbr_formula_raw"], list)
         assert isinstance(row["icbr_formula_display"], list)
+
+    assert summary["artifacts"]["task_stats_csv"].endswith("icbr_benchmark_task_stats.csv")
+    assert summary["artifacts"]["significance_csv"].endswith("icbr_benchmark_significance.csv")
+    visuals = summary["artifacts"]["visualizations"]
+    assert "enabled" in visuals
+    assert "files" in visuals

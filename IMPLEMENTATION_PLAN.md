@@ -443,6 +443,65 @@ Status:
 
 Complete
 
+### Stage 6: Extended Multi-Seed Benchmark Validation
+
+Goal:
+
+在保持 CPU-first 与 baseline 对照口径不变的前提下，扩展 benchmark 到多 seeds 与更大任务集，并增加可用于误差条与统计检验的结构化统计与可视化汇总。
+
+Target Files:
+
+- `scripts/icbr_benchmark.py`
+- `tests/test_icbr_benchmark_script_smoke.py`
+- `tests/test_icbr_benchmark_smoke.py`（如需补充指标结构检查）
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- benchmark 支持多 seeds 运行，并保留 `rows` 级明细结果用于后续统计检验
+- benchmark 支持大于当前 `minimal/combo` 的任务集（可通过 task 列表扩展）
+- 按 task 聚合时，至少对核心数值指标输出:
+  - `count`
+  - `mean`
+  - `median`
+  - `std`
+  - `min`
+  - `max`
+- 汇总中保留 baseline vs ICBR 的对照可读性（时间、MSE、公式验证）
+- 增加统计显著性相关输出（至少覆盖 wall time delta 与 MSE shift）
+- 生成可视化汇总产物（用于快速对比 task 间差异）
+
+Implementation Constraints:
+
+- 不改动 ICBR 算法主路径，只扩展 benchmark 与报告层
+- 不删除现有 `rows` 明细字段
+- 不把扩展验证改写为全量大规模实验平台；保持可复现、可 smoke 的默认执行
+- 继续遵守 CPU-first 验收口径，不引入 CUDA 作为通过条件
+
+Success Criteria:
+
+- 同一次 benchmark 运行可产出:
+  - 明细级 `rows`（含 seed 级结果）
+  - task 级聚合统计（含 `mean | median | std | min | max`）
+  - 统计显著性摘要
+  - 可视化汇总文件
+- 测试覆盖新的聚合结构与导出文件存在性
+- 脚本实跑可在多 seed 条件下完成并落盘
+
+Validation:
+
+- `pytest tests/test_icbr_benchmark_smoke.py tests/test_icbr_benchmark_script_smoke.py`
+- 运行 `scripts.icbr_benchmark`（多 tasks + 多 seeds）并检查:
+  - `icbr_benchmark_rows.csv`
+  - `icbr_benchmark_summary.json`
+  - `icbr_benchmark_summary.md`
+  - 新增统计/可视化产物
+- 人工核对 JSON 聚合字段是否包含 `count | mean | median | std | min | max`
+
+Status:
+
+Complete
+
 ## 5. Acceptance Criteria
 
 Phase I 仅在以下条件全部满足时视为完成:
@@ -472,5 +531,4 @@ Phase I 仅在以下条件全部满足时视为完成:
 3. Stage 3: Add Explicit Commit Helper
 4. Stage 4: Add `auto_symbolic_icbr(...)` Entry
 5. Stage 5: Benchmark and Verify Phase I Claims
-
-
+6. Stage 6: Extended Multi-Seed Benchmark Validation
