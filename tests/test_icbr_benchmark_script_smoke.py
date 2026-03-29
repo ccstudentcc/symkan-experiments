@@ -5,7 +5,7 @@ import json
 import uuid
 from pathlib import Path
 
-from scripts.icbr_benchmark import main, run_benchmark
+from scripts.icbr_benchmark import _resolve_training_config, main, run_benchmark
 
 
 def test_icbr_benchmark_script_generates_outputs() -> None:
@@ -98,6 +98,12 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
     assert "notes" in summary
     assert len(summary["rows"]) == 4
     assert summary["config"]["tasks"] == ["minimal", "combo"]
+    assert summary["config"]["profile"]["name"] == "quick"
+    assert summary["config"]["profile"]["overrides"]["train_num"] is True
+    assert summary["config"]["profile"]["overrides"]["test_num"] is True
+    assert summary["config"]["profile"]["overrides"]["train_steps"] is True
+    assert summary["config"]["profile"]["overrides"]["lr"] is True
+    assert summary["config"]["profile"]["overrides"]["lamb"] is False
     assert "overall" in summary["aggregates"]
     assert "by_task" in summary["aggregates"]
     assert "teacher_quality_gate" in summary["config"]
@@ -125,6 +131,29 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
     assert "files" in visuals
 
 
+def test_quality_profile_resolves_expected_defaults() -> None:
+    resolved, overrides = _resolve_training_config(
+        profile="quality",
+        train_num=None,
+        test_num=None,
+        train_steps=None,
+        lr=None,
+        lamb=None,
+    )
+    assert resolved["train_num"] == 192
+    assert resolved["test_num"] == 192
+    assert resolved["train_steps"] == 80
+    assert resolved["lr"] == 0.03
+    assert resolved["lamb"] == 1e-3
+    assert overrides == {
+        "train_num": False,
+        "test_num": False,
+        "train_steps": False,
+        "lr": False,
+        "lamb": False,
+    }
+
+
 def test_trig_interaction_uses_task_specific_topk_override() -> None:
     out_dir = Path("tmp") / f"icbr_benchmark_topk_override_{uuid.uuid4().hex}"
     result = run_benchmark(
@@ -135,6 +164,7 @@ def test_trig_interaction_uses_task_specific_topk_override() -> None:
         test_num=16,
         train_steps=2,
         lr=0.05,
+        lamb=1e-3,
         topk=3,
         grid_number=11,
         iteration=1,
@@ -161,6 +191,7 @@ def test_teacher_quality_gate_can_skip_symbolic_comparison() -> None:
         test_num=16,
         train_steps=2,
         lr=0.05,
+        lamb=1e-3,
         topk=2,
         grid_number=11,
         iteration=1,

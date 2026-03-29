@@ -670,6 +670,54 @@ Status:
 
 Complete
 
+### Stage 10: Calibrate Teacher Convergence and Run 10-Seed Full-Task Verification
+
+Goal:
+
+在不改动 ICBR 主算法的前提下，补充“高质量数值教师”验证口径：提供可复用的高质量 benchmark 配置入口，并在 10 seeds + 全任务集下完成一次门禁复验。
+
+Target Files:
+
+- `scripts/icbr_benchmark.py`
+- `tests/test_icbr_benchmark_script_smoke.py`
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- benchmark 提供可显式选择的运行 profile（至少含 `quick` 与 `quality`）:
+  - `quick` 用于 smoke/快速回归
+  - `quality` 用于教师收敛质量评估
+- `quality` profile 至少覆盖:
+  - 更高 `train_steps`
+  - 更大 `train_num/test_num`
+  - 稀疏正则 `lamb`
+  - 可与 teacher 质量门禁共同使用
+- summary 导出必须明确记录 profile 与实际生效的训练参数。
+- 使用 10 seeds + 全任务集运行一次 `quality` profile，并输出门禁结果。
+
+Implementation Constraints:
+
+- 不改动 ICBR 算法路径，只扩展 benchmark 执行与报告层。
+- 不删除 Stage 9 新增字段；继续保留 rows 明细导出。
+- 不把本 stage 扩展为新训练器或自动调参系统。
+
+Success Criteria:
+
+- benchmark 可通过 profile 选择快速配置或高质量配置。
+- 10 seeds 全任务 `quality` 运行可落盘产出 summary/rows/report。
+- `TASK_STATUS.md` 如实记录门禁通过率与是否仍有薄弱任务。
+
+Validation:
+
+- `pytest tests/test_icbr_benchmark_script_smoke.py`
+- `python -m scripts.icbr_benchmark --profile quality --train-num 2000 --test-num 1000 --lamb 1e-3 --tasks minimal,combo,poly_cubic,trig_interaction --seeds 0,1,2,3,4,5,6,7,8,9 --output-dir outputs/icbr_benchmark_stage10_quality_10seeds_2000_1000_l1e3 --quiet --no-plots`
+- `python -m scripts.icbr_benchmark_regression --summary-json outputs/icbr_benchmark_stage10_quality_10seeds_2000_1000_l1e3/icbr_benchmark_summary.json --output-dir outputs/icbr_benchmark_stage10_quality_10seeds_2000_1000_l1e3`
+- `python -c "from scripts.icbr_benchmark import _generate_visualizations; ..."`（基于已落盘 rows 生成 PNG 并回写 summary 的 `artifacts.visualizations`）
+
+Status:
+
+Complete
+
 ## 5. Acceptance Criteria
 
 Phase I 仅在以下条件全部满足时视为完成:
@@ -703,3 +751,4 @@ Phase I 仅在以下条件全部满足时视为完成:
 7. Stage 7: Regression Gating and Stability Verification
 8. Stage 8: Diagnose and Fix `trig_interaction` Regression
 9. Stage 9: Add Teacher Quality Gate and Target-Error Metrics
+10. Stage 10: Calibrate Teacher Convergence and Run 10-Seed Full-Task Verification

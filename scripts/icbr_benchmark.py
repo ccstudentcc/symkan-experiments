@@ -53,6 +53,23 @@ _SIGNIFICANCE_DIRECTIONS = {
     "final_mse_loss_shift": "negative",
 }
 
+_BENCHMARK_PROFILES: dict[str, dict[str, float | int]] = {
+    "quick": {
+        "train_num": 64,
+        "test_num": 64,
+        "train_steps": 20,
+        "lr": 0.05,
+        "lamb": 1e-3,
+    },
+    "quality": {
+        "train_num": 192,
+        "test_num": 192,
+        "train_steps": 80,
+        "lr": 0.03,
+        "lamb": 1e-3,
+    },
+}
+
 
 @dataclass(frozen=True)
 class _TaskSpec:
@@ -110,6 +127,7 @@ def _fit_teacher_model(
     test_num: int,
     train_steps: int,
     lr: float,
+    lamb: float,
 ) -> tuple[MultKAN, dict[str, torch.Tensor]]:
     torch.manual_seed(seed)
     dataset = create_dataset(
@@ -135,7 +153,7 @@ def _fit_teacher_model(
         lr=lr,
         update_grid=False,
         batch=-1,
-        lamb=0.0,
+        lamb=lamb,
         log=max(train_steps + 1, 999999),
     )
     return model, dataset
@@ -542,11 +560,15 @@ def run_benchmark(
     test_num: int,
     train_steps: int,
     lr: float,
+    lamb: float,
     topk: int,
     grid_number: int,
     iteration: int,
     teacher_max_test_mse: float,
     teacher_min_test_r2: float,
+    profile_name: str = "custom",
+    profile_defaults: dict[str, float | int] | None = None,
+    profile_overrides: dict[str, bool] | None = None,
     make_plots: bool,
     quiet: bool,
 ) -> dict[str, object]:
@@ -579,6 +601,7 @@ def run_benchmark(
                 test_num=test_num,
                 train_steps=train_steps,
                 lr=lr,
+                lamb=lamb,
             )
             with torch.no_grad():
                 teacher_test_pred = model(dataset["test_input"])
@@ -771,10 +794,16 @@ def run_benchmark(
         "config": {
             "tasks": tasks,
             "seeds": seeds,
+            "profile": {
+                "name": profile_name,
+                "defaults": profile_defaults if profile_defaults is not None else {},
+                "overrides": profile_overrides if profile_overrides is not None else {},
+            },
             "train_num": train_num,
             "test_num": test_num,
             "train_steps": train_steps,
             "lr": lr,
+            "lamb": lamb,
             "topk": topk,
             "grid_number": grid_number,
             "iteration": iteration,
@@ -866,10 +895,11 @@ def run_benchmark(
         "",
         "## Run Config",
         "",
+        f"- Profile: {summary['config']['profile']['name']}",
         f"- Tasks: {', '.join(tasks)}",
         f"- Seeds: {', '.join(str(seed) for seed in seeds)}",
         f"- Train/Test samples per task: {train_num}/{test_num}",
-        f"- Train steps: {train_steps}, lr: {lr}",
+        f"- Train steps: {train_steps}, lr: {lr}, lamb: {lamb}",
         f"- ICBR shortlist topk: {topk}, grid_number: {grid_number}, iteration: {iteration}",
         "",
         "## Task-Level Aggregate Stats",
@@ -1025,8 +1055,44 @@ def _parse_str_list(text: str) -> list[str]:
     return values
 
 
+def _resolve_training_config(
+    *,
+    profile: str,
+    train_num: int | None,
+    test_num: int | None,
+    train_steps: int | None,
+    lr: float | None,
+    lamb: float | None,
+) -> tuple[dict[str, float | int], dict[str, bool]]:
+    if profile not in _BENCHMARK_PROFILES:
+        raise ValueError(f"Unknown benchmark profile: {profile}")
+
+    profile_defaults = _BENCHMARK_PROFILES[profile]
+    resolved = {
+        "train_num": int(profile_defaults["train_num"]) if train_num is None else int(train_num),
+        "test_num": int(profile_defaults["test_num"]) if test_num is None else int(test_num),
+        "train_steps": int(profile_defaults["train_steps"]) if train_steps is None else int(train_steps),
+        "lr": float(profile_defaults["lr"]) if lr is None else float(lr),
+        "lamb": float(profile_defaults["lamb"]) if lamb is None else float(lamb),
+    }
+    overridden = {
+        "train_num": train_num is not None,
+        "test_num": test_num is not None,
+        "train_steps": train_steps is not None,
+        "lr": lr is not None,
+        "lamb": lamb is not None,
+    }
+    return resolved, overridden
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run CPU benchmark for ICBR Phase I with extended multi-seed reporting.")
+    parser.add_argument(
+        "--profile",
+        default="quick",
+        choices=sorted(_BENCHMARK_PROFILES.keys()),
+        help="Benchmark run profile: quick for smoke, quality for teacher-convergence verification.",
+    )
     parser.add_argument(
         "--tasks",
         default="minimal,combo,poly_cubic,trig_interaction",
@@ -1034,10 +1100,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--seeds", default="0,1,2,3,4,5,6,7,8,9", help="Comma-separated integer seeds")
     parser.add_argument("--output-dir", default="outputs/icbr_benchmark_extended", help="Output directory")
-    parser.add_argument("--train-num", type=int, default=64, help="Training sample count per task")
-    parser.add_argument("--test-num", type=int, default=64, help="Test/calibration sample count per task")
-    parser.add_argument("--train-steps", type=int, default=20, help="Teacher training steps")
-    parser.add_argument("--lr", type=float, default=0.05, help="Teacher training learning rate")
+    parser.add_argument("--train-num", type=int, default=None, help="Training sample count per task")
+    parser.add_argument("--test-num", type=int, default=None, help="Test/calibration sample count per task")
+    parser.add_argument("--train-steps", type=int, default=None, help="Teacher training steps")
+    parser.add_argument("--lr", type=float, default=None, help="Teacher training learning rate")
+    parser.add_argument("--lamb", type=float, default=None, help="Teacher sparsity regularization lambda")
     parser.add_argument("--topk", type=int, default=3, help="Replay shortlist size")
     parser.add_argument("--grid-number", type=int, default=21, help="Grid size for (a,b) search")
     parser.add_argument("--iteration", type=int, default=2, help="Zoom iterations for (a,b) search")
@@ -1060,20 +1127,32 @@ def main(argv: list[str] | None = None) -> None:
     tasks = _parse_str_list(args.tasks)
     seeds = _parse_int_list(args.seeds)
     output_dir = Path(args.output_dir)
+    resolved_training, profile_overrides = _resolve_training_config(
+        profile=args.profile,
+        train_num=args.train_num,
+        test_num=args.test_num,
+        train_steps=args.train_steps,
+        lr=args.lr,
+        lamb=args.lamb,
+    )
 
     run_benchmark(
         tasks=tasks,
         seeds=seeds,
         output_dir=output_dir,
-        train_num=args.train_num,
-        test_num=args.test_num,
-        train_steps=args.train_steps,
-        lr=args.lr,
+        train_num=int(resolved_training["train_num"]),
+        test_num=int(resolved_training["test_num"]),
+        train_steps=int(resolved_training["train_steps"]),
+        lr=float(resolved_training["lr"]),
+        lamb=float(resolved_training["lamb"]),
         topk=args.topk,
         grid_number=args.grid_number,
         iteration=args.iteration,
         teacher_max_test_mse=args.teacher_max_test_mse,
         teacher_min_test_r2=args.teacher_min_test_r2,
+        profile_name=args.profile,
+        profile_defaults=dict(_BENCHMARK_PROFILES[args.profile]),
+        profile_overrides=profile_overrides,
         make_plots=not args.no_plots,
         quiet=args.quiet,
     )
