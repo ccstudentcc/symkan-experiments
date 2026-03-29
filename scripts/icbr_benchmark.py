@@ -9,6 +9,7 @@ import os
 import random
 import statistics
 import time
+import warnings
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -542,10 +543,25 @@ def _train_teacher_model(
         log=max(train_steps + 1, 999999),
     )
     if spec.teacher_post_train_prune:
-        model = model.prune(
-            node_th=float(spec.teacher_prune_node_th),
-            edge_th=float(spec.teacher_prune_edge_th),
-        )
+        try:
+            model = model.prune(
+                node_th=float(spec.teacher_prune_node_th),
+                edge_th=float(spec.teacher_prune_edge_th),
+            )
+        except Exception as prune_exc:
+            warnings.warn(
+                f"Teacher prune failed for task={spec.name} with configured thresholds; "
+                f"falling back to no-threshold prune. error={prune_exc!r}",
+                RuntimeWarning,
+            )
+            try:
+                model = model.prune(node_th=0.0, edge_th=0.0)
+            except Exception as prune_fallback_exc:
+                warnings.warn(
+                    f"Fallback prune also failed for task={spec.name}; keep unpruned teacher model. "
+                    f"error={prune_fallback_exc!r}",
+                    RuntimeWarning,
+                )
         post_prune_steps = int(spec.teacher_post_prune_steps)
         if post_prune_steps > 0:
             post_prune_lr = float(spec.teacher_post_prune_lr)

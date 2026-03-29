@@ -4,67 +4,63 @@
 2026-03-29
 
 ## Task
-完成 Stage 13 收口补充：固定 Feynman 数据随机种子默认值，并把公式/数据集元数据贯通到 benchmark 导出与 Markdown 报告。
+完成 Stage 14：在 `feynman_reference` 配置下对 `I.12.1` 与 `I.12.4` 进行 seeds=1,2 先导实跑，并验证 teacher 持久缓存链路。
 
 ## Current Stage
-Stage 13: Add Feynman Reference Preset and Prune-Refit Teacher Flow
+Stage 14: Feynman Pilot Run on I.12.1 and I.12.4 (Seeds 1,2)
 
 ## Status
 Complete
 
 ## Latest Completed Work
-- 将 Feynman 随机相关默认值固定为可复现口径：
-  - `feynman_dataset_select_seed=1`
-  - `feynman_split_strategy_seed=1`
-- 将 Feynman train/test 切分随机性从运行 seed 解耦：
-  - random split 使用 `feynman_split_strategy_seed`
-  - run seed 继续用于模型训练随机性
-- 扩展 Feynman 任务规格与导出字段，新增并贯通：
-  - `feynman_dataset_filename`
-  - `feynman_dataset_rows`
-  - `feynman_dataset_columns`
-  - `feynman_split_seed`
-  - `feynman_equation_metadata`
-- 增强 `FeynmanEquations.csv` 解析：
-  - 保留按公式文件名匹配公式表达式
-  - 透传整行元数据到 summary/rows
-  - 清理 BOM 字段名，避免 `﻿Filename` 污染报告字段
-- 增强 `icbr_benchmark_summary.md`：
-  - Run Config 显示 `split_seed` / `select_seed`
-  - 新增 `Feynman Dataset Metadata` 章节，展示每个公式任务的数据文件、样本规模、变量数、切分参数与 CSV 元信息
-- 完成真实本地数据链路验证（`datasets/Feynman_with_units` + `datasets/FeynmanEquations.csv`）并生成报告产物。
+- 新增并执行 Stage 14（最小范围实跑）：
+  - `tasks=feynman_I_12_1,feynman_I_12_4`
+  - `seeds=1,2`
+  - 其余保持 `feynman_reference` 口径
+  - teacher cache 模式 `readwrite`
+- 首轮实跑出现运行时失败：
+  - 在 teacher `prune()` 阶段触发 `RuntimeError: stack expects a non-empty TensorList`
+- 在当前 stage 范围内完成最小修复：
+  - `scripts/icbr_benchmark.py` 的 teacher 剪枝流程增加安全回退：
+    - 先按配置阈值 `prune`
+    - 失败则回退到 `node_th=0, edge_th=0` 的保守剪枝
+    - 再失败则保留未剪枝 teacher 并继续流程
+- 修复后重跑 Stage 14 成功，产出完整 benchmark 导出文件：
+  - `outputs/icbr_benchmark_stage14_feynman_i12_pilot/icbr_benchmark_rows.csv`
+  - `outputs/icbr_benchmark_stage14_feynman_i12_pilot/icbr_benchmark_summary.json`
+  - `outputs/icbr_benchmark_stage14_feynman_i12_pilot/icbr_benchmark_summary.md`
 
 ## Files Changed
 - scripts/icbr_benchmark.py
-- tests/test_icbr_benchmark_script_smoke.py
 - IMPLEMENTATION_PLAN.md
 - TASK_STATUS.md
 
 ## Validation Run
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m py_compile scripts\icbr_benchmark.py tests\test_icbr_benchmark_script_smoke.py`
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_benchmark_script_smoke.py`
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_benchmark_smoke.py tests\test_icbr_benchmark_script_smoke.py tests\test_icbr_benchmark_regression_smoke.py`
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.icbr_benchmark --tasks feynman_I_10_7 --seeds 1 --output-dir outputs/icbr_benchmark_feynman_metadata_smoke --train-num 64 --test-num 32 --train-steps 4 --lr 0.03 --lamb 1e-3 --topk 2 --grid-number 11 --iteration 1 --teacher-max-test-mse 10 --teacher-min-test-r2 -10 --feynman-root datasets --feynman-variant Feynman_with_units --feynman-split-strategy random --quiet --no-plots`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m py_compile scripts\icbr_benchmark.py`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_benchmark_script_smoke.py::test_feynman_dataset_file_loading_smoke`
+- （首轮失败）`C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.icbr_benchmark --profile feynman_reference --tasks feynman_I_12_1,feynman_I_12_4 --seeds 1,2 --feynman-root datasets --feynman-variant Feynman_with_units --teacher-cache-dir outputs/teacher_cache_feynman_reference --teacher-cache-mode readwrite --output-dir outputs/icbr_benchmark_stage14_feynman_i12_pilot --quiet`
+- （修复后通过）`C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.icbr_benchmark --profile feynman_reference --tasks feynman_I_12_1,feynman_I_12_4 --seeds 1,2 --feynman-root datasets --feynman-variant Feynman_with_units --teacher-cache-dir outputs/teacher_cache_feynman_reference --teacher-cache-mode readwrite --output-dir outputs/icbr_benchmark_stage14_feynman_i12_pilot --quiet`
 
 ## Validation Result
-- `py_compile` 通过
-- 脚本 smoke 测试通过：`9 passed`
-- benchmark 回归 smoke 测试通过：`12 passed`
-- 真实数据最小实跑成功，报告产物已生成：
-  - `outputs/icbr_benchmark_feynman_metadata_smoke/icbr_benchmark_summary.json`
-  - `outputs/icbr_benchmark_feynman_metadata_smoke/icbr_benchmark_summary.md`
-- 已确认 Markdown 报告包含：
-  - `Feynman Dataset Metadata` 章节
-  - 公式任务名、目标公式、数据文件名、样本规模、切分 seed 与 CSV 元数据
+- 代码修复验证通过（`py_compile` + Feynman smoke 单测）
+- Stage 14 目标命令最终执行成功，`rows=4`（2 tasks × 2 seeds）
+- 缓存状态可观测：
+  - `feynman_I_12_1` seeds 1/2：`cache_hit=True`（hit）
+  - `feynman_I_12_4` seeds 1/2：`cache_hit=False`（miss_write）
+- 结果中 teacher quality gate 均未通过，导致符号化对比被跳过（该行为符合当前门禁策略）：
+  - `feynman_I_12_1`: teacher `test_mse≈0.24`（高于默认阈值 0.10）
+  - `feynman_I_12_4`: teacher `test_r2≈-0.53`（低于默认阈值 0.75）
 
 ## Decisions
-- 保持“只改 benchmark 层，不改 ICBR 主算法路径”。
-- 为保证多次运行与跨任务可复现，Feynman 数据子集选择 seed 与随机切分 seed 默认统一为 `1`。
-- 将 Feynman 元数据直接进 `summary.config.feynman.task_metadata` 与 rows 级字段，保证 JSON/CSV/MD 三种导出一致可追溯。
+- 保持“其他参数一致”的前提下完成你指定任务/seed 的先导验证。
+- 不放宽 teacher 门禁阈值，先保留真实失败信号，避免误判符号化流程收益。
+- 对 prune 运行时异常采用最小安全回退方案，优先保障 benchmark 流程可执行性与可观测性。
 
 ## Remaining Work
-- 使用 `--profile feynman_reference` 对 `feynman_paper10` 执行完整参考配置实跑（2000/1000, steps=200, prune+refit）。
-- 在完整 Feynman 多任务结果上执行后续多 seed 聚合与回归门禁复验。
+- 若你希望继续对比 baseline/ICBR 符号化效果，需要先提升这两个任务的 teacher 质量，或临时放宽门禁阈值做探索性对比。
+- 建议下一步：
+  - 先对 `I.12.1/I.12.4` 做 teacher 收敛增强（如增步数/调 lr/lamb）再复跑本 stage。
+  - 或按你的决策，先用放宽门禁做一次符号化可行性试跑。
 
 ## Blockers
-- 无
+- 无硬 blocker；当前主要问题是 teacher 质量门禁未通过。

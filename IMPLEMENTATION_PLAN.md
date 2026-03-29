@@ -889,6 +889,44 @@ Status:
 
 Complete
 
+### Stage 14: Feynman Pilot Run on I.12.1 and I.12.4 (Seeds 1,2)
+
+Goal:
+
+在保持 `feynman_reference` 口径不变的前提下，先对 `I.12.1` 与 `I.12.4` 两个数据集执行小范围实跑（`seeds=1,2`），并验证 teacher 持久缓存命中行为与导出结果完整性。
+
+Target Files:
+
+- `IMPLEMENTATION_PLAN.md`
+- `TASK_STATUS.md`
+- `outputs/icbr_benchmark_stage14_feynman_i12_pilot/*`（运行产物）
+
+Required Behavior:
+
+- benchmark 运行参数保持与 `feynman_reference` 一致，仅覆盖：
+  - `tasks=feynman_I_12_1,feynman_I_12_4`
+  - `seeds=1,2`
+- 使用持久 teacher cache（`readwrite`），并在结果中保留 cache 命中信息。
+- 导出产物至少包含：
+  - `icbr_benchmark_rows.csv`
+  - `icbr_benchmark_summary.json`
+  - `icbr_benchmark_summary.md`
+
+Success Criteria:
+
+- 运行成功完成并产出上述文件。
+- 行级结果中可观察 `teacher_cache_hit` / `teacher_cache_status`。
+- `summary.md` 能查看两个任务、两个 seed 的结果与公式导出信息。
+
+Validation:
+
+- `python -m scripts.icbr_benchmark --profile feynman_reference --tasks feynman_I_12_1,feynman_I_12_4 --seeds 1,2 --feynman-root datasets --feynman-variant Feynman_with_units --teacher-cache-dir outputs/teacher_cache_feynman_reference --teacher-cache-mode readwrite --output-dir outputs/icbr_benchmark_stage14_feynman_i12_pilot --quiet`
+- 人工核对 `outputs/icbr_benchmark_stage14_feynman_i12_pilot/icbr_benchmark_summary.json` 中 `rows` 条数与 cache 字段。
+
+Status:
+
+Complete
+
 ## 5. Acceptance Criteria
 
 Phase I 仅在以下条件全部满足时视为完成:
@@ -926,3 +964,4 @@ Phase I 仅在以下条件全部满足时视为完成:
 11. Stage 11: Add Cross-Run Persistent Teacher Cache
 12. Stage 12: Add Feynman Dataset Support to `icbr_benchmark.py`
 13. Stage 13: Add Feynman Reference Preset and Prune-Refit Teacher Flow
+14. Stage 14: Feynman Pilot Run on I.12.1 and I.12.4 (Seeds 1,2)
