@@ -1,427 +1,478 @@
-# FastKAN-Style Numeric Frontend Migration Plan
+# ICBR-KAN Phase I Implementation Plan
 
-## Goal
+状态: Active  
+日期: 2026-03-29  
+范围: 本计划只覆盖 `ICBR-KAN_design.md` 中已经收缩后的 **Phase I**。实现对象是 **冻结已训练数值 KAN 之后的 post-hoc symbolic fitting**，不是训练器、不是通用 symbolic regression、不是程序搜索、不是全局公式树发现。  
+交付口径: **CPU-first**。Phase I 不以 CUDA 作为交付目标或验收条件。
 
-在不破坏现有 `symkan -> kan.MultKAN` 工作流的前提下，为本仓库引入一个可选的 `radial_bf` 数值前端，使其具备：
+## 1. Goals
 
-- 可训练
-- 可剪枝
-- 可符号化
-- 可导出公式
+在当前 `kan/` 实现契约下，新增一条严格对齐设计稿的 Phase I symbolic fitting 路线，使其相对 baseline `MultKAN.auto_symbolic()` 只包含两个核心改进点:
 
-当前优先级是“工程可跑通”，不是立即追求论文级最优结果。
+1. `shared-tensor symbolic candidate evaluation`
+2. `teacher-replay contextual reranking`
 
-## Scope
+Phase I 完成后应满足:
 
-本计划只覆盖最小侵入迁移路线：
+- 输入仍然是已经训练完成的数值 `MultKAN`
+- 数值训练流程、数值层表示与训练器语义保持不变
+- 最终输出仍然必须能够通过 `symbolic_formula()` 导出
+- 导出前必须达到 fully symbolic completion
+- 所有 wall time、复杂度解释与 benchmark 默认按 CPU 路线汇报
 
-- 保留现有 `symkan` 流水线与 `kan/` 主体 API。
-- 在 `kan/` 中增加 FastKAN 风格的数值边前端。
-- 保持默认 `bspline` 路径不变。
+## 2. Non-Goals
 
-本计划暂不包含：
+以下内容不属于 Phase I 主实施范围；如需提及，只能作为非目标或后续扩展:
 
-- 全量 benchmark 重跑
-- 大规模消融分析
-- 论文最终图表与结论撰写
+- 训练器改造
+- 全网重训练
+- 通用 symbolic regression 框架
+- 程序搜索或全局公式树发现
+- block planning
+- pairwise coupling / coupling graph / pairwise synergy
+- active set
+- behavior-diverse shortlist heuristic 扩张
+- affine-only polish
+- node affine / subnode affine 优化
+- CUDA candidate path
+- 任何以设备切换替代算法收益归因的验收方式
 
-## AI Execution Protocol (Added After Stage 1)
+## 3. Implementation Principles
 
-为降低后续代理执行偏差，后续 Stage 必须遵守以下执行协议。
+### 3.1 Phase I Baseline Semantics to Respect
 
-### 1. Environment and command rules
+当前 baseline 不是全局搜索，而是:
 
-- 所有 Python 测试与脚本默认使用 `kan` 环境解释器：
-  - `C:\\Users\\chenpeng\\miniconda3\\envs\\kan\\python.exe`
-- 避免使用 `conda run -n kan ...` 作为主执行路径（当前终端存在编码异常风险，可能误报失败）。
-- 命令执行目录固定为仓库根目录：`symkan-experiments/`。
+1. `auto_symbolic()` 逐层、逐边遍历
+2. 每条边调用 `suggest_symbolic()`
+3. `suggest_symbolic()` 对函数库逐个调用 `fix_symbolic()` 做单边拟合
+4. `suggest_symbolic()` 再调用 `unfix_symbolic()` 回退
+5. 按局部 `r2` 与复杂度排序
+6. `auto_symbolic()` 将 top-1 再次 `fix_symbolic()` 真正提交
 
-### 2. Minimal-change policy
+因此，Phase I 只允许替换两件事:
 
-- 每个 Stage 仅修改其 `Target files`，不要顺手改不相关模块。
-- 默认行为必须保持 `bspline` 不变；新增能力只能走显式开关。
-- 不允许把 `symkan` 逻辑回退为脚本私有逻辑。
+- 候选生成的组织方式
+- 最终提交的评分方式
 
-### 3. Stage completion checklist (mandatory)
+外层遍历顺序保持与 baseline 一致，避免把 Phase I 扩张为新的全局 planning 系统。
 
-每完成一个 Stage，必须同步完成以下事项：
+### 3.2 Exporter Contract Is a Hard Constraint
 
-1. 代码实现与该 Stage 的 `Required behavior` / `Focus` 对齐；
-2. 执行该 Stage 的最小验证命令并记录结果；
-3. 将该 Stage 状态从 `Not Started` 更新为 `Complete`；
-4. 若存在 blocker，记录“失败命令 + 错误 + 下一步方案”。
+必须显式尊重以下事实:
 
-### 4. Stop conditions for agents
+- `symbolic_formula()` 只读取 `symbolic_fun` 中的 `funs_sympy` 与 `affine`，并按层组合导出
+- `symbolic_formula()` 不把 numeric branch 作为导出真源
+- `symbolic_formula()` 也不把 mask 当作唯一真源
 
-出现以下情况时，代理应停止扩展开发并先修正计划或请求确认：
+因此，Phase I 结束时必须满足:
 
-- 发现需要跨 Stage 才能落地（例如 Stage 2 尚未完成却需要 Stage 5 配置才能验证）；
-- 需要修改 `symkan` 公共配置语义或默认值；
-- 发现 `symbolic` 或 `pruning` 契约与当前计划描述冲突。
+- 每条有效边都有明确 symbolic assignment
+- 被剪掉的边必须显式提交为 `0`
+- `funs`
+- `funs_sympy`
+- `funs_avoid_singularity`
+- `funs_name`
+- `affine`
+- numeric mask
+- symbolic mask
 
-## Must-Read Before Implementation
+以上状态必须彼此一致，不能留下历史残留。
 
-以下文件是执行当前计划前的真正必读项，只保留与 Stage 1 到 Stage 4 直接相关的最小集合。
+### 3.3 Teacher Cache and Work State Must Be Explicitly Separated
 
-### 1. Project constraints
+Phase I 必须显式区分:
 
-- `ARCHITECTURE.md`
-  了解 `kan/` 与 `symkan/` 的模块边界，避免把迁移做成跨层重写。
-- `docs/design.md`
-  这里明确了“不重写 pykan 核心行为”和“保持 notebook / CLI / CSV 工作流兼容”的约束。
+- `teacher cache`: 来自冻结教师模型的缓存
+- `work state`: 当前逐步提交 symbolic candidate 的工作模型状态
 
-### 2. Current pykan implementation that must stay compatible
+使用规则固定为:
 
-- `kan/KANLayer.py`
-  新数值层必须对齐的接口基线。
-- `kan/MultKAN.py`
-  迁移的核心文件；必须重点阅读：
-  `__init__`、`forward`、`attribute`、`prune_edge`、`prune_input`、
-  `suggest_symbolic`、`fix_symbolic`、`auto_symbolic`、`symbolic_formula`。
-- `kan/Symbolic_KANLayer.py`
-  符号边固定与参数拟合逻辑，决定新数值前端缓存如何接入。
+- 候选生成只使用 `teacher cache`
+- shortlist replay 只在当前 `work state` 上执行
+- teacher 输出只作为 imitation target，不参与提交状态写入
 
-### 3. symkan integration points that depend on the model contract
+### 3.4 Cache Semantics Must Follow Current Forward Behavior
 
-- `symkan/symbolic/pipeline.py`
-  当前完整符号化主链路，决定模型至少要提供哪些能力。
-- `symkan/symbolic/search.py`
-  直接使用 `suggest_symbolic` / `fix_symbolic` 的地方。
-- `symkan/symbolic/compact.py`
-  直接依赖 `prune_input()`，是迁移兼容性的关键点。
-- `symkan/tuning/stagewise.py`
-  直接依赖训练、attribution 和 `prune_edge()` 行为。
+根据当前 `MultKAN.forward()`:
 
-### 4. FastKAN / AutoSym reference files
+- `acts[l]` 是每层节点级缓存
+- `spline_postacts[l]` 保存的是当前 forward 下的 edge-level postacts
+- `spline_postsplines[l]` 保存 numeric branch 的 edge response cache
 
-- `In-Context-Symbolic-Regression-KAN-main/symbolic_kan/gated_kan.py`
-  `radial_bf` 数值原子与兼容层设计的最直接参考。
-- `In-Context-Symbolic-Regression-KAN-main/symbolic_kan/MultKAN.py`
-  `numeric_atom_configs` 如何接入 `MultKAN`，以及 AutoSym 风格后处理如何与数值前端解耦。
-- `In-Context-Symbolic-Regression-KAN-main/example_simple.py`
-  作者对“fastkan 只改变 numeric basis，symbolic regression step 不变”的最短说明。
+必须写清楚:
 
-## Nice-to-Read If Needed
+- `acts` 与 `spline_postacts` 只有在 **纯数值教师 forward** 下采集时，才能作为 teacher cache 使用
+- 一旦 symbolic branch 打开，`spline_postacts` 就混入 symbolic contribution，不能再被当作纯教师边目标
+- `spline_postsplines` 可以作为 numeric response 辅助检查，但不是 exporter 真源
 
-以下文件不是开工前必读，但在遇到对应问题时建议回看：
+### 3.5 Replay Helpers Must Be Memory-Resident
 
-- `README.md`
-  仓库整体运行方式与输出口径。
-- `symkan/pruning/attribution.py`
-  若迁移过程中 attribution 行为异常，再读这个包装层。
-- `symkan/io/checkpoint.py`
-  若后续 checkpoint / reload 出问题，再补读。
-- `symkan/config/schema.py`
-  等进入 Stage 5 再读即可。
-- `In-Context-Symbolic-Regression-KAN-main/symbolic_kan/Symbolic_KANLayer.py`
-  若需要对照其 `old_fix_symbolic` 细节，再补读。
-- `In-Context-Symbolic-Regression-KAN-main/symbolic_kan/utils.py`
-  若需要对照其局部拟合函数，再补读。
+Phase I replay 内环不能依赖现有高开销或不完整的 primitive:
 
-## Compatibility Contract
+- `MultKAN.copy()` 当前通过 `saveckpt()` / `loadckpt()` 走磁盘式复制，不适合作为 replay 内环
+- `unfix_symbolic()` 只切换 mode 并把 `funs_name` 改为 `"0"`，不是完整 rollback primitive
+- replay 内环必须绕开 `log_history()` / `auto_save` / checkpoint 落盘路径
 
-新的数值前端必须继续满足 `symkan` 当前依赖的模型契约：
+因此，Phase I 必须新增内存态 snapshot/apply/restore helper。
 
-- `attribute()`
-- `prune_edge()`
-- `prune_input()`
-- `suggest_symbolic()`
-- `fix_symbolic()`
-- `symbolic_formula()`
-- `act_fun[l].mask`
-- `symbolic_fun[l].mask`
-- 训练后可读取的边曲线缓存：`acts`、`spline_preacts`、`spline_postacts`、`spline_postsplines`
+### 3.6 `fit_params()` Is Only a Candidate Generator
 
-说明：
+Phase I 复用 `fit_params()` 的参数化边界:
 
-- 即使 `radial_bf` 路径下不再使用真实 spline，这些缓存字段也应继续存在。
-- 其中 `spline_postacts` / `spline_postsplines` 在新路径下可解释为 “numeric edge response cache”。
+- 搜索 `(a, b)` 网格
+- 用相关性式 `r2` 做局部代理排序
+- 用 `LinearRegression` 在固定 `(a, b)` 后拟合 `(c, d)`
+- 对非法数值用 `torch.nan_to_num` 兜底
 
-## Stage 0: Baseline Lock
+但必须明确:
+
+- `fit_params()` 不是单边全局最优求解器
+- 局部 `r2` 只能用于生成 shortlist，不能直接作为最终提交分数
+
+### 3.7 Why Phase I Is CPU-First
+
+Phase I 固定 CPU 路线，不是保守退让，而是由当前 `kan/` 的真实结构决定:
+
+- symbolic fitting 的基本单位是单边一元函数
+- baseline 的主要低效来自 `suggest_symbolic()` 的状态试写，而不是大规模张量训练
+- 当前函数库异构，开销大量来自 Python 枚举、对象状态写入与回滚
+- replay、commit、export 具有显著控制流与对象状态语义
+- `fit_params()` 当前仍依赖 `LinearRegression`
+- `symbolic_formula()` / `sympy` 路径也不在 CUDA 友好主链上
+
+所以 Phase I 的收益目标应当是:
+
+- 降低 Python 调度常数项
+- 消除状态污染
+- 共享同层候选评估中的中间张量
+- 用 replay 改善最终提交质量
+
+而不是把 CUDA 加速写成第一版验收前提。
+
+## 4. Staged Plan
+
+### Stage 0: Freeze Phase I Scope
 
 Goal:
-锁定当前 `bspline` 路径行为，避免迁移过程中引入无意回归。
 
-Success criteria:
+将当前设计稿中的 Phase I 范围收紧并冻结为唯一实施边界，只保留两个核心改进点，不保留任何训练器或 planning 扩张。
 
-- 当前默认配置下的关键 smoke test 可以在迁移前后保持通过。
-- 不修改任何已有默认参数语义。
+Target Files:
 
-Tests:
+- `ICBR-KAN_design.md`
+- `IMPLEMENTATION_PLAN.md`
 
-- 记录当前 `python -m pytest` 的通过/失败范围。
-- 记录一个最小 notebook/CLI 路径的现状输出。
+Required Behavior:
+
+- 计划文档必须明确 baseline 的真实语义是“逐边局部拟合 + 立即硬提交”
+- 计划文档必须明确 Phase I 只包含:
+  - `shared-tensor symbolic candidate evaluation`
+  - `teacher-replay contextual reranking`
+- 计划文档必须把以下内容写入非目标:
+  - block planning
+  - coupling
+  - active set
+  - affine polish
+  - CUDA optimization
+  - 训练器改造
+  - 全网重训练
+- 计划文档必须把 CPU-first 口径写死
+
+Success Criteria:
+
+- `IMPLEMENTATION_PLAN.md` 与 `ICBR-KAN_design.md` 的 Phase I 范围一致
+- 不再把 Phase I 描述成训练系统或通用 symbolic regression 系统
+- 不再把 CUDA 写成 Phase I 主交付目标
+
+Validation:
+
+- 人工逐节核对 `ICBR-KAN_design.md` 第 2、4、5、7、10、12 节
+- 人工核对本计划的 Goals / Non-Goals / Stage 定义是否超出 Phase I
 
 Status:
+
 Complete
 
-## Stage 1: Introduce a Compatible FastKAN-Style Layer
+### Stage 1: Add CPU Batched Candidate Evaluation
 
 Goal:
-在 `kan/` 下新增一个与 `KANLayer` 接口兼容的 `radial_bf` 数值层。
 
-Target files:
+新增无状态的 CPU 候选生成 helper，直接对冻结教师 cache 中的 `(x_e, y_e)` 做按函数固定、按边成批的候选评估，替代 `suggest_symbolic()` 的状态型试探。
 
-- `kan/FastKANLayer.py` 或等价命名的新文件
-- `kan/__init__.py`
+Target Files:
 
-Required behavior:
+- `kan/icbr.py`（新文件，推荐）
+- `kan/MultKAN.py`（仅在需要增加 opt-in 调用入口时修改）
+- `tests/test_icbr_candidates.py`（建议）
 
-- `forward(x)` 返回 `(y, preacts, postacts, postspline)`
-- 支持 `mask`
-- 支持 `get_subset(in_id, out_id)`
-- 支持 `swap(i1, i2, mode)`
-- 提供 `update_grid_from_samples()` 和 `initialize_grid_from_parent()` 的兼容实现
-- 保留 `grid` / `k` / `coef` / `scale_*` 等必要兼容字段
+Required Behavior:
 
-Success criteria:
+- 输入同层一批边的 `teacher_acts[l][:, i]` 与 `teacher_edge_targets[l][:, j, i]`
+- 对固定函数族共享 `(a, b)` 搜索网格
+- 共享 `u = a x + b`、均值、方差、相关性等局部统计量
+- 返回每条边的:
+  - `fun_name`
+  - `(a, b, c, d)` 候选参数
+  - 局部 `r2`
+  - complexity
+  - 最小诊断量
+- 整个候选生成过程不触碰:
+  - `symbolic_fun`
+  - `act_fun.mask`
+  - `symbolic_fun.mask`
+  - `log_history`
+  - `auto_save`
 
-- 新层单独前向不报错。
-- 输出张量 shape 与 `KANLayer` 对齐。
-- `get_subset()` 后仍可前向。
+Implementation Constraints:
 
-Tests:
+- 复用 `fit_params()` 的问题定义与参数化边界
+- 不把本阶段扩张成新优化器或新训练器
+- 不依赖当前 `suggest_symbolic()` 实现路径
+- teacher cache 只能由纯数值教师 forward 采集
 
-- 新增层级 smoke test
-- 手动检查 shape、mask、生效边数量
+Success Criteria:
+
+- 候选生成与 baseline 单边 `fit_params()` 在参数化语义上兼容
+- 调用前后模型 symbolic state、numeric mask 与 symbolic mask 均保持不变
+- 可稳定输出最小诊断量:
+  - `boundary_hit`
+  - `nan_to_num_trigger`
+  - `top1_top2_margin`
+
+Validation:
+
+- 最小单元测试: batched candidate 与单边 `fit_params()` 的结果兼容性检查
+- 无副作用测试: 候选生成前后比较 `funs` / `funs_sympy` / `funs_avoid_singularity` / `funs_name` / `affine` / numeric mask / symbolic mask
+- CPU benchmark smoke test: 记录 `candidate_generation_wall_time_s`
 
 Status:
+
 Complete
 
-Implementation notes (from practice):
-
-- 实际新增文件为 `kan/FastKANLayer.py`，并在 `kan/__init__.py` 导出。
-- 兼容字段建议最小集：`grid / k / coef / scale_base / scale_sp / mask`。
-- `postspline` 在该路径下代表 numeric edge response（非真实 spline），但 shape/读取语义与旧路径一致。
-- Stage 1 验证命令（推荐）：
-  - `C:\\Users\\chenpeng\\miniconda3\\envs\\kan\\python.exe -m pytest tests\\test_fastkan_layer.py`
-
-## Stage 2: Wire the Layer into `kan.MultKAN`
+### Stage 2: Add Safe Replay Evaluator
 
 Goal:
-让 `kan.MultKAN` 支持在 `bspline` 和 `radial_bf` 两种数值前端之间切换。
 
-Target files:
+新增内存态 replay evaluator，对单边 shortlist 做 teacher-replay contextual reranking，并保证 replay 无副作用。
 
-- `kan/MultKAN.py`
+Target Files:
 
-Planned changes:
+- `kan/icbr.py`
+- `tests/test_icbr_replay.py`（建议）
 
-- 增加 `numeric_atom_configs` 或更简单的 `numeric_basis` 配置入口
-- 默认仍构造原始 `KANLayer`
-- 当配置为 `radial_bf` 时构造新的兼容层
+Required Behavior:
 
-Execution checklist:
+- 输入:
+  - 当前 `work model`
+  - 冻结 `teacher model`
+  - calibration split
+  - 目标边
+  - 单边 shortlist candidate
+- 临时将候选写入当前 work state
+- 在 calibration split 上执行完整 forward replay
+- 以 squared imitation loss 作为默认 replay score
+- replay 结束后完整恢复目标边状态
 
-1. 在 `kan.MultKAN.__init__` 引入数值前端选择入口（推荐 `numeric_basis`，候选值 `bspline|radial_bf`）；
-2. 保持默认 `bspline` 分支构造 `KANLayer`；
-3. `radial_bf` 分支构造 `FastKANLayer`；
-4. 确保 `refine` / `prune_input` / `expand_*` 等内部重新构造模型路径不会丢失该配置。
+Must Restore:
 
-Success criteria:
+- `funs`
+- `funs_sympy`
+- `funs_avoid_singularity`
+- `funs_name`
+- `affine`
+- numeric mask
+- symbolic mask
 
-- 原有构造方式完全不受影响。
-- 新配置能成功实例化 `MultKAN` 并完成一次训练前向/反向。
+Implementation Constraints:
 
-Tests:
+- 不允许调用 `MultKAN.copy()` 作为 replay 内环 primitive
+- 不允许依赖 `unfix_symbolic()` 作为完整 rollback primitive
+- 不允许触发 `log_history()`、checkpoint 保存或 `state_id` 递增
+- teacher 只提供对照输出，不允许在 replay 中被修改
 
-- 旧代码路径回归 smoke test
-- 新路径最小训练 smoke test
+Success Criteria:
 
-Suggested validation commands:
+- replay 前后目标边 symbolic state 完整一致
+- replay 内环对磁盘、history 与 checkpoint 无副作用
+- 可对同一 shortlist 返回稳定 replay 排序
 
-- `C:\\Users\\chenpeng\\miniconda3\\envs\\kan\\python.exe -m pytest tests\\test_fastkan_layer.py`
-- `C:\\Users\\chenpeng\\miniconda3\\envs\\kan\\python.exe -m pytest tests\\test_symbolic_pipeline_regressions.py -k \"symbolic or prune\"`
+Validation:
+
+- 最小单元测试: replay 前后逐项比较 `funs` / `funs_sympy` / `funs_avoid_singularity` / `funs_name` / `affine` / masks
+- replay 无副作用测试: 比较 `state_id`、history 文件、checkpoint 目录是否未变化
+- 排序差异测试: 构造案例验证 replay top-1 与局部 `r2` top-1 可以不同
 
 Status:
+
 Not Started
 
-## Stage 3: Align Symbolic-Fitting Caches
+### Stage 3: Add Explicit Commit Helper
 
 Goal:
-确保 `suggest_symbolic()` / `fix_symbolic()` 在 `radial_bf` 路径下读取到正确的一维边曲线。
 
-Target files:
+新增显式 commit helper，把外部已选 candidate 直接提交到 `symbolic_fun`，而不是再次调用 `fix_symbolic()` 重新拟合。
 
-- `kan/MultKAN.py`
-- `kan/FastKANLayer.py`
-- 如有需要，`kan/Symbolic_KANLayer.py`
+Target Files:
 
-Focus:
+- `kan/icbr.py`
+- `tests/test_icbr_commit.py`（建议）
 
-- `self.acts[l][:, i]`
-- `self.spline_preacts[l][:, j, i]`
-- `self.spline_postacts[l][:, j, i]`
-- `self.spline_postsplines[l][:, j, i]`
+Required Behavior:
 
-Execution checklist:
+- 直接注册 candidate 对应的:
+  - `funs`
+  - `funs_sympy`
+  - `funs_avoid_singularity`
+  - `funs_name`
+- 直接写入 candidate affine
+- 明确切换 numeric mask 与 symbolic mask
+- 支持将剪掉边或无效边显式提交为 `0`
 
-1. 明确 `radial_bf` 路径下四类缓存的来源与 shape；
-2. 保证 `suggest_symbolic()` 读取的是单边一维曲线；
-3. 保证 `fix_symbolic()` 后 `forward()` 和 `symbolic_formula()` 可继续执行；
-4. 对 cache 语义差异写入必要注释（仅解释约束，不写冗余注释）。
+Implementation Constraints:
 
-Success criteria:
+- commit helper 不能把“外部已选 candidate”再次交回 `fix_symbolic()` 重新做拟合
+- commit 后 symbolic state 必须可被 `symbolic_formula()` 正确读取
+- 不允许仅通过修改 mask 来宣称完成 symbolic commit
 
-- `suggest_symbolic()` 在 `radial_bf` 路径下能正常返回候选函数。
-- `fix_symbolic()` 后模型仍可前向。
-- `symbolic_formula()` 能导出非空结果。
+Success Criteria:
 
-Tests:
+- 对任意单边 shortlist candidate 可直接提交，无需重新跑 `fit_params()`
+- 提交后 `forward()` 可继续运行
+- 提交后 `symbolic_formula()` 行为与 symbolic state 一致
 
-- 合成函数小样本测试
-- 单边曲线可视化/打印抽查
+Validation:
+
+- exporter correctness 测试: `commit_symbolic_candidate()` 后 `symbolic_formula()` 可导出
+- 零函数提交测试: 显式提交 `0` 候选后导出与 forward 均可运行
+- 一致性测试: `funs` / `funs_sympy` / `funs_avoid_singularity` / `funs_name` / `affine` / masks 逐项匹配
 
 Status:
+
 Not Started
 
-## Stage 4: Restore Pruning and Input Compaction
+### Stage 4: Add `auto_symbolic_icbr(...)` Entry
 
 Goal:
-让新路径在 `symkan` 所需的剪枝与输入压缩流程下保持可用。
 
-Target files:
+将 batched candidate generation、teacher replay reranking 与 explicit commit 串成新的 Phase I 入口。
 
-- `kan/MultKAN.py`
-- `symkan/symbolic/compact.py`
-- `symkan/pruning/attribution.py`
+Target Files:
 
-Focus:
+- `kan/icbr.py`
+- `kan/MultKAN.py`（如需挂接 `MultKAN.auto_symbolic_icbr(...)`）
+- `tests/test_icbr_integration.py`（建议）
 
-- `attribute()`
-- `prune_edge()`
-- `prune()`
-- `prune_input()`
+Required Behavior:
 
-Execution checklist:
+- 冻结教师模型
+- 在纯数值教师状态下采集 teacher cache
+- 显式创建与教师区分开的 `work model`
+- 沿用 baseline 的层序与边序遍历
+- 每条边:
+  - 基于 teacher cache 生成 shortlist
+  - 基于当前 work state 做 replay rerank
+  - 提交最优候选
+- 导出前达到 fully symbolic completion
 
-1. 验证 `attribute()` 输出可驱动 `prune_edge()`；
-2. 验证 `prune_input(active_inputs=...)` 返回模型在新路径可继续前向；
-3. 验证 `symkan.symbolic.compact` 的输入压缩在新路径不触发结构错误。
+Implementation Constraints:
 
-Success criteria:
+- teacher cache 与 work state 必须显式区分
+- 若教师当前不是纯数值状态，必须先恢复到纯数值教师状态再收集 cache
+- `symbolic_formula()` 只看 `symbolic_fun`，因此 fully symbolic completion 是导出前硬约束
+- 不把本阶段扩张为新选边策略、新 block 策略或新训练流程
 
-- `radial_bf` 路径可完成 edge pruning。
-- `prune_input()` 返回的新模型结构正确。
-- input compaction 后仍可继续符号化。
+Success Criteria:
 
-Tests:
+- 能从已训练 `MultKAN` 运行一条新的 ICBR Phase I 路线
+- 最终每条有效边都有 symbolic assignment
+- `symbolic_formula()` 可在最终 work model 上完成导出
 
-- 最小 stagewise + prune smoke test
-- input compaction smoke test
+Validation:
+
+- 最小集成测试: 小模型跑通 `auto_symbolic_icbr(...)`
+- teacher/work 分离测试: 混用 cache 与 work state 时应触发失败或暴露不一致
+- fully symbolic completion 测试: 未 fully symbolic 时 exporter 不应被判定为通过
 
 Status:
+
 Not Started
 
-## Stage 5: Expose Configuration in `symkan`
+### Stage 5: Benchmark and Verify Phase I Claims
 
 Goal:
-让 notebook / YAML / CLI 能显式选择数值前端。
 
-Target files:
+用最小可复现实验验证 Phase I 的两个核心主张，并只按 CPU 路线验收。
 
-- `symkan/config/schema.py`
-- `symkan/config/template.yaml`
-- `symkan/config/notebook.py`
-- 如有需要，相关脚本入口
+Target Files:
 
-Planned config:
+- `tests/test_icbr_benchmark_smoke.py`（建议）
+- 如有必要，最小 benchmark 脚本或 notebook
+- 结果汇总文档或 markdown 记录
 
-- 候选：`model.numeric_basis = bspline | radial_bf`
-- 或 `model.numeric_atom_configs`
+Required Behavior:
 
-Execution checklist:
+- 固定同一批已训练数值教师模型
+- 对比:
+  - baseline `MultKAN.auto_symbolic()`
+  - Phase I `auto_symbolic_icbr(...)`
+- 至少分别汇报:
+  - `candidate_generation_wall_time_s`
+  - `replay_rerank_wall_time_s`
+  - `symbolic_wall_time_s`
+  - replay imitation gap
+  - final MSE loss shift
+  - formula validation result
 
-1. schema、template、notebook 三处字段命名必须一致；
-2. CLI / YAML / notebook 三入口都能显式切换；
-3. 不得改变未显式配置时的默认行为（仍为 `bspline`）。
+Success Criteria:
 
-Success criteria:
+- 至少在最小任务和一个组合任务上完成 CPU 结果
+- 能说明 contextual rerank 相比局部 `r2` top-1 的收益或边界
+- 能说明 shared-tensor candidate evaluation 相比 baseline 候选生成的 CPU 常数级收益
+- 不以 CUDA 加速结果作为 Phase I 是否通过的依据
 
-- 默认配置仍走 `bspline`
-- 显式配置后可走 `radial_bf`
-- notebook / CLI / YAML 三条入口口径一致
+Validation:
 
-Tests:
-
-- 配置解析单测或 smoke test
-- CLI 最小运行验证
-
-Status:
-Not Started
-
-## Stage 6: End-to-End Engineering Smoke Test
-
-Goal:
-验证 `symkan` 主链路在 `radial_bf` 路径下工程上可以跑通。
-
-Target flow:
-
-- train
-- stagewise prune
-- symbolic search
-- formula export
-
-Success criteria:
-
-- 不依赖手工 patch 流程即可跑通一次完整实验
-- 输出 `metrics`、`trace`、`formula_validation` 等关键产物
-- 没有接口级崩溃
-
-Tests:
-
-- 一个最小 synthetic dataset
-- 一个小规模 benchmark 配置
-
-Suggested validation commands:
-
-- `C:\\Users\\chenpeng\\miniconda3\\envs\\kan\\python.exe -m scripts.symkanbenchmark --config configs/symkanbenchmark.default.yaml --quiet`
+- 最小 benchmark: 记录 `candidate_generation_wall_time_s`
+- 最小 benchmark: 记录 `replay_rerank_wall_time_s`
+- replay 无副作用测试必须通过
+- exporter correctness 检查必须通过
+- 最小单元测试与最小集成测试必须通过
 
 Status:
+
 Not Started
 
-## Stage 7: Compare Against Baseline
+## 5. Acceptance Criteria
 
-Goal:
-在“工程可跑通”完成后，再进入 `bspline` 与 `radial_bf` 的初步对照。
+Phase I 仅在以下条件全部满足时视为完成:
 
-Comparison dimensions:
+- `auto_symbolic_icbr(...)` 可运行
+- 实现范围仍然只包含两个核心改进点
+- 第一版只按 CPU 路线验收
+- 不以 CUDA 加速作为 Phase I 验收条件
+- 候选生成是无状态的
+- replay evaluator 是无副作用的
+- commit helper 能维护完整 symbolic state 一致性
+- 最终达到 fully symbolic completion
+- `symbolic_formula()` 导出正确
+- 至少具备:
+  - 最小单元测试
+  - replay 无副作用测试
+  - exporter correctness 检查
+  - candidate generation wall time benchmark
+  - replay rerank wall time benchmark
 
-- train/test loss
-- final edge count
-- symbolic success rate
-- valid expression count
-- symbolic wall time
+## 6. Execution Order
 
-Success criteria:
+推荐执行顺序固定为:
 
-- 至少得到一组可复现的 `bspline vs radial_bf` 对照结果
-- 能判断是否值得继续做论文级实验
+1. Stage 1: Add CPU Batched Candidate Evaluation
+2. Stage 2: Add Safe Replay Evaluator
+3. Stage 3: Add Explicit Commit Helper
+4. Stage 4: Add `auto_symbolic_icbr(...)` Entry
+5. Stage 5: Benchmark and Verify Phase I Claims
 
-Tests:
+当前建议开工点:
 
-- 统一 seed 的 A/B 对照运行
-
-Execution checklist:
-
-1. 固定同一组 seeds；
-2. 只改变 numeric frontend 相关配置；
-3. 输出统一写入可比较目录并生成 summary 表。
-
-Status:
-Not Started
-
-## Risks
-
-1. `symkan` 对 `pykan` 的缓存命名和对象结构耦合较深，数值前端虽可替换，但缓存语义必须严格保持。
-2. `attribute()` 与 pruning 可能依赖现有 spline 路径的数值尺度，迁移后阈值未必可直接复用。
-3. `prune_input()` 是现有 `symkan` 流程的关键能力，若新路径在该处行为不一致，整体链路会断。
-4. 即便工程上跑通，`radial_bf` 路径的符号提取质量也未必与 `bspline` 相同，需要后续实验确认。
-
-## Immediate Next Action
-
-执行 Stage 2：
-
-- 在 `kan.MultKAN` 中接入 `numeric_basis` 切换（默认 `bspline`）；
-- 新增 `radial_bf` 构造分支并保持现有训练/剪枝入口兼容；
-- 用 `kan` 环境跑最小回归测试，确认旧路径不回退。
+**Stage 1: Add CPU Batched Candidate Evaluation**
