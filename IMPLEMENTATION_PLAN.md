@@ -441,7 +441,7 @@ Validation:
 
 Status:
 
-Not Started
+Complete
 
 ## 5. Acceptance Criteria
 

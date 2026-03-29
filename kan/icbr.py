@@ -510,6 +510,7 @@ def _run_auto_symbolic_icbr_with_models(
     grid_number: int,
     iteration: int,
     verbose: int,
+    collect_metrics: bool = False,
 ):
     if teacher_model is work_model:
         raise ValueError("teacher_model and work_model must be different objects")
@@ -517,6 +518,10 @@ def _run_auto_symbolic_icbr_with_models(
     _set_teacher_numeric_mode(teacher_model)
     teacher_model.auto_save = False
     work_model.auto_save = False
+
+    candidate_generation_wall_time_s = 0.0
+    replay_rerank_wall_time_s = 0.0
+    symbolic_start = perf_counter()
 
     with torch.no_grad():
         teacher_model(calibration_input)
@@ -548,6 +553,7 @@ def _run_auto_symbolic_icbr_with_models(
                         print(f"commit ({layer_idx},{input_idx},{output_idx}) as 0")
                     continue
 
+                candidate_start = perf_counter()
                 shortlist = _build_edge_shortlist(
                     teacher_acts_layer,
                     teacher_edge_targets_layer,
@@ -560,6 +566,7 @@ def _run_auto_symbolic_icbr_with_models(
                     grid_number=grid_number,
                     iteration=iteration,
                 )
+                candidate_generation_wall_time_s += perf_counter() - candidate_start
                 rerank = replay_rerank_edge_candidates(
                     work_model,
                     teacher_model,
@@ -569,6 +576,7 @@ def _run_auto_symbolic_icbr_with_models(
                     output_idx=output_idx,
                     shortlist=shortlist,
                 )
+                replay_rerank_wall_time_s += float(rerank["replay_rerank_wall_time_s"])
                 best = rerank["best_candidate"]
                 commit_symbolic_candidate(
                     work_model,
@@ -584,6 +592,13 @@ def _run_auto_symbolic_icbr_with_models(
                     )
 
     _ensure_fully_symbolic_completion(work_model)
+    symbolic_wall_time_s = perf_counter() - symbolic_start
+    if collect_metrics:
+        return work_model, {
+            "candidate_generation_wall_time_s": candidate_generation_wall_time_s,
+            "replay_rerank_wall_time_s": replay_rerank_wall_time_s,
+            "symbolic_wall_time_s": symbolic_wall_time_s,
+        }
     return work_model
 
 
@@ -633,8 +648,91 @@ def auto_symbolic_icbr(
     )
 
 
+def benchmark_icbr_vs_baseline(
+    model,
+    *,
+    calibration_split: Mapping[str, torch.Tensor] | torch.Tensor,
+    lib: Iterable[str] | Mapping[str, tuple] | None = None,
+    topk: int = 5,
+    a_range: tuple[float, float] = (-10.0, 10.0),
+    b_range: tuple[float, float] = (-10.0, 10.0),
+    grid_number: int = 101,
+    iteration: int = 3,
+) -> dict[str, object]:
+    calibration_input = _extract_calibration_input(calibration_split)
+    symbolic_lib = _resolve_symbolic_lib(lib)
+    lib_names = list(symbolic_lib.keys())
+    if not lib_names:
+        raise ValueError("symbolic library must not be empty")
+
+    teacher_numeric = copy.deepcopy(model)
+    _set_teacher_numeric_mode(teacher_numeric)
+    teacher_numeric.auto_save = False
+    with torch.no_grad():
+        teacher_output = teacher_numeric(calibration_input).detach()
+
+    baseline_model = copy.deepcopy(model)
+    baseline_model.auto_save = False
+    with torch.no_grad():
+        baseline_model(calibration_input)
+    baseline_start = perf_counter()
+    baseline_model.auto_symbolic(lib=lib_names, verbose=0, weight_simple=0.0, r2_threshold=0.0)
+    baseline_symbolic_wall_time_s = perf_counter() - baseline_start
+    with torch.no_grad():
+        baseline_output = baseline_model(calibration_input).detach()
+    baseline_mse = torch.mean((baseline_output - teacher_output).pow(2)).item()
+    baseline_formula_ok = False
+    try:
+        formulas, _ = baseline_model.symbolic_formula(
+            var=[f"x_{idx + 1}" for idx in range(int(calibration_input.shape[1]))]
+        )
+        baseline_formula_ok = len(formulas) == int(baseline_output.shape[1])
+    except Exception:
+        baseline_formula_ok = False
+
+    teacher_model = copy.deepcopy(model)
+    work_model = copy.deepcopy(model)
+    work_model, icbr_timing = _run_auto_symbolic_icbr_with_models(
+        teacher_model,
+        work_model,
+        calibration_input,
+        lib_names=lib_names,
+        topk=topk,
+        a_range=a_range,
+        b_range=b_range,
+        grid_number=grid_number,
+        iteration=iteration,
+        verbose=0,
+        collect_metrics=True,
+    )
+    with torch.no_grad():
+        icbr_output = work_model(calibration_input).detach()
+    icbr_mse = torch.mean((icbr_output - teacher_output).pow(2)).item()
+    icbr_formula_ok = False
+    try:
+        formulas, _ = work_model.symbolic_formula(
+            var=[f"x_{idx + 1}" for idx in range(int(calibration_input.shape[1]))]
+        )
+        icbr_formula_ok = len(formulas) == int(icbr_output.shape[1])
+    except Exception:
+        icbr_formula_ok = False
+
+    return {
+        "candidate_generation_wall_time_s": float(icbr_timing["candidate_generation_wall_time_s"]),
+        "replay_rerank_wall_time_s": float(icbr_timing["replay_rerank_wall_time_s"]),
+        "symbolic_wall_time_s": float(icbr_timing["symbolic_wall_time_s"]),
+        "baseline_symbolic_wall_time_s": float(baseline_symbolic_wall_time_s),
+        "replay_imitation_gap": float(icbr_mse),
+        "final_mse_loss_shift": float(icbr_mse - baseline_mse),
+        "formula_validation_result": bool(icbr_formula_ok and baseline_formula_ok),
+        "baseline_mse": float(baseline_mse),
+        "icbr_mse": float(icbr_mse),
+    }
+
+
 __all__ = [
     "auto_symbolic_icbr",
+    "benchmark_icbr_vs_baseline",
     "commit_symbolic_candidate",
     "generate_layer_candidates",
     "replay_rerank_edge_candidates",

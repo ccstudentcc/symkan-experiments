@@ -4,41 +4,45 @@
 按 `IMPLEMENTATION_PLAN.md` 推进 ICBR-KAN Phase I，并完成当前首个可执行 stage。
 
 ## Current Stage
-Stage 4: Add `auto_symbolic_icbr(...)` Entry
+Stage 5: Benchmark and Verify Phase I Claims
 
 ## Status
 Complete
 
 ## Latest Completed Work
-- 在 `kan/icbr.py` 新增 `auto_symbolic_icbr(...)`，串联 Stage 1-3：teacher cache 候选生成 -> replay rerank -> explicit commit。
-- 新增 `_run_auto_symbolic_icbr_with_models(...)`，显式要求 teacher/work 为不同对象，并按 baseline 层序与边序遍历。
-- 新增 teacher numeric-mode 处理与 fully symbolic completion 守卫（未 fully symbolic 直接抛错，不视为可导出完成）。
-- 在 `kan/MultKAN.py` 挂接 `MultKAN.auto_symbolic_icbr(...)` 入口。
-- 新增 `tests/test_icbr_integration.py`，覆盖：
-  - 小模型集成跑通并可导出公式
-  - teacher/work 混用触发失败
-  - 未 fully symbolic 时 completion guard 触发
+- 在 `kan/icbr.py` 新增 `benchmark_icbr_vs_baseline(...)`，对同一校准集执行 baseline `auto_symbolic` 与 ICBR 路线对照，并返回最小指标集。
+- 新增计时聚合：
+  - `candidate_generation_wall_time_s`
+  - `replay_rerank_wall_time_s`
+  - `symbolic_wall_time_s`
+- 新增最小对照指标：
+  - `replay_imitation_gap`
+  - `final_mse_loss_shift`
+  - `formula_validation_result`
+  - `baseline_symbolic_wall_time_s`
+  - `baseline_mse` / `icbr_mse`
+- 在 `tests/test_icbr_benchmark_smoke.py` 增加 smoke 验证，确保上述关键指标可生成且数值有效。
 
 ## Files Changed
 - kan/icbr.py
-- kan/MultKAN.py
-- tests/test_icbr_integration.py
+- tests/test_icbr_benchmark_smoke.py
 - IMPLEMENTATION_PLAN.md
 - TASK_STATUS.md
 
 ## Validation Run
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_candidates.py tests\test_icbr_replay.py tests\test_icbr_commit.py tests\test_icbr_integration.py`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_candidates.py tests\test_icbr_replay.py tests\test_icbr_commit.py tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py`
 
 ## Validation Result
-- 通过：`tests/test_icbr_candidates.py` + `tests/test_icbr_replay.py` + `tests/test_icbr_commit.py` + `tests/test_icbr_integration.py` 共 12 项，12 项通过。
+- 通过：`tests/test_icbr_candidates.py` + `tests/test_icbr_replay.py` + `tests/test_icbr_commit.py` + `tests/test_icbr_integration.py` + `tests/test_icbr_benchmark_smoke.py` 共 13 项，13 项通过。
 
 ## Decisions
-- Stage 4 维持最小串联实现：先复用 Stage 1 的候选生成，再用 Stage 2 replay 评分，最终走 Stage 3 commit。
-- `auto_symbolic_icbr` 返回新的 work model，保持输入模型不被直接改写，显式体现 teacher/work 分离。
-- 对当前 numeric mask 已为 0 的边，直接提交 `0` 候选，确保最终 fully symbolic completion。
+- Stage 5 采用“最小可复现 benchmark smoke”策略，不引入额外脚本，先通过测试固定核心指标接口。
+- baseline 与 ICBR 都基于同一输入与同一模型拷贝体系，避免统计口径混用。
+- 现阶段以 CPU 路线和单测 smoke 验收为主，后续再扩展到更大任务对照。
 
 ## Remaining Work
-- Stage 5: CPU 基准与主张验证。
+- Phase I 五个 stage 已全部完成。
+- 下一步建议：补充更大任务规模的 benchmark 结果落盘与汇总文档（例如独立 markdown 报告或 CSV 产物）。
 
 ## Blockers
 - 无
