@@ -275,6 +275,7 @@ def test_run_benchmark_supports_ablation_variants() -> None:
     summary_md = (out_dir / "icbr_benchmark_summary.md").read_text(encoding="utf-8")
     assert "Variant formula overview" in summary_md
     assert "icbr_no_replay formula (display, rounded)" in summary_md
+    assert "formula (raw)" not in summary_md
 
 
 def test_formula_comparison_keeps_requested_variants_when_teacher_gate_skips() -> None:
@@ -311,6 +312,35 @@ def test_formula_comparison_keeps_requested_variants_when_teacher_gate_skips() -
     assert "icbr_no_replay: symbolic_s=nan" in summary_md
     assert "icbr_no_replay formula (display, rounded):" in summary_md
     assert "icbr_no_replay formula export error: skipped_by_teacher_quality_gate:" in summary_md
+    assert "formula (raw)" not in summary_md
+
+
+def test_quiet_mode_suppresses_training_and_symbolic_console_output(capsys) -> None:
+    out_dir = Path("tmp") / f"icbr_benchmark_quiet_{uuid.uuid4().hex}"
+    run_benchmark(
+        tasks=["minimal"],
+        seeds=[0],
+        output_dir=out_dir,
+        train_num=16,
+        test_num=16,
+        train_steps=2,
+        lr=0.05,
+        lamb=1e-3,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=1.0,
+        teacher_min_test_r2=-1.0,
+        teacher_cache_dir=out_dir / "teacher_cache",
+        teacher_cache_mode="off",
+        teacher_cache_version="stage19_quiet_test_v1",
+        variants=["baseline", "icbr_no_replay", "icbr_full"],
+        make_plots=False,
+        quiet=True,
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
 
 
 def test_visualization_upgrade_emits_variant_and_q123_plots() -> None:

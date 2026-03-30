@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 import csv
 import hashlib
 import json
@@ -21,6 +22,16 @@ import torch
 from kan.MultKAN import MultKAN
 from kan.icbr import benchmark_symbolic_variants
 from kan.utils import create_dataset
+
+
+@contextmanager
+def _suppress_console_output(enabled: bool):
+    if not enabled:
+        yield
+        return
+    with open(os.devnull, "w", encoding="utf-8") as sink:
+        with redirect_stdout(sink), redirect_stderr(sink):
+            yield
 
 
 _NUMERIC_METRICS = [
@@ -630,23 +641,38 @@ def _train_teacher_model(
     train_steps: int,
     lr: float,
     lamb: float,
+    quiet: bool = False,
 ) -> MultKAN:
     model = _build_teacher_model(spec)
-    model.fit(
-        dataset,
-        opt=spec.teacher_fit_opt,
-        steps=train_steps,
-        lr=lr,
-        update_grid=False,
-        batch=-1,
-        lamb=lamb,
-        log=max(train_steps + 1, 999999),
-    )
+    with _suppress_console_output(quiet):
+        model.fit(
+            dataset,
+            opt=spec.teacher_fit_opt,
+            steps=train_steps,
+            lr=lr,
+            update_grid=False,
+            batch=-1,
+            lamb=lamb,
+            log=max(train_steps + 1, 999999),
+        )
+
+    def _prune_teacher_once(node_th: float, edge_th: float) -> MultKAN:
+        with _suppress_console_output(quiet):
+            pruned = model.prune_node(threshold=node_th, log_history=False)
+            # prune_node creates a derived model with auto_save=True by default;
+            # disable it to avoid benchmark-side checkpoint noise and side effects.
+            pruned.auto_save = False
+            pruned.forward(pruned.cache_data)
+            pruned.attribute()
+            pruned.prune_edge(threshold=edge_th, log_history=False)
+        pruned.auto_save = False
+        return pruned
+
     if spec.teacher_post_train_prune:
         try:
-            model = model.prune(
-                node_th=float(spec.teacher_prune_node_th),
-                edge_th=float(spec.teacher_prune_edge_th),
+            model = _prune_teacher_once(
+                float(spec.teacher_prune_node_th),
+                float(spec.teacher_prune_edge_th),
             )
         except Exception as prune_exc:
             warnings.warn(
@@ -655,14 +681,14 @@ def _train_teacher_model(
                 RuntimeWarning,
             )
             try:
-                model = model.prune(node_th=0.0, edge_th=0.0)
+                model = _prune_teacher_once(0.0, 0.0)
             except Exception as prune_fallback_exc:
                 warnings.warn(
                     f"Fallback prune also failed for task={spec.name}; keep unpruned teacher model. "
                     f"error={prune_fallback_exc!r}",
                     RuntimeWarning,
                 )
-        # prune() may return a model with auto_save/history enabled; disable it for benchmark tuning loops.
+        # Keep benchmark loops side-effect free: disable checkpoint auto-save throughout tuning.
         model.auto_save = False
         post_prune_steps = int(spec.teacher_post_prune_steps)
         if post_prune_steps > 0:
@@ -677,16 +703,17 @@ def _train_teacher_model(
                 stable_checks = 0
                 while remaining_steps > 0:
                     chunk_steps = min(eval_every, remaining_steps)
-                    model.fit(
-                        dataset,
-                        opt=spec.teacher_fit_opt,
-                        steps=chunk_steps,
-                        lr=post_prune_lr,
-                        update_grid=False,
-                        batch=-1,
-                        lamb=post_prune_lamb,
-                        log=max(chunk_steps + 1, 999999),
-                    )
+                    with _suppress_console_output(quiet):
+                        model.fit(
+                            dataset,
+                            opt=spec.teacher_fit_opt,
+                            steps=chunk_steps,
+                            lr=post_prune_lr,
+                            update_grid=False,
+                            batch=-1,
+                            lamb=post_prune_lamb,
+                            log=max(chunk_steps + 1, 999999),
+                        )
                     remaining_steps -= chunk_steps
                     with torch.no_grad():
                         train_pred = model(dataset["train_input"])
@@ -702,16 +729,17 @@ def _train_teacher_model(
                     if stable_checks >= patience:
                         break
             else:
-                model.fit(
-                    dataset,
-                    opt=spec.teacher_fit_opt,
-                    steps=post_prune_steps,
-                    lr=post_prune_lr,
-                    update_grid=False,
-                    batch=-1,
-                    lamb=post_prune_lamb,
-                    log=max(post_prune_steps + 1, 999999),
-                )
+                with _suppress_console_output(quiet):
+                    model.fit(
+                        dataset,
+                        opt=spec.teacher_fit_opt,
+                        steps=post_prune_steps,
+                        lr=post_prune_lr,
+                        update_grid=False,
+                        batch=-1,
+                        lamb=post_prune_lamb,
+                        log=max(post_prune_steps + 1, 999999),
+                    )
     return model
 
 
@@ -810,6 +838,7 @@ def _resolve_teacher_model_with_cache(
     cache_dir: Path,
     cache_mode: str,
     cache_version: str,
+    quiet: bool = False,
     lock_timeout_s: float = 120.0,
 ) -> tuple[MultKAN, dict[str, torch.Tensor], dict[str, object]]:
     if cache_mode not in _TEACHER_CACHE_MODES:
@@ -845,6 +874,7 @@ def _resolve_teacher_model_with_cache(
             train_steps=train_steps,
             lr=lr,
             lamb=lamb,
+            quiet=quiet,
         )
 
     if cache_mode in {"readwrite", "readonly"} and state_path.exists() and meta_path.exists():
@@ -1743,6 +1773,7 @@ def run_benchmark(
                 cache_dir=teacher_cache_dir,
                 cache_mode=teacher_cache_mode,
                 cache_version=teacher_cache_version,
+                quiet=quiet,
             )
             with torch.no_grad():
                 teacher_test_pred = model(dataset["test_input"])
@@ -1761,21 +1792,22 @@ def run_benchmark(
             )
 
             if teacher_quality_gate_pass:
-                variant_bundle = benchmark_symbolic_variants(
-                    model,
-                    calibration_split={
-                        "test_input": dataset["test_input"],
-                        "test_label": dataset["test_label"],
-                    },
-                    calibration_target=dataset["test_label"],
-                    lib=spec.lib,
-                    topk=effective_topk,
-                    a_range=(-5.0, 5.0),
-                    b_range=(-5.0, 5.0),
-                    grid_number=grid_number,
-                    iteration=iteration,
-                    variants=effective_variants,
-                )
+                with _suppress_console_output(quiet):
+                    variant_bundle = benchmark_symbolic_variants(
+                        model,
+                        calibration_split={
+                            "test_input": dataset["test_input"],
+                            "test_label": dataset["test_label"],
+                        },
+                        calibration_target=dataset["test_label"],
+                        lib=spec.lib,
+                        topk=effective_topk,
+                        a_range=(-5.0, 5.0),
+                        b_range=(-5.0, 5.0),
+                        grid_number=grid_number,
+                        iteration=iteration,
+                        variants=effective_variants,
+                    )
                 metrics = _build_legacy_metrics_from_variant_bundle(variant_bundle)
                 variant_rows.extend(
                     _build_variant_rows_for_task_seed(
@@ -2579,19 +2611,11 @@ def run_benchmark(
             if variant is None:
                 continue
             display_formulas = list(variant.get("formula_display", []))
-            raw_formulas = list(variant.get("formula_raw", []))
             formula_error = variant.get("formula_error")
 
             md_lines.append(f"- {variant_name} formula (display, rounded):")
             if display_formulas:
                 for expr in display_formulas:
-                    md_lines.append(f"  - `{expr}`")
-            else:
-                md_lines.append("  - `<none>`")
-
-            md_lines.append(f"- {variant_name} formula (raw):")
-            if raw_formulas:
-                for expr in raw_formulas:
                     md_lines.append(f"  - `{expr}`")
             else:
                 md_lines.append("  - `<none>`")

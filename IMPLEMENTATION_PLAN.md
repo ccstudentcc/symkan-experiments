@@ -1104,6 +1104,60 @@ Status:
 
 Complete
 
+### Stage 19: Benchmark Quietness, Formula Display Cleanup, and Pipeline Sanity Audit
+
+Goal:
+
+修复 benchmark 使用体验与报告展示问题，并完成一次流程级复核，避免低级实现错误（训练/剪枝/保存/数据统计）。
+
+Target Files:
+
+- `scripts/icbr_benchmark.py`
+- `kan/icbr.py`（如需要静默控制透传）
+- `tests/test_icbr_benchmark_script_smoke.py`
+- `tests/test_icbr_benchmark_smoke.py`（如需要补充流程断言）
+- `IMPLEMENTATION_PLAN.md`
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- `--quiet` 生效后，benchmark 运行应保持命令行静默（除 fatal error 外），包括但不限于：
+  - 训练进度条输出（如 `train_loss/test_loss`）
+  - `saving model version ...` 等底层训练日志
+- `icbr_benchmark_summary.md` 的公式展示仅保留 `display` 公式，不再输出 `raw` 公式区块。
+  - `raw` 公式继续保留在机器可读产物（`summary.json` / CSV）中，保证可追溯。
+- 复核 benchmark 关键流程并修补明显风险点：
+  - teacher 训练与后剪枝-微调流程（含 early-stop chunk）
+  - auto-save / artifact 污染风险（避免无关模型保存副作用）
+  - task/seed 数据构造与 split 逻辑一致性
+  - 指标汇总与导出字段一致性（rows / variant_rows / summary）
+
+Implementation Constraints:
+
+- 不改 ICBR 算法核心语义，仅改 benchmark 编排与报告层行为。
+- 保持 Stage 16~18 的导出结构兼容（新增约束优先通过附加字段或渲染层调整实现）。
+
+Success Criteria:
+
+- 用户给定命令加 `--quiet` 时，终端不再出现训练进度条与模型保存日志噪声。
+- `summary.md` 的 `Formula Comparison` 仅展示 display 公式，且无 raw 公式区块。
+- 至少一轮代码级流程复核完成并在 `TASK_STATUS.md` 留有“检查项 + 结论”记录。
+
+Validation:
+
+- `python -m py_compile scripts/icbr_benchmark.py tests/test_icbr_benchmark_script_smoke.py`
+- `pytest tests/test_icbr_benchmark_script_smoke.py -k "quiet or formula or variants"`
+- `pytest tests/test_icbr_benchmark_script_smoke.py -k "quality_profile_enables_teacher_prune_by_default or teacher_cache_hit_after_first_run or trig_interaction_uses_task_specific_topk_override"`
+- `python -m scripts.icbr_benchmark --profile quality --tasks minimal --seeds 0 --variants baseline,icbr_full,icbr_no_replay --quiet --no-plots --output-dir outputs/icbr_benchmark_stage19_quiet_smoke`
+- 人工核对：
+  - 上述命令终端输出是否静默
+  - `outputs/icbr_benchmark_stage19_quiet_smoke/icbr_benchmark_summary.md` 是否只含 display 公式
+  - `summary.json` 是否仍包含 raw 公式字段
+
+Status:
+
+Complete
+
 ## 5. Acceptance Criteria
 
 Phase I 仅在以下条件全部满足时视为完成:
@@ -1146,3 +1200,4 @@ Phase I 仅在以下条件全部满足时视为完成:
 16. Stage 16: Quality 4-Task Ablation 10-Seed Extension Validation
 17. Stage 17: Multi-Variant Formula Report Completeness Fix
 18. Stage 18: Visualization Upgrade for Stage 16 10-Seed Outputs
+19. Stage 19: Benchmark Quietness, Formula Display Cleanup, and Pipeline Sanity Audit
