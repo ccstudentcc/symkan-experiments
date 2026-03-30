@@ -272,6 +272,45 @@ def test_run_benchmark_supports_ablation_variants() -> None:
     summary = result["summary"]
     assert summary["config"]["variants"] == ["baseline", "icbr_no_replay", "icbr_full"]
     assert summary["aggregates"]["variant_ablation"]["overall"]["icbr_no_replay"]["row_count"] == 1
+    summary_md = (out_dir / "icbr_benchmark_summary.md").read_text(encoding="utf-8")
+    assert "Variant formula overview" in summary_md
+    assert "icbr_no_replay formula (display, rounded)" in summary_md
+
+
+def test_formula_comparison_keeps_requested_variants_when_teacher_gate_skips() -> None:
+    out_dir = Path("tmp") / f"icbr_benchmark_formula_skip_{uuid.uuid4().hex}"
+    result = run_benchmark(
+        tasks=["minimal"],
+        seeds=[0],
+        output_dir=out_dir,
+        train_num=16,
+        test_num=16,
+        train_steps=2,
+        lr=0.05,
+        lamb=1e-3,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=1e-8,
+        teacher_min_test_r2=0.999999,
+        teacher_cache_dir=out_dir / "teacher_cache",
+        teacher_cache_mode="off",
+        teacher_cache_version="stage17_formula_skip_test_v1",
+        variants=["baseline", "icbr_no_replay", "icbr_full"],
+        make_plots=False,
+        quiet=True,
+    )
+
+    variant_rows = result["variant_rows"]
+    assert len(variant_rows) == 3
+    assert {row["variant"] for row in variant_rows} == {"baseline", "icbr_no_replay", "icbr_full"}
+    assert all(row["formula_display"] == [] for row in variant_rows)
+    assert all(row["formula_raw"] == [] for row in variant_rows)
+
+    summary_md = (out_dir / "icbr_benchmark_summary.md").read_text(encoding="utf-8")
+    assert "icbr_no_replay: symbolic_s=nan" in summary_md
+    assert "icbr_no_replay formula (display, rounded):" in summary_md
+    assert "icbr_no_replay formula export error: skipped_by_teacher_quality_gate:" in summary_md
 
 
 def test_quality_profile_enables_teacher_prune_by_default() -> None:

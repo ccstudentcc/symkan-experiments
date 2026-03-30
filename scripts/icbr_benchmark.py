@@ -109,8 +109,8 @@ _BENCHMARK_PROFILES: dict[str, dict[str, float | int]] = {
     "quality": {
         "train_num": 1000,
         "test_num": 500,
-        "train_steps": 80,
-        "lr": 3e-2,
+        "train_steps": 200,
+        "lr": 1e-2,
         "lamb": 1e-3,
     },
     "feynman_reference": {
@@ -2417,9 +2417,23 @@ def run_benchmark(
                     md_lines.append(f"  - {key}: `{value}`")
             md_lines.append("")
 
+    variant_rows_by_task_seed: dict[tuple[str, int], dict[str, dict[str, object]]] = {}
+    for variant_row in variant_rows:
+        key = (str(variant_row["task"]), int(variant_row["seed"]))
+        variant_rows_by_task_seed.setdefault(key, {})[str(variant_row["variant"])] = variant_row
+
+    def _fmt_float(value: object) -> str:
+        number = float(value)
+        if math.isfinite(number):
+            return f"{number:.6e}"
+        return "nan"
+
     md_lines.append("## Formula Comparison")
     md_lines.append("")
     for row in rows:
+        task_name = str(row["task"])
+        seed = int(row["seed"])
+        variant_map = variant_rows_by_task_seed.get((task_name, seed), {})
         md_lines.append(f"### task={row['task']} seed={row['seed']}")
         md_lines.append("")
         md_lines.append(f"- Task source: {row['task_source']}")
@@ -2436,20 +2450,42 @@ def run_benchmark(
             f"- Teacher target metrics: mse={float(row['teacher_target_mse']):.6e}, "
             f"r2={float(row['teacher_target_r2']):.6f}"
         )
-        md_lines.append("- Baseline formula (display, rounded):")
-        for expr in row["baseline_formula_display"]:
-            md_lines.append(f"  - `{expr}`")
-        md_lines.append("- ICBR formula (display, rounded):")
-        for expr in row["icbr_formula_display"]:
-            md_lines.append(f"  - `{expr}`")
-        md_lines.append("- Baseline formula (raw):")
-        for expr in row["baseline_formula_raw"]:
-            md_lines.append(f"  - `{expr}`")
-        md_lines.append("- ICBR formula (raw):")
-        for expr in row["icbr_formula_raw"]:
-            md_lines.append(f"  - `{expr}`")
-        if row["baseline_formula_error"] or row["icbr_formula_error"]:
-            md_lines.append(f"- Formula export error baseline={row['baseline_formula_error']}, icbr={row['icbr_formula_error']}")
+        md_lines.append("- Variant formula overview:")
+        for variant_name in summary["config"]["variants"]:
+            variant = variant_map.get(str(variant_name))
+            if variant is None:
+                md_lines.append(f"  - {variant_name}: missing")
+                continue
+            md_lines.append(
+                f"  - {variant_name}: symbolic_s={_fmt_float(variant['symbolic_wall_time_s'])}, "
+                f"mse={_fmt_float(variant['mse'])}, "
+                f"target_mse={_fmt_float(variant['target_mse'])}, "
+                f"formula_ok={bool(variant['formula_validation_result'])}"
+            )
+        for variant_name in summary["config"]["variants"]:
+            variant = variant_map.get(str(variant_name))
+            if variant is None:
+                continue
+            display_formulas = list(variant.get("formula_display", []))
+            raw_formulas = list(variant.get("formula_raw", []))
+            formula_error = variant.get("formula_error")
+
+            md_lines.append(f"- {variant_name} formula (display, rounded):")
+            if display_formulas:
+                for expr in display_formulas:
+                    md_lines.append(f"  - `{expr}`")
+            else:
+                md_lines.append("  - `<none>`")
+
+            md_lines.append(f"- {variant_name} formula (raw):")
+            if raw_formulas:
+                for expr in raw_formulas:
+                    md_lines.append(f"  - `{expr}`")
+            else:
+                md_lines.append("  - `<none>`")
+
+            if formula_error:
+                md_lines.append(f"- {variant_name} formula export error: {formula_error}")
         md_lines.append("")
 
     md_lines.extend(["## Visualization Summary", ""])
