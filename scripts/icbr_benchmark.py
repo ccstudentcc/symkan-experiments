@@ -1406,6 +1406,8 @@ def _generate_visualizations(
     output_dir: Path,
     tasks: list[str],
     by_task_rows: dict[str, list[dict[str, object]]],
+    variant_rows: list[dict[str, object]],
+    variants: list[str],
 ) -> dict[str, object]:
     try:
         import matplotlib
@@ -1416,6 +1418,7 @@ def _generate_visualizations(
         return {"enabled": False, "error": f"{type(exc).__name__}: {exc}", "files": []}
 
     created_files: list[str] = []
+    warnings_list: list[str] = []
 
     def _finite_metric_values(task: str, metric: str) -> list[float]:
         values: list[float] = []
@@ -1442,81 +1445,184 @@ def _generate_visualizations(
         baseline_std.append(base_std)
         icbr_mean.append(icbr_m)
         icbr_std.append(icbr_s)
-    if not all(math.isfinite(value) for value in (baseline_mean + baseline_std + icbr_mean + icbr_std)):
-        plt.close(fig)
-        return {
-            "enabled": False,
-            "error": "Insufficient finite symbolic timing metrics for plot generation (likely skipped by teacher quality gate).",
-            "files": created_files,
-        }
-    bar_width = 0.36
-    ax.bar(
-        [x - bar_width / 2.0 for x in x_positions],
-        baseline_mean,
-        width=bar_width,
-        yerr=baseline_std,
-        capsize=4,
-        label="Baseline symbolic time",
-    )
-    ax.bar(
-        [x + bar_width / 2.0 for x in x_positions],
-        icbr_mean,
-        width=bar_width,
-        yerr=icbr_std,
-        capsize=4,
-        label="ICBR symbolic time",
-    )
-    ax.set_xticks(x_positions)
-    ax.set_xticklabels(tasks, rotation=20)
-    ax.set_ylabel("seconds")
-    ax.set_title("Symbolic Wall Time by Task (mean ± std)")
-    ax.legend()
-    time_plot = output_dir / "icbr_benchmark_symbolic_time_errorbar.png"
-    fig.tight_layout()
-    fig.savefig(time_plot, dpi=160)
+    if all(math.isfinite(value) for value in (baseline_mean + baseline_std + icbr_mean + icbr_std)):
+        bar_width = 0.36
+        ax.bar(
+            [x - bar_width / 2.0 for x in x_positions],
+            baseline_mean,
+            width=bar_width,
+            yerr=baseline_std,
+            capsize=4,
+            label="Baseline symbolic time",
+        )
+        ax.bar(
+            [x + bar_width / 2.0 for x in x_positions],
+            icbr_mean,
+            width=bar_width,
+            yerr=icbr_std,
+            capsize=4,
+            label="ICBR symbolic time",
+        )
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(tasks, rotation=20)
+        ax.set_ylabel("seconds (lower is better)")
+        ax.set_title("Symbolic Wall Time by Task (mean ± std)")
+        ax.legend()
+        time_plot = output_dir / "icbr_benchmark_symbolic_time_errorbar.png"
+        fig.tight_layout()
+        fig.savefig(time_plot, dpi=160)
+        created_files.append(str(time_plot))
+    else:
+        warnings_list.append(
+            "Insufficient finite symbolic timing metrics for plot generation (likely skipped by teacher quality gate)."
+        )
     plt.close(fig)
-    created_files.append(str(time_plot))
 
     fig, ax = plt.subplots(figsize=(10, 4.5))
     speedup_data = [_finite_metric_values(task, "symbolic_speedup_vs_baseline") for task in tasks]
-    if any(len(values) == 0 for values in speedup_data):
-        plt.close(fig)
-        return {
-            "enabled": False,
-            "error": "Insufficient finite symbolic metrics for plot generation (likely skipped by teacher quality gate).",
-            "files": created_files,
-        }
-    ax.boxplot(speedup_data, labels=tasks, showmeans=True)
-    ax.set_ylabel("speedup x")
-    ax.set_title("ICBR Speedup vs Baseline (seed distribution)")
-    ax.grid(axis="y", alpha=0.3)
-    speedup_plot = output_dir / "icbr_benchmark_speedup_boxplot.png"
-    fig.tight_layout()
-    fig.savefig(speedup_plot, dpi=160)
+    if all(len(values) > 0 for values in speedup_data):
+        ax.boxplot(speedup_data, labels=tasks, showmeans=True)
+        ax.set_ylabel("speedup x (higher is better)")
+        ax.set_title("ICBR Speedup vs Baseline (seed distribution)")
+        ax.grid(axis="y", alpha=0.3)
+        speedup_plot = output_dir / "icbr_benchmark_speedup_boxplot.png"
+        fig.tight_layout()
+        fig.savefig(speedup_plot, dpi=160)
+        created_files.append(str(speedup_plot))
+    else:
+        warnings_list.append(
+            "Insufficient finite symbolic metrics for plot generation (likely skipped by teacher quality gate)."
+        )
     plt.close(fig)
-    created_files.append(str(speedup_plot))
 
     fig, ax = plt.subplots(figsize=(10, 4.5))
     mse_shift_data = [_finite_metric_values(task, "final_mse_loss_shift") for task in tasks]
-    if any(len(values) == 0 for values in mse_shift_data):
-        plt.close(fig)
+    if all(len(values) > 0 for values in mse_shift_data):
+        ax.boxplot(mse_shift_data, labels=tasks, showmeans=True)
+        ax.axhline(0.0, linestyle="--", linewidth=1.0, color="black", alpha=0.7)
+        ax.set_ylabel("icbr_mse - baseline_mse (lower is better)")
+        ax.set_title("MSE Shift by Task (seed distribution)")
+        ax.grid(axis="y", alpha=0.3)
+        mse_plot = output_dir / "icbr_benchmark_mse_shift_boxplot.png"
+        fig.tight_layout()
+        fig.savefig(mse_plot, dpi=160)
+        created_files.append(str(mse_plot))
+    else:
+        warnings_list.append("Insufficient finite mse shift metrics for plot generation (likely skipped by teacher quality gate).")
+    plt.close(fig)
+
+    def _finite_variant_metric_values(metric: str, variant_name: str) -> list[float]:
+        values: list[float] = []
+        for row in variant_rows:
+            if str(row["variant"]) != variant_name:
+                continue
+            value = float(row[metric])
+            if math.isfinite(value):
+                values.append(value)
+        return values
+
+    variant_metrics = [
+        ("symbolic_wall_time_s", "Symbolic Time by Variant (lower is better)", "seconds (lower is better)"),
+        ("mse", "Imitation MSE by Variant (lower is better)", "mse (lower is better)"),
+        ("target_mse", "Target MSE by Variant (lower is better)", "target_mse (lower is better)"),
+    ]
+    fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, 4.8))
+    has_variant_data = False
+    x_variant = list(range(len(variants)))
+    for axis, (metric, title, ylabel) in zip(axes, variant_metrics):
+        means: list[float] = []
+        stds: list[float] = []
+        for variant_name in variants:
+            mean, std = _safe_mean_std(_finite_variant_metric_values(metric, variant_name))
+            means.append(mean)
+            stds.append(std)
+        finite_positions = [idx for idx, value in enumerate(means) if math.isfinite(value)]
+        if finite_positions:
+            has_variant_data = True
+            axis.bar(
+                [x_variant[idx] for idx in finite_positions],
+                [means[idx] for idx in finite_positions],
+                yerr=[stds[idx] for idx in finite_positions],
+                capsize=4,
+                color="#4c72b0",
+            )
+        axis.set_xticks(x_variant)
+        axis.set_xticklabels(variants, rotation=25, ha="right")
+        axis.set_title(title)
+        axis.set_ylabel(ylabel)
+        axis.grid(axis="y", alpha=0.25)
+    if has_variant_data:
+        variant_plot = output_dir / "icbr_benchmark_variant_overview.png"
+        fig.tight_layout()
+        fig.savefig(variant_plot, dpi=160)
+        created_files.append(str(variant_plot))
+    else:
+        warnings_list.append("Insufficient finite variant metrics for variant-overview visualization.")
+    plt.close(fig)
+
+    challenge_plot_specs = [
+        (
+            "shared_tensor_symbolic_time_ratio_no_shared_vs_full",
+            "Q1 Shared-Tensor Evidence by Task",
+            "no_shared/full symbolic-time ratio (>1 favors shared tensors)",
+            1.0,
+        ),
+        (
+            "contextual_replay_mse_gain_full_vs_no_replay",
+            "Q2 Contextual-Replay Evidence by Task",
+            "no_replay mse - full mse (>0 favors replay)",
+            0.0,
+        ),
+        (
+            "explicit_commit_mse_gain_explicit_vs_refit",
+            "Q3 Explicit-Commit Evidence by Task",
+            "refit_commit mse - full mse (>0 favors explicit commit)",
+            0.0,
+        ),
+    ]
+    fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(10.5, 11.5))
+    x_task = list(range(len(tasks)))
+    has_challenge_data = False
+    for axis, (metric, title, ylabel, baseline_line) in zip(axes, challenge_plot_specs):
+        means: list[float] = []
+        stds: list[float] = []
+        for task in tasks:
+            mean, std = _safe_mean_std(_finite_metric_values(task, metric))
+            means.append(mean)
+            stds.append(std)
+        finite_positions = [idx for idx, value in enumerate(means) if math.isfinite(value)]
+        if finite_positions:
+            has_challenge_data = True
+            axis.bar(
+                [x_task[idx] for idx in finite_positions],
+                [means[idx] for idx in finite_positions],
+                yerr=[stds[idx] for idx in finite_positions],
+                capsize=4,
+                color="#55a868",
+            )
+        axis.axhline(baseline_line, linestyle="--", linewidth=1.0, color="black", alpha=0.7)
+        axis.set_xticks(x_task)
+        axis.set_xticklabels(tasks, rotation=20)
+        axis.set_title(title)
+        axis.set_ylabel(ylabel)
+        axis.grid(axis="y", alpha=0.25)
+    if has_challenge_data:
+        challenge_plot = output_dir / "icbr_benchmark_q123_evidence_by_task.png"
+        fig.tight_layout()
+        fig.savefig(challenge_plot, dpi=160)
+        created_files.append(str(challenge_plot))
+    else:
+        warnings_list.append("Insufficient finite Q1/Q2/Q3 evidence metrics for challenge-evidence visualization.")
+    plt.close(fig)
+
+    if created_files:
         return {
-            "enabled": False,
-            "error": "Insufficient finite mse shift metrics for plot generation (likely skipped by teacher quality gate).",
+            "enabled": True,
+            "error": "; ".join(warnings_list) if warnings_list else None,
             "files": created_files,
         }
-    ax.boxplot(mse_shift_data, labels=tasks, showmeans=True)
-    ax.axhline(0.0, linestyle="--", linewidth=1.0, color="black", alpha=0.7)
-    ax.set_ylabel("icbr_mse - baseline_mse")
-    ax.set_title("MSE Shift by Task (seed distribution)")
-    ax.grid(axis="y", alpha=0.3)
-    mse_plot = output_dir / "icbr_benchmark_mse_shift_boxplot.png"
-    fig.tight_layout()
-    fig.savefig(mse_plot, dpi=160)
-    plt.close(fig)
-    created_files.append(str(mse_plot))
-
-    return {"enabled": True, "error": None, "files": created_files}
+    error_message = "; ".join(warnings_list) if warnings_list else "No visualization files were created."
+    return {"enabled": False, "error": error_message, "files": []}
 
 
 def run_benchmark(
@@ -2032,7 +2138,13 @@ def run_benchmark(
 
     visualization = {"enabled": False, "error": "Disabled by --no-plots", "files": []}
     if make_plots:
-        visualization = _generate_visualizations(output_dir=output_dir, tasks=resolved_tasks, by_task_rows=by_task_rows)
+        visualization = _generate_visualizations(
+            output_dir=output_dir,
+            tasks=resolved_tasks,
+            by_task_rows=by_task_rows,
+            variant_rows=variant_rows,
+            variants=list(effective_variants),
+        )
 
     summary = {
         "metadata": {

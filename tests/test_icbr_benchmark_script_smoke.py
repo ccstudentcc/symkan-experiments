@@ -313,6 +313,50 @@ def test_formula_comparison_keeps_requested_variants_when_teacher_gate_skips() -
     assert "icbr_no_replay formula export error: skipped_by_teacher_quality_gate:" in summary_md
 
 
+def test_visualization_upgrade_emits_variant_and_q123_plots() -> None:
+    out_dir = Path("tmp") / f"icbr_benchmark_visual_upgrade_{uuid.uuid4().hex}"
+    result = run_benchmark(
+        tasks=["minimal", "combo"],
+        seeds=[0],
+        output_dir=out_dir,
+        train_num=16,
+        test_num=16,
+        train_steps=2,
+        lr=0.05,
+        lamb=1e-3,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=1.0,
+        teacher_min_test_r2=-1.0,
+        teacher_cache_dir=out_dir / "teacher_cache",
+        teacher_cache_mode="off",
+        teacher_cache_version="stage18_visual_test_v1",
+        variants=["baseline", "icbr_full", "icbr_no_replay", "icbr_no_shared", "icbr_refit_commit"],
+        make_plots=True,
+        quiet=True,
+    )
+
+    summary = result["summary"]
+    visuals = summary["artifacts"]["visualizations"]
+    assert visuals["enabled"] is True
+    file_names = {Path(path).name for path in visuals["files"]}
+    expected = {
+        "icbr_benchmark_symbolic_time_errorbar.png",
+        "icbr_benchmark_speedup_boxplot.png",
+        "icbr_benchmark_mse_shift_boxplot.png",
+        "icbr_benchmark_variant_overview.png",
+        "icbr_benchmark_q123_evidence_by_task.png",
+    }
+    assert expected.issubset(file_names)
+    for path in visuals["files"]:
+        assert Path(path).exists()
+
+    summary_md = (out_dir / "icbr_benchmark_summary.md").read_text(encoding="utf-8")
+    assert "icbr_benchmark_variant_overview.png" in summary_md
+    assert "icbr_benchmark_q123_evidence_by_task.png" in summary_md
+
+
 def test_quality_profile_enables_teacher_prune_by_default() -> None:
     out_dir = Path("tmp") / f"icbr_benchmark_quality_prune_{uuid.uuid4().hex}"
     result = run_benchmark(
