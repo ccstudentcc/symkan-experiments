@@ -9,6 +9,7 @@ import numpy as np
 
 from scripts.icbr_benchmark import (
     _expand_feynman_task_tokens,
+    _normalize_variants,
     _resolve_default_tasks_and_seeds,
     _resolve_training_config,
     main,
@@ -54,12 +55,14 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
     )
 
     rows_path = out_dir / "icbr_benchmark_rows.csv"
+    variant_rows_path = out_dir / "icbr_benchmark_variant_rows.csv"
     task_stats_csv = out_dir / "icbr_benchmark_task_stats.csv"
     significance_csv = out_dir / "icbr_benchmark_significance.csv"
     summary_json = out_dir / "icbr_benchmark_summary.json"
     summary_md = out_dir / "icbr_benchmark_summary.md"
 
     assert rows_path.exists()
+    assert variant_rows_path.exists()
     assert task_stats_csv.exists()
     assert significance_csv.exists()
     assert summary_json.exists()
@@ -93,6 +96,14 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
         "teacher_cache_path",
         "teacher_cache_mode",
         "teacher_cache_status",
+        "shared_tensor_candidate_time_ratio_no_shared_vs_full",
+        "shared_tensor_symbolic_time_ratio_no_shared_vs_full",
+        "contextual_replay_mse_gain_full_vs_no_replay",
+        "contextual_replay_target_mse_gain_full_vs_no_replay",
+        "contextual_replay_rank_inversion_rate_full",
+        "explicit_commit_mse_gain_explicit_vs_refit",
+        "explicit_commit_target_mse_gain_explicit_vs_refit",
+        "explicit_commit_refit_commit_param_drift_l2_mean",
         "teacher_target_mse",
         "teacher_target_r2",
         "baseline_target_mse",
@@ -121,6 +132,7 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
     assert len(summary["rows"]) == 4
     assert summary["config"]["tasks"] == ["minimal", "combo"]
     assert summary["config"]["profile"]["name"] == "quick"
+    assert summary["config"]["variants"] == ["baseline", "icbr_full"]
     assert summary["config"]["profile"]["overrides"]["train_num"] is True
     assert summary["config"]["profile"]["overrides"]["test_num"] is True
     assert summary["config"]["profile"]["overrides"]["train_steps"] is True
@@ -132,6 +144,10 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
     assert "teacher_cache" in summary["config"]
     assert summary["config"]["task_lib_mode"]["minimal"] == "full_symbolic_lib"
     assert summary["config"]["task_lib_mode"]["combo"] == "full_symbolic_lib"
+    assert summary["config"]["teacher_prune_policy"]["enabled"] is False
+    assert summary["aggregates"]["variant_ablation"]["overall"]["baseline"]["row_count"] == 4
+    assert summary["aggregates"]["variant_ablation"]["overall"]["icbr_full"]["row_count"] == 4
+    assert "challenge_evidence" in summary["aggregates"]
     assert "metrics" in summary["aggregates"]["overall"]
     assert "significance" in summary["aggregates"]["overall"]
     minimal = summary["aggregates"]["by_task"]["minimal"]
@@ -149,9 +165,16 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
 
     assert summary["artifacts"]["task_stats_csv"].endswith("icbr_benchmark_task_stats.csv")
     assert summary["artifacts"]["significance_csv"].endswith("icbr_benchmark_significance.csv")
+    assert summary["artifacts"]["variant_rows_csv"].endswith("icbr_benchmark_variant_rows.csv")
     visuals = summary["artifacts"]["visualizations"]
     assert "enabled" in visuals
     assert "files" in visuals
+
+    with variant_rows_path.open("r", encoding="utf-8") as f:
+        variant_rows = list(csv.DictReader(f))
+    assert len(variant_rows) == 8
+    assert {row["variant"] for row in variant_rows} == {"baseline", "icbr_full"}
+    assert all(row["teacher_quality_gate_pass"] == "True" for row in variant_rows)
 
 
 def test_quality_profile_resolves_expected_defaults() -> None:
@@ -208,6 +231,76 @@ def test_feynman_reference_defaults_task_and_seed() -> None:
     )
     assert tasks == ["feynman_paper10"]
     assert seeds == [1]
+
+
+def test_normalize_variants_keeps_baseline_and_icbr_full() -> None:
+    assert _normalize_variants("icbr_no_replay") == ["baseline", "icbr_no_replay", "icbr_full"]
+    assert _normalize_variants("baseline,icbr_full,icbr_no_shared") == [
+        "baseline",
+        "icbr_full",
+        "icbr_no_shared",
+    ]
+
+
+def test_run_benchmark_supports_ablation_variants() -> None:
+    out_dir = Path("tmp") / f"icbr_benchmark_variants_{uuid.uuid4().hex}"
+    result = run_benchmark(
+        tasks=["minimal"],
+        seeds=[0],
+        output_dir=out_dir,
+        train_num=16,
+        test_num=16,
+        train_steps=2,
+        lr=0.05,
+        lamb=1e-3,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=1.0,
+        teacher_min_test_r2=-1.0,
+        teacher_cache_dir=out_dir / "teacher_cache",
+        teacher_cache_mode="off",
+        teacher_cache_version="stage15_test_v1",
+        variants=["baseline", "icbr_no_replay", "icbr_full"],
+        make_plots=False,
+        quiet=True,
+    )
+
+    variant_rows = result["variant_rows"]
+    assert len(variant_rows) == 3
+    assert {row["variant"] for row in variant_rows} == {"baseline", "icbr_full", "icbr_no_replay"}
+    summary = result["summary"]
+    assert summary["config"]["variants"] == ["baseline", "icbr_no_replay", "icbr_full"]
+    assert summary["aggregates"]["variant_ablation"]["overall"]["icbr_no_replay"]["row_count"] == 1
+
+
+def test_quality_profile_enables_teacher_prune_by_default() -> None:
+    out_dir = Path("tmp") / f"icbr_benchmark_quality_prune_{uuid.uuid4().hex}"
+    result = run_benchmark(
+        tasks=["minimal"],
+        seeds=[0],
+        output_dir=out_dir,
+        train_num=16,
+        test_num=16,
+        train_steps=2,
+        lr=0.05,
+        lamb=1e-3,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=1.0,
+        teacher_min_test_r2=-1.0,
+        teacher_cache_dir=out_dir / "teacher_cache",
+        teacher_cache_mode="off",
+        teacher_cache_version="stage15_quality_prune_test_v1",
+        profile_name="quality",
+        make_plots=False,
+        quiet=True,
+    )
+
+    summary = result["summary"]
+    assert summary["config"]["teacher_prune_policy"]["enabled"] is True
+    assert summary["config"]["teacher_training"]["minimal"]["post_train_prune"] is True
 
 
 def test_trig_interaction_uses_task_specific_topk_override() -> None:
@@ -380,6 +473,8 @@ def test_feynman_dataset_file_loading_smoke() -> None:
             str(dataset_root),
             "--feynman-variant",
             "Feynman_with_units",
+            "--feynman-fit-opt",
+            "LBFGS",
             "--feynman-split-strategy",
             "random",
             "--feynman-width-mid",
@@ -422,6 +517,94 @@ def test_feynman_dataset_file_loading_smoke() -> None:
     assert task_meta["total_columns"] == 4
     assert task_meta["n_var"] == 3
     assert task_meta["target_formula"] == "m0/sqrt(1-v^2/c^2)"
+
+
+def test_feynman_post_prune_override_smoke() -> None:
+    base_dir = Path("tmp") / f"icbr_benchmark_feynman_post_prune_{uuid.uuid4().hex}"
+    dataset_root = base_dir / "datasets"
+    variant_dir = dataset_root / "Feynman_with_units"
+    variant_dir.mkdir(parents=True, exist_ok=True)
+
+    rng = np.random.default_rng(0)
+    m0 = rng.uniform(0.1, 1.0, size=(96, 1))
+    v = rng.uniform(0.0, 0.9, size=(96, 1))
+    c = rng.uniform(1.0, 2.0, size=(96, 1))
+    y = m0 / np.sqrt(1.0 - (v**2) / (c**2))
+    raw = np.concatenate([m0, v, c, y], axis=1).astype(np.float32)
+    np.savetxt(variant_dir / "I.10.7", raw)
+
+    equations_csv = dataset_root / "FeynmanEquations.csv"
+    equations_csv.write_text("Filename,Formula\nI.10.7,m0/sqrt(1-v^2/c^2)\n", encoding="utf-8")
+
+    out_dir = base_dir / "out"
+    main(
+        [
+            "--tasks",
+            "feynman_I_10_7",
+            "--seeds",
+            "0",
+            "--output-dir",
+            str(out_dir),
+            "--train-num",
+            "48",
+            "--test-num",
+            "24",
+            "--train-steps",
+            "2",
+            "--lr",
+            "0.03",
+            "--lamb",
+            "1e-3",
+            "--topk",
+            "2",
+            "--grid-number",
+            "11",
+            "--iteration",
+            "1",
+            "--teacher-max-test-mse",
+            "10.0",
+            "--teacher-min-test-r2",
+            "-10.0",
+            "--teacher-cache-dir",
+            str(base_dir / "cache"),
+            "--teacher-cache-mode",
+            "readwrite",
+            "--feynman-root",
+            str(dataset_root),
+            "--feynman-variant",
+            "Feynman_with_units",
+            "--feynman-fit-opt",
+            "LBFGS",
+            "--feynman-split-strategy",
+            "random",
+            "--feynman-width-mid",
+            "5,2",
+            "--feynman-post-prune-steps",
+            "7",
+            "--feynman-post-prune-lr",
+            "0.002",
+            "--feynman-post-prune-lamb",
+            "0.001",
+            "--feynman-post-prune-eval-every",
+            "3",
+            "--feynman-post-prune-min-delta",
+            "1e-5",
+            "--feynman-post-prune-patience",
+            "4",
+            "--quiet",
+            "--no-plots",
+        ]
+    )
+
+    summary = json.loads((out_dir / "icbr_benchmark_summary.json").read_text(encoding="utf-8"))
+    task_cfg = summary["config"]["teacher_training"]["feynman_I_10_7"]
+    assert task_cfg["post_prune_steps"] == 7
+    assert task_cfg["post_prune_lr"] == 0.002
+    assert task_cfg["post_prune_lamb"] == 0.001
+    assert task_cfg["post_prune_eval_every"] == 3
+    assert task_cfg["post_prune_min_delta"] == 1e-5
+    assert task_cfg["post_prune_patience"] == 4
+    assert task_cfg["opt"] == "LBFGS"
 
 
 def test_feynman_task_tokens_expand() -> None:

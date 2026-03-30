@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 from time import perf_counter
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Sequence
 
 import numpy as np
 import sympy
@@ -10,6 +10,14 @@ import torch
 from sklearn.linear_model import LinearRegression
 
 from .utils import SYMBOLIC_LIB
+
+_ICBR_BENCHMARK_VARIANTS = (
+    "baseline",
+    "icbr_full",
+    "icbr_no_replay",
+    "icbr_no_shared",
+    "icbr_refit_commit",
+)
 
 
 def _clone_model_memory(source_model):
@@ -582,6 +590,99 @@ def _build_edge_shortlist(
     return candidates[:topk]
 
 
+def _build_layer_shortlists_shared(
+    teacher_acts_layer: torch.Tensor,
+    teacher_edge_targets_layer: torch.Tensor,
+    *,
+    edge_indices: list[tuple[int, int]],
+    lib_names: list[str],
+    topk: int,
+    a_range: tuple[float, float],
+    b_range: tuple[float, float],
+    grid_number: int,
+    iteration: int,
+) -> dict[tuple[int, int], list[dict[str, object]]]:
+    if not edge_indices:
+        return {}
+    per_edge_candidates: dict[tuple[int, int], list[dict[str, object]]] = {edge: [] for edge in edge_indices}
+    for fun_name in lib_names:
+        result = generate_layer_candidates(
+            teacher_acts_layer,
+            teacher_edge_targets_layer,
+            lib=[fun_name],
+            edge_indices=edge_indices,
+            a_range=a_range,
+            b_range=b_range,
+            grid_number=grid_number,
+            iteration=iteration,
+        )
+        for edge, candidate in zip(edge_indices, result["candidates"]):
+            per_edge_candidates[edge].append(candidate)
+
+    for edge in edge_indices:
+        candidates = per_edge_candidates[edge]
+        candidates.sort(key=lambda item: (-float(item["r2"]), float(item["complexity"])))
+        per_edge_candidates[edge] = candidates[: max(1, min(topk, len(candidates)))]
+    return per_edge_candidates
+
+
+def _choose_best_candidate_by_local_score(shortlist: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    if not shortlist:
+        raise ValueError("shortlist must not be empty")
+    ranked = sorted(shortlist, key=lambda item: (-float(item["r2"]), float(item["complexity"])))
+    best = dict(ranked[0])
+    best["replay_score"] = float("nan")
+    return best
+
+
+def _commit_candidate_by_refit(
+    work_model,
+    *,
+    layer_idx: int,
+    input_idx: int,
+    output_idx: int,
+    candidate: Mapping[str, object],
+    a_range: tuple[float, float],
+    b_range: tuple[float, float],
+) -> float:
+    fun_name = str(candidate["fun_name"])
+    if fun_name == "0":
+        commit_symbolic_candidate(
+            work_model,
+            layer_idx=layer_idx,
+            input_idx=input_idx,
+            output_idx=output_idx,
+            candidate={"fun_name": "0"},
+        )
+        return float("nan")
+    before = torch.as_tensor(candidate["params"], dtype=work_model.symbolic_fun[layer_idx].affine.dtype).detach().cpu()
+    work_model.fix_symbolic(
+        layer_idx,
+        input_idx,
+        output_idx,
+        fun_name,
+        fit_params_bool=True,
+        a_range=a_range,
+        b_range=b_range,
+        verbose=False,
+        log_history=False,
+    )
+    after = work_model.symbolic_fun[layer_idx].affine.data[output_idx, input_idx].detach().cpu()
+    return float(torch.linalg.vector_norm(after - before).item())
+
+
+def _resolve_icbr_variant_modes(variant: str) -> tuple[str, str, str]:
+    if variant == "icbr_full":
+        return ("shared", "replay", "explicit")
+    if variant == "icbr_no_replay":
+        return ("shared", "local", "explicit")
+    if variant == "icbr_no_shared":
+        return ("serial", "replay", "explicit")
+    if variant == "icbr_refit_commit":
+        return ("shared", "replay", "refit")
+    raise ValueError(f"Unsupported ICBR variant: {variant}")
+
+
 def _run_auto_symbolic_icbr_with_models(
     teacher_model,
     work_model,
@@ -594,6 +695,9 @@ def _run_auto_symbolic_icbr_with_models(
     grid_number: int,
     iteration: int,
     verbose: int,
+    candidate_mode: str = "shared",
+    rerank_mode: str = "replay",
+    commit_mode: str = "explicit",
     collect_metrics: bool = False,
 ):
     if teacher_model is work_model:
@@ -603,8 +707,18 @@ def _run_auto_symbolic_icbr_with_models(
     teacher_model.auto_save = False
     work_model.auto_save = False
 
+    if candidate_mode not in {"shared", "serial"}:
+        raise ValueError(f"Unsupported candidate_mode: {candidate_mode}")
+    if rerank_mode not in {"replay", "local"}:
+        raise ValueError(f"Unsupported rerank_mode: {rerank_mode}")
+    if commit_mode not in {"explicit", "refit"}:
+        raise ValueError(f"Unsupported commit_mode: {commit_mode}")
+
     candidate_generation_wall_time_s = 0.0
     replay_rerank_wall_time_s = 0.0
+    replay_rank_inversion_count = 0
+    replay_rank_inversion_total = 0
+    commit_param_drifts: list[float] = []
     symbolic_start = perf_counter()
 
     with torch.no_grad():
@@ -614,6 +728,28 @@ def _run_auto_symbolic_icbr_with_models(
     for layer_idx in range(depth):
         teacher_acts_layer = teacher_model.acts[layer_idx]
         teacher_edge_targets_layer = teacher_model.spline_postacts[layer_idx]
+        shared_shortlists: dict[tuple[int, int], list[dict[str, object]]] = {}
+        if candidate_mode == "shared":
+            active_edges: list[tuple[int, int]] = []
+            for input_idx in range(work_model.width_in[layer_idx]):
+                for output_idx in range(work_model.width_out[layer_idx + 1]):
+                    symbolic_mask = float(work_model.symbolic_fun[layer_idx].mask[output_idx, input_idx].item())
+                    numeric_mask = float(work_model.act_fun[layer_idx].mask[input_idx][output_idx].item())
+                    if symbolic_mask == 0.0 and numeric_mask > 0.0:
+                        active_edges.append((input_idx, output_idx))
+            candidate_start = perf_counter()
+            shared_shortlists = _build_layer_shortlists_shared(
+                teacher_acts_layer,
+                teacher_edge_targets_layer,
+                edge_indices=active_edges,
+                lib_names=lib_names,
+                topk=topk,
+                a_range=a_range,
+                b_range=b_range,
+                grid_number=grid_number,
+                iteration=iteration,
+            )
+            candidate_generation_wall_time_s += perf_counter() - candidate_start
 
         for input_idx in range(work_model.width_in[layer_idx]):
             for output_idx in range(work_model.width_out[layer_idx + 1]):
@@ -637,51 +773,90 @@ def _run_auto_symbolic_icbr_with_models(
                         print(f"commit ({layer_idx},{input_idx},{output_idx}) as 0")
                     continue
 
-                candidate_start = perf_counter()
-                shortlist = _build_edge_shortlist(
-                    teacher_acts_layer,
-                    teacher_edge_targets_layer,
-                    input_idx=input_idx,
-                    output_idx=output_idx,
-                    lib_names=lib_names,
-                    topk=topk,
-                    a_range=a_range,
-                    b_range=b_range,
-                    grid_number=grid_number,
-                    iteration=iteration,
-                )
-                candidate_generation_wall_time_s += perf_counter() - candidate_start
-                rerank = replay_rerank_edge_candidates(
-                    work_model,
-                    teacher_model,
-                    calibration_input,
-                    layer_idx=layer_idx,
-                    input_idx=input_idx,
-                    output_idx=output_idx,
-                    shortlist=shortlist,
-                )
-                replay_rerank_wall_time_s += float(rerank["replay_rerank_wall_time_s"])
-                best = rerank["best_candidate"]
-                commit_symbolic_candidate(
-                    work_model,
-                    layer_idx=layer_idx,
-                    input_idx=input_idx,
-                    output_idx=output_idx,
-                    candidate=best,
-                )
+                if candidate_mode == "shared":
+                    shortlist = shared_shortlists[(input_idx, output_idx)]
+                else:
+                    candidate_start = perf_counter()
+                    shortlist = _build_edge_shortlist(
+                        teacher_acts_layer,
+                        teacher_edge_targets_layer,
+                        input_idx=input_idx,
+                        output_idx=output_idx,
+                        lib_names=lib_names,
+                        topk=topk,
+                        a_range=a_range,
+                        b_range=b_range,
+                        grid_number=grid_number,
+                        iteration=iteration,
+                    )
+                    candidate_generation_wall_time_s += perf_counter() - candidate_start
+
+                if rerank_mode == "replay":
+                    rerank = replay_rerank_edge_candidates(
+                        work_model,
+                        teacher_model,
+                        calibration_input,
+                        layer_idx=layer_idx,
+                        input_idx=input_idx,
+                        output_idx=output_idx,
+                        shortlist=shortlist,
+                    )
+                    replay_rerank_wall_time_s += float(rerank["replay_rerank_wall_time_s"])
+                    best = rerank["best_candidate"]
+                    replay_rank_inversion_total += 1
+                    if int(best.get("candidate_index", 0)) != 0:
+                        replay_rank_inversion_count += 1
+                    best_score_repr = f"replay_score={best['replay_score']:.6e}"
+                else:
+                    best = _choose_best_candidate_by_local_score(shortlist)
+                    best_score_repr = f"local_r2={float(best['r2']):.6e}"
+
+                if commit_mode == "explicit":
+                    commit_symbolic_candidate(
+                        work_model,
+                        layer_idx=layer_idx,
+                        input_idx=input_idx,
+                        output_idx=output_idx,
+                        candidate=best,
+                    )
+                else:
+                    drift_value = _commit_candidate_by_refit(
+                        work_model,
+                        layer_idx=layer_idx,
+                        input_idx=input_idx,
+                        output_idx=output_idx,
+                        candidate=best,
+                        a_range=a_range,
+                        b_range=b_range,
+                    )
+                    if np.isfinite(drift_value):
+                        commit_param_drifts.append(float(drift_value))
                 if verbose >= 1:
                     print(
                         f"commit ({layer_idx},{input_idx},{output_idx}) "
-                        f"{best['fun_name']} replay_score={best['replay_score']:.6e}"
+                        f"{best['fun_name']} {best_score_repr}"
                     )
 
     _ensure_fully_symbolic_completion(work_model)
     symbolic_wall_time_s = perf_counter() - symbolic_start
     if collect_metrics:
+        replay_rank_inversion_rate = (
+            float(replay_rank_inversion_count / replay_rank_inversion_total)
+            if replay_rank_inversion_total > 0
+            else float("nan")
+        )
         return work_model, {
+            "candidate_mode": candidate_mode,
+            "rerank_mode": rerank_mode,
+            "commit_mode": commit_mode,
             "candidate_generation_wall_time_s": candidate_generation_wall_time_s,
             "replay_rerank_wall_time_s": replay_rerank_wall_time_s,
             "symbolic_wall_time_s": symbolic_wall_time_s,
+            "replay_rank_inversion_count": replay_rank_inversion_count,
+            "replay_rank_inversion_total": replay_rank_inversion_total,
+            "replay_rank_inversion_rate": replay_rank_inversion_rate,
+            "commit_param_drift_l2_mean": float(np.mean(commit_param_drifts)) if commit_param_drifts else float("nan"),
+            "commit_param_drift_l2_max": float(np.max(commit_param_drifts)) if commit_param_drifts else float("nan"),
         }
     return work_model
 
@@ -762,7 +937,35 @@ def _formula_export_details(
     return {"ok": True, "raw": raw, "display": display, "error": None}
 
 
-def benchmark_icbr_vs_baseline(
+def _normalize_benchmark_variants(variants: Sequence[str] | None) -> list[str]:
+    if variants is None:
+        return ["baseline", "icbr_full"]
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in variants:
+        name = str(raw).strip()
+        if not name:
+            continue
+        if name not in _ICBR_BENCHMARK_VARIANTS:
+            raise ValueError(f"Unknown benchmark variant: {name}")
+        if name in seen:
+            continue
+        seen.add(name)
+        normalized.append(name)
+    if "baseline" not in seen:
+        normalized.insert(0, "baseline")
+    return normalized
+
+
+def _safe_ratio(numerator: float, denominator: float) -> float:
+    if not np.isfinite(numerator) or not np.isfinite(denominator):
+        return float("nan")
+    if abs(denominator) <= 1e-12:
+        return float("nan")
+    return float(numerator / denominator)
+
+
+def benchmark_symbolic_variants(
     model,
     *,
     calibration_split: Mapping[str, torch.Tensor] | torch.Tensor,
@@ -774,7 +977,9 @@ def benchmark_icbr_vs_baseline(
     grid_number: int = 101,
     iteration: int = 3,
     formula_significant_digits: int = 6,
+    variants: Sequence[str] | None = None,
 ) -> dict[str, object]:
+    variant_names = _normalize_benchmark_variants(variants)
     calibration_input = _extract_calibration_input(calibration_split)
     if calibration_target is None:
         calibration_target = _extract_calibration_target(calibration_split)
@@ -826,81 +1031,212 @@ def benchmark_icbr_vs_baseline(
         significant_digits=formula_significant_digits,
     )
     baseline_formula_ok = bool(baseline_formula["ok"]) and len(baseline_formula["raw"]) == int(baseline_output.shape[1])
+    baseline_payload = {
+        "symbolic_wall_time_s": float(baseline_symbolic_wall_time_s),
+        "mse": float(baseline_mse),
+        "target_mse": float(baseline_target_mse),
+        "target_r2": float(baseline_target_r2),
+        "formula_validation_result": bool(baseline_formula_ok),
+        "formula_raw": baseline_formula["raw"],
+        "formula_display": baseline_formula["display"],
+        "formula_error": baseline_formula["error"],
+    }
 
-    teacher_model = _clone_model_memory(model)
-    work_model = _clone_model_memory(model)
-    work_model, icbr_timing = _run_auto_symbolic_icbr_with_models(
-        teacher_model,
-        work_model,
-        calibration_input,
-        lib_names=lib_names,
+    variant_payloads: dict[str, dict[str, object]] = {}
+    comparisons_vs_baseline: dict[str, dict[str, float | bool]] = {}
+    for variant in variant_names:
+        if variant == "baseline":
+            continue
+        candidate_mode, rerank_mode, commit_mode = _resolve_icbr_variant_modes(variant)
+        teacher_model = _clone_model_memory(model)
+        work_model = _clone_model_memory(model)
+        work_model, timing = _run_auto_symbolic_icbr_with_models(
+            teacher_model,
+            work_model,
+            calibration_input,
+            lib_names=lib_names,
+            topk=topk,
+            a_range=a_range,
+            b_range=b_range,
+            grid_number=grid_number,
+            iteration=iteration,
+            verbose=0,
+            candidate_mode=candidate_mode,
+            rerank_mode=rerank_mode,
+            commit_mode=commit_mode,
+            collect_metrics=True,
+        )
+        with torch.no_grad():
+            variant_output = work_model(calibration_input).detach()
+        variant_mse = torch.mean((variant_output - teacher_output).pow(2)).item()
+        if target is not None:
+            variant_target_mse = _mse_to_target(variant_output, target)
+            variant_target_r2 = _r2_to_target(variant_output, target)
+        else:
+            variant_target_mse = float("nan")
+            variant_target_r2 = float("nan")
+        variant_formula = _formula_export_details(
+            work_model,
+            input_dim=input_dim,
+            significant_digits=formula_significant_digits,
+        )
+        variant_formula_ok = bool(variant_formula["ok"]) and len(variant_formula["raw"]) == int(variant_output.shape[1])
+        variant_payloads[variant] = {
+            "candidate_mode": candidate_mode,
+            "rerank_mode": rerank_mode,
+            "commit_mode": commit_mode,
+            "candidate_generation_wall_time_s": float(timing["candidate_generation_wall_time_s"]),
+            "replay_rerank_wall_time_s": float(timing["replay_rerank_wall_time_s"]),
+            "symbolic_wall_time_s": float(timing["symbolic_wall_time_s"]),
+            "replay_rank_inversion_count": int(timing["replay_rank_inversion_count"]),
+            "replay_rank_inversion_total": int(timing["replay_rank_inversion_total"]),
+            "replay_rank_inversion_rate": float(timing["replay_rank_inversion_rate"]),
+            "commit_param_drift_l2_mean": float(timing["commit_param_drift_l2_mean"]),
+            "commit_param_drift_l2_max": float(timing["commit_param_drift_l2_max"]),
+            "mse": float(variant_mse),
+            "target_mse": float(variant_target_mse),
+            "target_r2": float(variant_target_r2),
+            "formula_validation_result": bool(variant_formula_ok),
+            "formula_raw": variant_formula["raw"],
+            "formula_display": variant_formula["display"],
+            "formula_error": variant_formula["error"],
+        }
+        comparisons_vs_baseline[variant] = {
+            "symbolic_wall_time_delta_s": float(baseline_payload["symbolic_wall_time_s"] - variant_payloads[variant]["symbolic_wall_time_s"]),
+            "symbolic_speedup_vs_baseline": float(
+                baseline_payload["symbolic_wall_time_s"] / max(float(variant_payloads[variant]["symbolic_wall_time_s"]), 1e-12)
+            ),
+            "replay_imitation_gap": float(variant_mse),
+            "final_mse_loss_shift": float(variant_mse - baseline_payload["mse"]),
+            "symbolic_target_mse_shift": float(variant_target_mse - baseline_payload["target_mse"]),
+            "symbolic_target_r2_shift": float(variant_target_r2 - baseline_payload["target_r2"]),
+            "formula_validation_result": bool(variant_formula_ok and baseline_formula_ok),
+        }
+
+    full = variant_payloads.get("icbr_full")
+    no_shared = variant_payloads.get("icbr_no_shared")
+    no_replay = variant_payloads.get("icbr_no_replay")
+    refit_commit = variant_payloads.get("icbr_refit_commit")
+    challenge_evidence = {
+        "shared_tensor": {
+            "candidate_time_ratio_no_shared_vs_full": _safe_ratio(
+                float(no_shared["candidate_generation_wall_time_s"]) if no_shared else float("nan"),
+                float(full["candidate_generation_wall_time_s"]) if full else float("nan"),
+            ),
+            "symbolic_time_ratio_no_shared_vs_full": _safe_ratio(
+                float(no_shared["symbolic_wall_time_s"]) if no_shared else float("nan"),
+                float(full["symbolic_wall_time_s"]) if full else float("nan"),
+            ),
+        },
+        "contextual_replay": {
+            "mse_gain_full_vs_no_replay": (
+                float(no_replay["mse"]) - float(full["mse"])
+                if full is not None and no_replay is not None
+                else float("nan")
+            ),
+            "target_mse_gain_full_vs_no_replay": (
+                float(no_replay["target_mse"]) - float(full["target_mse"])
+                if full is not None and no_replay is not None
+                else float("nan")
+            ),
+            "replay_rank_inversion_rate_full": float(full["replay_rank_inversion_rate"]) if full else float("nan"),
+        },
+        "explicit_commit": {
+            "mse_gain_explicit_vs_refit": (
+                float(refit_commit["mse"]) - float(full["mse"])
+                if full is not None and refit_commit is not None
+                else float("nan")
+            ),
+            "target_mse_gain_explicit_vs_refit": (
+                float(refit_commit["target_mse"]) - float(full["target_mse"])
+                if full is not None and refit_commit is not None
+                else float("nan")
+            ),
+            "refit_commit_param_drift_l2_mean": float(refit_commit["commit_param_drift_l2_mean"])
+            if refit_commit
+            else float("nan"),
+        },
+    }
+    return {
+        "variants_requested": list(variant_names),
+        "teacher_target_mse": float(teacher_target_mse),
+        "teacher_target_r2": float(teacher_target_r2),
+        "baseline": baseline_payload,
+        "variants": variant_payloads,
+        "comparisons_vs_baseline": comparisons_vs_baseline,
+        "challenge_evidence": challenge_evidence,
+    }
+
+
+def benchmark_icbr_vs_baseline(
+    model,
+    *,
+    calibration_split: Mapping[str, torch.Tensor] | torch.Tensor,
+    calibration_target: torch.Tensor | None = None,
+    lib: Iterable[str] | Mapping[str, tuple] | None = None,
+    topk: int = 5,
+    a_range: tuple[float, float] = (-10.0, 10.0),
+    b_range: tuple[float, float] = (-10.0, 10.0),
+    grid_number: int = 101,
+    iteration: int = 3,
+    formula_significant_digits: int = 6,
+) -> dict[str, object]:
+    bundle = benchmark_symbolic_variants(
+        model,
+        calibration_split=calibration_split,
+        calibration_target=calibration_target,
+        lib=lib,
         topk=topk,
         a_range=a_range,
         b_range=b_range,
         grid_number=grid_number,
         iteration=iteration,
-        verbose=0,
-        collect_metrics=True,
+        formula_significant_digits=formula_significant_digits,
+        variants=("baseline", "icbr_full"),
     )
-    with torch.no_grad():
-        icbr_output = work_model(calibration_input).detach()
-    icbr_mse = torch.mean((icbr_output - teacher_output).pow(2)).item()
-    if target is not None:
-        icbr_target_mse = _mse_to_target(icbr_output, target)
-        icbr_target_r2 = _r2_to_target(icbr_output, target)
-        symbolic_target_mse_shift = icbr_target_mse - baseline_target_mse
-        symbolic_target_r2_shift = icbr_target_r2 - baseline_target_r2
-    else:
-        icbr_target_mse = float("nan")
-        icbr_target_r2 = float("nan")
-        symbolic_target_mse_shift = float("nan")
-        symbolic_target_r2_shift = float("nan")
-    icbr_formula = _formula_export_details(
-        work_model,
-        input_dim=input_dim,
-        significant_digits=formula_significant_digits,
-    )
-    icbr_formula_ok = bool(icbr_formula["ok"]) and len(icbr_formula["raw"]) == int(icbr_output.shape[1])
-
-    icbr_symbolic_wall_time_s = float(icbr_timing["symbolic_wall_time_s"])
-    baseline_symbolic_wall_time_s_f = float(baseline_symbolic_wall_time_s)
-    symbolic_speedup_vs_baseline = baseline_symbolic_wall_time_s_f / max(icbr_symbolic_wall_time_s, 1e-12)
-    symbolic_wall_time_delta_s = baseline_symbolic_wall_time_s_f - icbr_symbolic_wall_time_s
-
+    baseline = bundle["baseline"]
+    icbr = bundle["variants"]["icbr_full"]
+    cmp = bundle["comparisons_vs_baseline"]["icbr_full"]
     return {
-        "candidate_generation_wall_time_s": float(icbr_timing["candidate_generation_wall_time_s"]),
-        "replay_rerank_wall_time_s": float(icbr_timing["replay_rerank_wall_time_s"]),
-        "symbolic_wall_time_s": icbr_symbolic_wall_time_s,
-        "baseline_symbolic_wall_time_s": baseline_symbolic_wall_time_s_f,
-        "symbolic_wall_time_delta_s": float(symbolic_wall_time_delta_s),
-        "symbolic_speedup_vs_baseline": float(symbolic_speedup_vs_baseline),
-        "replay_imitation_gap": float(icbr_mse),
-        "final_mse_loss_shift": float(icbr_mse - baseline_mse),
-        "formula_validation_result": bool(icbr_formula_ok and baseline_formula_ok),
-        "baseline_formula_validation_result": bool(baseline_formula_ok),
-        "icbr_formula_validation_result": bool(icbr_formula_ok),
-        "baseline_formula_raw": baseline_formula["raw"],
-        "baseline_formula_display": baseline_formula["display"],
-        "icbr_formula_raw": icbr_formula["raw"],
-        "icbr_formula_display": icbr_formula["display"],
-        "baseline_formula_error": baseline_formula["error"],
-        "icbr_formula_error": icbr_formula["error"],
-        "baseline_mse": float(baseline_mse),
-        "icbr_mse": float(icbr_mse),
-        "teacher_target_mse": float(teacher_target_mse),
-        "teacher_target_r2": float(teacher_target_r2),
-        "baseline_target_mse": float(baseline_target_mse),
-        "baseline_target_r2": float(baseline_target_r2),
-        "icbr_target_mse": float(icbr_target_mse),
-        "icbr_target_r2": float(icbr_target_r2),
-        "symbolic_target_mse_shift": float(symbolic_target_mse_shift),
-        "symbolic_target_r2_shift": float(symbolic_target_r2_shift),
+        "candidate_generation_wall_time_s": float(icbr["candidate_generation_wall_time_s"]),
+        "replay_rerank_wall_time_s": float(icbr["replay_rerank_wall_time_s"]),
+        "symbolic_wall_time_s": float(icbr["symbolic_wall_time_s"]),
+        "baseline_symbolic_wall_time_s": float(baseline["symbolic_wall_time_s"]),
+        "symbolic_wall_time_delta_s": float(cmp["symbolic_wall_time_delta_s"]),
+        "symbolic_speedup_vs_baseline": float(cmp["symbolic_speedup_vs_baseline"]),
+        "replay_imitation_gap": float(cmp["replay_imitation_gap"]),
+        "final_mse_loss_shift": float(cmp["final_mse_loss_shift"]),
+        "formula_validation_result": bool(cmp["formula_validation_result"]),
+        "baseline_formula_validation_result": bool(baseline["formula_validation_result"]),
+        "icbr_formula_validation_result": bool(icbr["formula_validation_result"]),
+        "baseline_formula_raw": list(baseline["formula_raw"]),
+        "baseline_formula_display": list(baseline["formula_display"]),
+        "icbr_formula_raw": list(icbr["formula_raw"]),
+        "icbr_formula_display": list(icbr["formula_display"]),
+        "baseline_formula_error": baseline["formula_error"],
+        "icbr_formula_error": icbr["formula_error"],
+        "baseline_mse": float(baseline["mse"]),
+        "icbr_mse": float(icbr["mse"]),
+        "teacher_target_mse": float(bundle["teacher_target_mse"]),
+        "teacher_target_r2": float(bundle["teacher_target_r2"]),
+        "baseline_target_mse": float(baseline["target_mse"]),
+        "baseline_target_r2": float(baseline["target_r2"]),
+        "icbr_target_mse": float(icbr["target_mse"]),
+        "icbr_target_r2": float(icbr["target_r2"]),
+        "symbolic_target_mse_shift": float(cmp["symbolic_target_mse_shift"]),
+        "symbolic_target_r2_shift": float(cmp["symbolic_target_r2_shift"]),
+        "replay_rank_inversion_count": int(icbr["replay_rank_inversion_count"]),
+        "replay_rank_inversion_total": int(icbr["replay_rank_inversion_total"]),
+        "replay_rank_inversion_rate": float(icbr["replay_rank_inversion_rate"]),
+        "commit_param_drift_l2_mean": float(icbr["commit_param_drift_l2_mean"]),
+        "commit_param_drift_l2_max": float(icbr["commit_param_drift_l2_max"]),
     }
 
 
 __all__ = [
     "auto_symbolic_icbr",
     "benchmark_icbr_vs_baseline",
+    "benchmark_symbolic_variants",
     "commit_symbolic_candidate",
     "generate_layer_candidates",
     "replay_rerank_edge_candidates",

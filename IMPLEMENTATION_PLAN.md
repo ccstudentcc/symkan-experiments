@@ -927,6 +927,61 @@ Status:
 
 Complete
 
+### Stage 15: Quality 4-Task Ablation Benchmark and Critique-Evidence Validation
+
+Goal:
+
+在 `quality` 口径下对 `minimal/combo/poly_cubic/trig_interaction` 四任务执行启用 teacher 剪枝的多变体 benchmark，并新增能直接回应三类质疑（shared-tensor 是否仅框架红利、contextual replay 是否真改进局部误选、explicit commit 是否引入偏差）的结构化实证导出。
+
+Target Files:
+
+- `kan/icbr.py`
+- `scripts/icbr_benchmark.py`
+- `tests/test_icbr_benchmark_smoke.py`
+- `tests/test_icbr_benchmark_script_smoke.py`
+- `IMPLEMENTATION_PLAN.md`
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- benchmark 支持 `quality` 配置下四任务默认运行，并保持 teacher 剪枝路径启用与可观测。
+- benchmark 支持不止 `baseline/icbr` 的多变体运行（至少包含）:
+  - `baseline`
+  - `icbr_full`（shared + replay + explicit commit）
+  - `icbr_no_replay`
+  - `icbr_no_shared`
+  - `icbr_refit_commit`
+- 导出中新增可用于回答三类质疑的证据字段（至少）:
+  - Q1（shared-tensor）：`icbr_full` vs `icbr_no_shared` 的候选生成时间与总符号化时间对照
+  - Q2（contextual replay）：`icbr_full` vs `icbr_no_replay` 的误差对照 + replay rank inversion 统计
+  - Q3（explicit commit）：`icbr_full` vs `icbr_refit_commit` 的误差对照 + commit 参数漂移统计
+- 保持原有 baseline vs icbr_full 主导出兼容，不破坏既有 rows/summary/report 字段。
+
+Implementation Constraints:
+
+- 不改动 ICBR 主算法核心语义，只扩展 benchmark 变体与证据导出层。
+- 不删除 Stage 9~14 已有字段与文件产物。
+- 默认运行口径继续 CPU-first，不引入 CUDA 作为通过条件。
+
+Success Criteria:
+
+- 单次 benchmark 可产出：
+  - 原有主导出（rows/task_stats/significance/summary/md）
+  - 多变体明细与质疑证据导出（JSON/CSV 至少一种 machine-readable 结构）
+- 四任务 `quality` 运行可直接读取三类质疑对应的实证指标。
+- 相关 smoke 测试覆盖新增变体参数与导出结构并通过。
+
+Validation:
+
+- `python -m py_compile kan/icbr.py scripts/icbr_benchmark.py tests/test_icbr_benchmark_smoke.py tests/test_icbr_benchmark_script_smoke.py`
+- `pytest tests/test_icbr_benchmark_smoke.py tests/test_icbr_benchmark_script_smoke.py`
+- `python -m scripts.icbr_benchmark --profile quality --tasks minimal,combo,poly_cubic,trig_interaction --seeds 0,1 --variants baseline,icbr_full,icbr_no_replay,icbr_no_shared,icbr_refit_commit --output-dir outputs/icbr_benchmark_stage15_quality_ablation_4tasks --quiet --no-plots`
+- 人工核对 summary 中三类质疑证据字段与变体对照结果是否完整。
+
+Status:
+
+Complete
+
 ## 5. Acceptance Criteria
 
 Phase I 仅在以下条件全部满足时视为完成:

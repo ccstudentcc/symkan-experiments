@@ -10,7 +10,7 @@ import random
 import statistics
 import time
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -19,7 +19,7 @@ import numpy as np
 import torch
 
 from kan.MultKAN import MultKAN
-from kan.icbr import benchmark_icbr_vs_baseline
+from kan.icbr import benchmark_symbolic_variants
 from kan.utils import create_dataset
 
 
@@ -59,19 +59,58 @@ _SIGNIFICANCE_DIRECTIONS = {
     "final_mse_loss_shift": "negative",
 }
 
+_CHALLENGE_EVIDENCE_METRICS = [
+    "shared_tensor_candidate_time_ratio_no_shared_vs_full",
+    "shared_tensor_symbolic_time_ratio_no_shared_vs_full",
+    "contextual_replay_mse_gain_full_vs_no_replay",
+    "contextual_replay_target_mse_gain_full_vs_no_replay",
+    "contextual_replay_rank_inversion_rate_full",
+    "explicit_commit_mse_gain_explicit_vs_refit",
+    "explicit_commit_target_mse_gain_explicit_vs_refit",
+    "explicit_commit_refit_commit_param_drift_l2_mean",
+]
+
+_VARIANT_NUMERIC_METRICS = [
+    "candidate_generation_wall_time_s",
+    "replay_rerank_wall_time_s",
+    "symbolic_wall_time_s",
+    "mse",
+    "target_mse",
+    "target_r2",
+    "baseline_symbolic_wall_time_s",
+    "baseline_mse",
+    "baseline_target_mse",
+    "baseline_target_r2",
+    "symbolic_wall_time_delta_s",
+    "symbolic_speedup_vs_baseline",
+    "final_mse_loss_shift",
+    "symbolic_target_mse_shift",
+    "symbolic_target_r2_shift",
+    "replay_rank_inversion_count",
+    "replay_rank_inversion_total",
+    "replay_rank_inversion_rate",
+    "commit_param_drift_l2_mean",
+    "commit_param_drift_l2_max",
+]
+
+_VARIANT_BOOLEAN_METRICS = [
+    "formula_validation_result",
+    "teacher_quality_gate_pass",
+]
+
 _BENCHMARK_PROFILES: dict[str, dict[str, float | int]] = {
     "quick": {
         "train_num": 64,
         "test_num": 64,
         "train_steps": 20,
-        "lr": 0.05,
+        "lr": 1e-2,
         "lamb": 1e-3,
     },
     "quality": {
         "train_num": 1000,
         "test_num": 500,
         "train_steps": 80,
-        "lr": 0.03,
+        "lr": 3e-2,
         "lamb": 1e-3,
     },
     "feynman_reference": {
@@ -84,12 +123,20 @@ _BENCHMARK_PROFILES: dict[str, dict[str, float | int]] = {
 }
 
 _TEACHER_CACHE_MODES = {"readwrite", "readonly", "refresh", "off"}
+_BENCHMARK_VARIANTS = (
+    "baseline",
+    "icbr_full",
+    "icbr_no_replay",
+    "icbr_no_shared",
+    "icbr_refit_commit",
+)
 _FEYNMAN_VARIANTS = (
     "Feynman_without_units",
     "Feynman_with_units",
     "bonus_without_units",
     "bonus_with_units",
 )
+_FEYNMAN_FIT_OPTS = ("Adam", "LBFGS")
 _FEYNMAN_PAPER10_DATASETS = [
     "feynman_I_9_18",
     "feynman_I_10_7",
@@ -350,6 +397,13 @@ def _build_feynman_task_spec(
     feynman_width_mid: list[int],
     feynman_split_strategy: str,
     feynman_split_strategy_seed: int,
+    feynman_post_prune_steps: int | None,
+    feynman_post_prune_lr: float | None,
+    feynman_post_prune_lamb: float | None,
+    feynman_post_prune_eval_every: int | None,
+    feynman_post_prune_min_delta: float | None,
+    feynman_post_prune_patience: int | None,
+    feynman_fit_opt: str | None,
     equations_map: dict[str, str],
     equations_metadata_map: dict[str, dict[str, str]],
 ) -> _TaskSpec:
@@ -364,8 +418,31 @@ def _build_feynman_task_spec(
         raw = raw.reshape(-1, 1)
     if raw.shape[1] < 2:
         raise ValueError(f"Invalid Feynman dataset columns (<2): {dataset_path}")
+    if feynman_post_prune_steps is not None and int(feynman_post_prune_steps) < 0:
+        raise ValueError("feynman_post_prune_steps must be >= 0 when provided.")
+    if feynman_post_prune_eval_every is not None and int(feynman_post_prune_eval_every) <= 0:
+        raise ValueError("feynman_post_prune_eval_every must be > 0 when provided.")
+    if feynman_post_prune_patience is not None and int(feynman_post_prune_patience) <= 0:
+        raise ValueError("feynman_post_prune_patience must be > 0 when provided.")
+    if feynman_fit_opt is not None and feynman_fit_opt not in _FEYNMAN_FIT_OPTS:
+        raise ValueError(
+            f"Unsupported feynman_fit_opt: {feynman_fit_opt}. Expected one of {list(_FEYNMAN_FIT_OPTS)}"
+        )
     n_var = int(raw.shape[1] - 1)
     width = [n_var, *feynman_width_mid, 1]
+    fit_opt = str(feynman_fit_opt) if feynman_fit_opt is not None else "Adam"
+
+    post_prune_steps = int(feynman_post_prune_steps) if feynman_post_prune_steps is not None else 100
+    post_prune_lr = float(feynman_post_prune_lr) if feynman_post_prune_lr is not None else 1e-3
+    post_prune_lamb = float(feynman_post_prune_lamb) if feynman_post_prune_lamb is not None else 1e-2
+    post_prune_eval_every = (
+        int(feynman_post_prune_eval_every) if feynman_post_prune_eval_every is not None else 5
+    )
+    post_prune_min_delta = (
+        float(feynman_post_prune_min_delta) if feynman_post_prune_min_delta is not None else 1e-6
+    )
+    post_prune_patience = int(feynman_post_prune_patience) if feynman_post_prune_patience is not None else 2
+
     return _TaskSpec(
         name=task_name,
         n_var=n_var,
@@ -384,17 +461,17 @@ def _build_feynman_task_spec(
         equation_metadata=dict(equations_metadata_map.get(filename, {})),
         teacher_grid=20,
         teacher_k=3,
-        teacher_fit_opt="Adam",
+        teacher_fit_opt=fit_opt,
         teacher_post_train_prune=True,
         teacher_prune_node_th=1e-2,
         teacher_prune_edge_th=1e-2,
-        teacher_post_prune_steps=100,
-        teacher_post_prune_lr=1e-3,
-        teacher_post_prune_lamb=1e-2,
+        teacher_post_prune_steps=post_prune_steps,
+        teacher_post_prune_lr=post_prune_lr,
+        teacher_post_prune_lamb=post_prune_lamb,
         teacher_post_prune_early_stop=True,
-        teacher_post_prune_eval_every=5,
-        teacher_post_prune_min_delta=1e-6,
-        teacher_post_prune_patience=2,
+        teacher_post_prune_eval_every=post_prune_eval_every,
+        teacher_post_prune_min_delta=post_prune_min_delta,
+        teacher_post_prune_patience=post_prune_patience,
     )
 
 
@@ -406,6 +483,13 @@ def _resolve_task_specs(
     feynman_width_mid: list[int],
     feynman_split_strategy: str,
     feynman_split_strategy_seed: int,
+    feynman_post_prune_steps: int | None,
+    feynman_post_prune_lr: float | None,
+    feynman_post_prune_lamb: float | None,
+    feynman_post_prune_eval_every: int | None,
+    feynman_post_prune_min_delta: float | None,
+    feynman_post_prune_patience: int | None,
+    feynman_fit_opt: str | None,
     feynman_max_datasets: int,
     feynman_dataset_select_seed: int,
     feynman_equations_csv: Path | None,
@@ -445,6 +529,13 @@ def _resolve_task_specs(
                 feynman_width_mid=feynman_width_mid,
                 feynman_split_strategy=feynman_split_strategy,
                 feynman_split_strategy_seed=feynman_split_strategy_seed,
+                feynman_post_prune_steps=feynman_post_prune_steps,
+                feynman_post_prune_lr=feynman_post_prune_lr,
+                feynman_post_prune_lamb=feynman_post_prune_lamb,
+                feynman_post_prune_eval_every=feynman_post_prune_eval_every,
+                feynman_post_prune_min_delta=feynman_post_prune_min_delta,
+                feynman_post_prune_patience=feynman_post_prune_patience,
+                feynman_fit_opt=feynman_fit_opt,
                 equations_map=equations_map,
                 equations_metadata_map=equations_metadata_map,
             )
@@ -473,6 +564,15 @@ def _resolve_task_specs(
         "equations_metadata_columns": equations_metadata_columns,
         "split_strategy": feynman_split_strategy,
         "split_strategy_seed": int(feynman_split_strategy_seed),
+        "post_prune_overrides": {
+            "steps": feynman_post_prune_steps,
+            "lr": feynman_post_prune_lr,
+            "lamb": feynman_post_prune_lamb,
+            "eval_every": feynman_post_prune_eval_every,
+            "min_delta": feynman_post_prune_min_delta,
+            "patience": feynman_post_prune_patience,
+        },
+        "fit_opt_override": feynman_fit_opt,
         "width_mid": feynman_width_mid,
         "max_datasets": int(feynman_max_datasets),
         "dataset_select_seed": int(feynman_dataset_select_seed),
@@ -562,6 +662,8 @@ def _train_teacher_model(
                     f"error={prune_fallback_exc!r}",
                     RuntimeWarning,
                 )
+        # prune() may return a model with auto_save/history enabled; disable it for benchmark tuning loops.
+        model.auto_save = False
         post_prune_steps = int(spec.teacher_post_prune_steps)
         if post_prune_steps > 0:
             post_prune_lr = float(spec.teacher_post_prune_lr)
@@ -888,6 +990,209 @@ def _build_skipped_symbolic_metrics(*, reason: str) -> dict[str, object]:
         "icbr_formula_error": f"skipped_by_teacher_quality_gate: {reason}",
     }
 
+
+def _build_legacy_metrics_from_variant_bundle(bundle: dict[str, object]) -> dict[str, object]:
+    baseline = bundle["baseline"]
+    variants = bundle["variants"]
+    comparisons = bundle["comparisons_vs_baseline"]
+    icbr = variants["icbr_full"]
+    cmp = comparisons["icbr_full"]
+    return {
+        "candidate_generation_wall_time_s": float(icbr["candidate_generation_wall_time_s"]),
+        "replay_rerank_wall_time_s": float(icbr["replay_rerank_wall_time_s"]),
+        "symbolic_wall_time_s": float(icbr["symbolic_wall_time_s"]),
+        "baseline_symbolic_wall_time_s": float(baseline["symbolic_wall_time_s"]),
+        "symbolic_wall_time_delta_s": float(cmp["symbolic_wall_time_delta_s"]),
+        "symbolic_speedup_vs_baseline": float(cmp["symbolic_speedup_vs_baseline"]),
+        "replay_imitation_gap": float(cmp["replay_imitation_gap"]),
+        "final_mse_loss_shift": float(cmp["final_mse_loss_shift"]),
+        "formula_validation_result": bool(cmp["formula_validation_result"]),
+        "baseline_formula_validation_result": bool(baseline["formula_validation_result"]),
+        "icbr_formula_validation_result": bool(icbr["formula_validation_result"]),
+        "baseline_formula_raw": list(baseline["formula_raw"]),
+        "baseline_formula_display": list(baseline["formula_display"]),
+        "icbr_formula_raw": list(icbr["formula_raw"]),
+        "icbr_formula_display": list(icbr["formula_display"]),
+        "baseline_formula_error": baseline["formula_error"],
+        "icbr_formula_error": icbr["formula_error"],
+        "baseline_mse": float(baseline["mse"]),
+        "icbr_mse": float(icbr["mse"]),
+        "teacher_target_mse": float(bundle["teacher_target_mse"]),
+        "teacher_target_r2": float(bundle["teacher_target_r2"]),
+        "baseline_target_mse": float(baseline["target_mse"]),
+        "baseline_target_r2": float(baseline["target_r2"]),
+        "icbr_target_mse": float(icbr["target_mse"]),
+        "icbr_target_r2": float(icbr["target_r2"]),
+        "symbolic_target_mse_shift": float(cmp["symbolic_target_mse_shift"]),
+        "symbolic_target_r2_shift": float(cmp["symbolic_target_r2_shift"]),
+    }
+
+
+def _build_variant_rows_for_task_seed(
+    *,
+    task: str,
+    seed: int,
+    variant_bundle: dict[str, object],
+    variants_requested: list[str],
+    teacher_quality_gate_pass: bool,
+    teacher_quality_gate_reason: str,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    baseline = variant_bundle["baseline"]
+    variants = variant_bundle["variants"]
+    comparisons = variant_bundle["comparisons_vs_baseline"]
+    baseline_row = {
+        "task": task,
+        "seed": seed,
+        "variant": "baseline",
+        "variant_requested": bool("baseline" in variants_requested),
+        "candidate_mode": "baseline",
+        "rerank_mode": "baseline",
+        "commit_mode": "baseline",
+        "teacher_quality_gate_pass": bool(teacher_quality_gate_pass),
+        "teacher_quality_gate_reason": teacher_quality_gate_reason,
+        "candidate_generation_wall_time_s": float("nan"),
+        "replay_rerank_wall_time_s": float("nan"),
+        "symbolic_wall_time_s": float(baseline["symbolic_wall_time_s"]),
+        "mse": float(baseline["mse"]),
+        "target_mse": float(baseline["target_mse"]),
+        "target_r2": float(baseline["target_r2"]),
+        "formula_validation_result": bool(baseline["formula_validation_result"]),
+        "formula_raw": list(baseline["formula_raw"]),
+        "formula_display": list(baseline["formula_display"]),
+        "formula_error": baseline["formula_error"],
+        "replay_rank_inversion_count": float("nan"),
+        "replay_rank_inversion_total": float("nan"),
+        "replay_rank_inversion_rate": float("nan"),
+        "commit_param_drift_l2_mean": float("nan"),
+        "commit_param_drift_l2_max": float("nan"),
+        "baseline_symbolic_wall_time_s": float(baseline["symbolic_wall_time_s"]),
+        "baseline_mse": float(baseline["mse"]),
+        "baseline_target_mse": float(baseline["target_mse"]),
+        "baseline_target_r2": float(baseline["target_r2"]),
+        "symbolic_wall_time_delta_s": 0.0,
+        "symbolic_speedup_vs_baseline": 1.0,
+        "final_mse_loss_shift": 0.0,
+        "symbolic_target_mse_shift": 0.0,
+        "symbolic_target_r2_shift": 0.0,
+    }
+    rows.append(baseline_row)
+    for variant_name, variant in variants.items():
+        cmp = comparisons.get(variant_name, {})
+        rows.append(
+            {
+                "task": task,
+                "seed": seed,
+                "variant": variant_name,
+                "variant_requested": bool(variant_name in variants_requested),
+                "candidate_mode": variant.get("candidate_mode"),
+                "rerank_mode": variant.get("rerank_mode"),
+                "commit_mode": variant.get("commit_mode"),
+                "teacher_quality_gate_pass": bool(teacher_quality_gate_pass),
+                "teacher_quality_gate_reason": teacher_quality_gate_reason,
+                "candidate_generation_wall_time_s": float(variant["candidate_generation_wall_time_s"]),
+                "replay_rerank_wall_time_s": float(variant["replay_rerank_wall_time_s"]),
+                "symbolic_wall_time_s": float(variant["symbolic_wall_time_s"]),
+                "mse": float(variant["mse"]),
+                "target_mse": float(variant["target_mse"]),
+                "target_r2": float(variant["target_r2"]),
+                "formula_validation_result": bool(variant["formula_validation_result"]),
+                "formula_raw": list(variant["formula_raw"]),
+                "formula_display": list(variant["formula_display"]),
+                "formula_error": variant["formula_error"],
+                "replay_rank_inversion_count": int(variant["replay_rank_inversion_count"]),
+                "replay_rank_inversion_total": int(variant["replay_rank_inversion_total"]),
+                "replay_rank_inversion_rate": float(variant["replay_rank_inversion_rate"]),
+                "commit_param_drift_l2_mean": float(variant["commit_param_drift_l2_mean"]),
+                "commit_param_drift_l2_max": float(variant["commit_param_drift_l2_max"]),
+                "baseline_symbolic_wall_time_s": float(baseline["symbolic_wall_time_s"]),
+                "baseline_mse": float(baseline["mse"]),
+                "baseline_target_mse": float(baseline["target_mse"]),
+                "baseline_target_r2": float(baseline["target_r2"]),
+                "symbolic_wall_time_delta_s": float(cmp.get("symbolic_wall_time_delta_s", float("nan"))),
+                "symbolic_speedup_vs_baseline": float(cmp.get("symbolic_speedup_vs_baseline", float("nan"))),
+                "final_mse_loss_shift": float(cmp.get("final_mse_loss_shift", float("nan"))),
+                "symbolic_target_mse_shift": float(cmp.get("symbolic_target_mse_shift", float("nan"))),
+                "symbolic_target_r2_shift": float(cmp.get("symbolic_target_r2_shift", float("nan"))),
+            }
+        )
+    return rows
+
+
+def _build_skipped_variant_rows_for_task_seed(
+    *,
+    task: str,
+    seed: int,
+    variants_requested: list[str],
+    reason: str,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for variant_name in variants_requested:
+        rows.append(
+            {
+                "task": task,
+                "seed": seed,
+                "variant": variant_name,
+                "variant_requested": True,
+                "candidate_mode": "skipped_by_teacher_quality_gate",
+                "rerank_mode": "skipped_by_teacher_quality_gate",
+                "commit_mode": "skipped_by_teacher_quality_gate",
+                "teacher_quality_gate_pass": False,
+                "teacher_quality_gate_reason": reason,
+                "candidate_generation_wall_time_s": float("nan"),
+                "replay_rerank_wall_time_s": float("nan"),
+                "symbolic_wall_time_s": float("nan"),
+                "mse": float("nan"),
+                "target_mse": float("nan"),
+                "target_r2": float("nan"),
+                "formula_validation_result": False,
+                "formula_raw": [],
+                "formula_display": [],
+                "formula_error": f"skipped_by_teacher_quality_gate: {reason}",
+                "replay_rank_inversion_count": float("nan"),
+                "replay_rank_inversion_total": float("nan"),
+                "replay_rank_inversion_rate": float("nan"),
+                "commit_param_drift_l2_mean": float("nan"),
+                "commit_param_drift_l2_max": float("nan"),
+                "baseline_symbolic_wall_time_s": float("nan"),
+                "baseline_mse": float("nan"),
+                "baseline_target_mse": float("nan"),
+                "baseline_target_r2": float("nan"),
+                "symbolic_wall_time_delta_s": float("nan"),
+                "symbolic_speedup_vs_baseline": float("nan"),
+                "final_mse_loss_shift": float("nan"),
+                "symbolic_target_mse_shift": float("nan"),
+                "symbolic_target_r2_shift": float("nan"),
+            }
+        )
+    return rows
+
+
+def _build_variant_metric_stats(rows: list[dict[str, object]]) -> dict[str, dict[str, float]]:
+    stats: dict[str, dict[str, float]] = {}
+    for metric in _VARIANT_NUMERIC_METRICS:
+        values: list[float] = []
+        for row in rows:
+            value = float(row[metric])
+            if math.isfinite(value):
+                values.append(value)
+        stats[metric] = _describe(values)
+    for metric in _VARIANT_BOOLEAN_METRICS:
+        values = [1.0 if bool(row[metric]) else 0.0 for row in rows]
+        stats[metric] = _describe(values)
+    return stats
+
+
+def _build_challenge_evidence_stats(rows: list[dict[str, object]]) -> dict[str, dict[str, float]]:
+    stats: dict[str, dict[str, float]] = {}
+    for metric in _CHALLENGE_EVIDENCE_METRICS:
+        values: list[float] = []
+        for row in rows:
+            value = float(row[metric])
+            if math.isfinite(value):
+                values.append(value)
+        stats[metric] = _describe(values)
+    return stats
 
 def _describe(values: list[float]) -> dict[str, float]:
     if not values:
@@ -1240,9 +1545,20 @@ def run_benchmark(
     feynman_equations_csv: Path | None = None,
     feynman_split_strategy: str = "random",
     feynman_split_strategy_seed: int = 1,
+    feynman_post_prune_steps: int | None = None,
+    feynman_post_prune_lr: float | None = None,
+    feynman_post_prune_lamb: float | None = None,
+    feynman_post_prune_eval_every: int | None = None,
+    feynman_post_prune_min_delta: float | None = None,
+    feynman_post_prune_patience: int | None = None,
+    feynman_fit_opt: str | None = None,
     feynman_width_mid: list[int] | None = None,
     feynman_max_datasets: int = 10,
     feynman_dataset_select_seed: int = 1,
+    variants: list[str] | None = None,
+    enable_teacher_prune: bool | None = None,
+    teacher_prune_node_th: float = 1e-2,
+    teacher_prune_edge_th: float = 1e-2,
     make_plots: bool,
     quiet: bool,
 ) -> dict[str, object]:
@@ -1252,6 +1568,8 @@ def run_benchmark(
         raise ValueError(f"Unsupported feynman split strategy: {feynman_split_strategy}")
     if int(feynman_split_strategy_seed) < 0:
         raise ValueError("feynman_split_strategy_seed must be >= 0.")
+    if feynman_fit_opt is not None and feynman_fit_opt not in _FEYNMAN_FIT_OPTS:
+        raise ValueError(f"Unsupported feynman_fit_opt: {feynman_fit_opt}")
     if feynman_width_mid is None:
         feynman_width_mid = [5, 2]
 
@@ -1262,13 +1580,36 @@ def run_benchmark(
         feynman_width_mid=feynman_width_mid,
         feynman_split_strategy=feynman_split_strategy,
         feynman_split_strategy_seed=int(feynman_split_strategy_seed),
+        feynman_post_prune_steps=feynman_post_prune_steps,
+        feynman_post_prune_lr=feynman_post_prune_lr,
+        feynman_post_prune_lamb=feynman_post_prune_lamb,
+        feynman_post_prune_eval_every=feynman_post_prune_eval_every,
+        feynman_post_prune_min_delta=feynman_post_prune_min_delta,
+        feynman_post_prune_patience=feynman_post_prune_patience,
+        feynman_fit_opt=feynman_fit_opt,
         feynman_max_datasets=feynman_max_datasets,
         feynman_dataset_select_seed=feynman_dataset_select_seed,
         feynman_equations_csv=feynman_equations_csv,
     )
+    effective_variants = _normalize_variants(",".join(variants) if variants is not None else None)
+    effective_enable_teacher_prune = bool(enable_teacher_prune) if enable_teacher_prune is not None else (profile_name == "quality")
+    for task_name in resolved_tasks:
+        spec = specs[task_name]
+        if spec.dataset_kind == "feynman_file":
+            continue
+        if not effective_enable_teacher_prune:
+            continue
+        specs[task_name] = replace(
+            spec,
+            teacher_post_train_prune=True,
+            teacher_prune_node_th=float(teacher_prune_node_th),
+            teacher_prune_edge_th=float(teacher_prune_edge_th),
+        )
+    feynman_config["benchmark_variants"] = list(effective_variants)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, object]] = []
+    variant_rows: list[dict[str, object]] = []
 
     for task_name in resolved_tasks:
         spec = specs[task_name]
@@ -1314,7 +1655,7 @@ def run_benchmark(
             )
 
             if teacher_quality_gate_pass:
-                metrics = benchmark_icbr_vs_baseline(
+                variant_bundle = benchmark_symbolic_variants(
                     model,
                     calibration_split={
                         "test_input": dataset["test_input"],
@@ -1327,9 +1668,46 @@ def run_benchmark(
                     b_range=(-5.0, 5.0),
                     grid_number=grid_number,
                     iteration=iteration,
+                    variants=effective_variants,
                 )
+                metrics = _build_legacy_metrics_from_variant_bundle(variant_bundle)
+                variant_rows.extend(
+                    _build_variant_rows_for_task_seed(
+                        task=task_name,
+                        seed=seed,
+                        variant_bundle=variant_bundle,
+                        variants_requested=effective_variants,
+                        teacher_quality_gate_pass=teacher_quality_gate_pass,
+                        teacher_quality_gate_reason=teacher_quality_gate_reason,
+                    )
+                )
+                challenge_evidence = dict(variant_bundle.get("challenge_evidence", {}))
             else:
                 metrics = _build_skipped_symbolic_metrics(reason=teacher_quality_gate_reason)
+                variant_rows.extend(
+                    _build_skipped_variant_rows_for_task_seed(
+                        task=task_name,
+                        seed=seed,
+                        variants_requested=effective_variants,
+                        reason=teacher_quality_gate_reason,
+                    )
+                )
+                challenge_evidence = {
+                    "shared_tensor": {
+                        "candidate_time_ratio_no_shared_vs_full": float("nan"),
+                        "symbolic_time_ratio_no_shared_vs_full": float("nan"),
+                    },
+                    "contextual_replay": {
+                        "mse_gain_full_vs_no_replay": float("nan"),
+                        "target_mse_gain_full_vs_no_replay": float("nan"),
+                        "replay_rank_inversion_rate_full": float("nan"),
+                    },
+                    "explicit_commit": {
+                        "mse_gain_explicit_vs_refit": float("nan"),
+                        "target_mse_gain_explicit_vs_refit": float("nan"),
+                        "refit_commit_param_drift_l2_mean": float("nan"),
+                    },
+                }
             row = {
                 "task": task_name,
                 "seed": seed,
@@ -1356,6 +1734,30 @@ def run_benchmark(
                 "teacher_cache_path": str(cache_info["teacher_cache_path"]),
                 "teacher_cache_mode": str(cache_info["teacher_cache_mode"]),
                 "teacher_cache_status": str(cache_info["teacher_cache_status"]),
+                "shared_tensor_candidate_time_ratio_no_shared_vs_full": float(
+                    challenge_evidence["shared_tensor"]["candidate_time_ratio_no_shared_vs_full"]
+                ),
+                "shared_tensor_symbolic_time_ratio_no_shared_vs_full": float(
+                    challenge_evidence["shared_tensor"]["symbolic_time_ratio_no_shared_vs_full"]
+                ),
+                "contextual_replay_mse_gain_full_vs_no_replay": float(
+                    challenge_evidence["contextual_replay"]["mse_gain_full_vs_no_replay"]
+                ),
+                "contextual_replay_target_mse_gain_full_vs_no_replay": float(
+                    challenge_evidence["contextual_replay"]["target_mse_gain_full_vs_no_replay"]
+                ),
+                "contextual_replay_rank_inversion_rate_full": float(
+                    challenge_evidence["contextual_replay"]["replay_rank_inversion_rate_full"]
+                ),
+                "explicit_commit_mse_gain_explicit_vs_refit": float(
+                    challenge_evidence["explicit_commit"]["mse_gain_explicit_vs_refit"]
+                ),
+                "explicit_commit_target_mse_gain_explicit_vs_refit": float(
+                    challenge_evidence["explicit_commit"]["target_mse_gain_explicit_vs_refit"]
+                ),
+                "explicit_commit_refit_commit_param_drift_l2_mean": float(
+                    challenge_evidence["explicit_commit"]["refit_commit_param_drift_l2_mean"]
+                ),
                 **metrics,
             }
             rows.append(row)
@@ -1406,6 +1808,14 @@ def run_benchmark(
         "teacher_cache_path",
         "teacher_cache_mode",
         "teacher_cache_status",
+        "shared_tensor_candidate_time_ratio_no_shared_vs_full",
+        "shared_tensor_symbolic_time_ratio_no_shared_vs_full",
+        "contextual_replay_mse_gain_full_vs_no_replay",
+        "contextual_replay_target_mse_gain_full_vs_no_replay",
+        "contextual_replay_rank_inversion_rate_full",
+        "explicit_commit_mse_gain_explicit_vs_refit",
+        "explicit_commit_target_mse_gain_explicit_vs_refit",
+        "explicit_commit_refit_commit_param_drift_l2_mean",
         "candidate_generation_wall_time_s",
         "replay_rerank_wall_time_s",
         "symbolic_wall_time_s",
@@ -1465,6 +1875,30 @@ def run_benchmark(
                     "teacher_cache_path": row["teacher_cache_path"],
                     "teacher_cache_mode": row["teacher_cache_mode"],
                     "teacher_cache_status": row["teacher_cache_status"],
+                    "shared_tensor_candidate_time_ratio_no_shared_vs_full": row[
+                        "shared_tensor_candidate_time_ratio_no_shared_vs_full"
+                    ],
+                    "shared_tensor_symbolic_time_ratio_no_shared_vs_full": row[
+                        "shared_tensor_symbolic_time_ratio_no_shared_vs_full"
+                    ],
+                    "contextual_replay_mse_gain_full_vs_no_replay": row[
+                        "contextual_replay_mse_gain_full_vs_no_replay"
+                    ],
+                    "contextual_replay_target_mse_gain_full_vs_no_replay": row[
+                        "contextual_replay_target_mse_gain_full_vs_no_replay"
+                    ],
+                    "contextual_replay_rank_inversion_rate_full": row[
+                        "contextual_replay_rank_inversion_rate_full"
+                    ],
+                    "explicit_commit_mse_gain_explicit_vs_refit": row[
+                        "explicit_commit_mse_gain_explicit_vs_refit"
+                    ],
+                    "explicit_commit_target_mse_gain_explicit_vs_refit": row[
+                        "explicit_commit_target_mse_gain_explicit_vs_refit"
+                    ],
+                    "explicit_commit_refit_commit_param_drift_l2_mean": row[
+                        "explicit_commit_refit_commit_param_drift_l2_mean"
+                    ],
                     "candidate_generation_wall_time_s": row["candidate_generation_wall_time_s"],
                     "replay_rerank_wall_time_s": row["replay_rerank_wall_time_s"],
                     "symbolic_wall_time_s": row["symbolic_wall_time_s"],
@@ -1495,13 +1929,93 @@ def run_benchmark(
                 }
             )
 
+    variant_rows_csv = output_dir / "icbr_benchmark_variant_rows.csv"
+    variant_row_fieldnames = [
+        "task",
+        "seed",
+        "variant",
+        "variant_requested",
+        "candidate_mode",
+        "rerank_mode",
+        "commit_mode",
+        "teacher_quality_gate_pass",
+        "teacher_quality_gate_reason",
+        "candidate_generation_wall_time_s",
+        "replay_rerank_wall_time_s",
+        "symbolic_wall_time_s",
+        "mse",
+        "target_mse",
+        "target_r2",
+        "formula_validation_result",
+        "formula_error",
+        "formula_raw",
+        "formula_display",
+        "replay_rank_inversion_count",
+        "replay_rank_inversion_total",
+        "replay_rank_inversion_rate",
+        "commit_param_drift_l2_mean",
+        "commit_param_drift_l2_max",
+        "baseline_symbolic_wall_time_s",
+        "baseline_mse",
+        "baseline_target_mse",
+        "baseline_target_r2",
+        "symbolic_wall_time_delta_s",
+        "symbolic_speedup_vs_baseline",
+        "final_mse_loss_shift",
+        "symbolic_target_mse_shift",
+        "symbolic_target_r2_shift",
+    ]
+    with variant_rows_csv.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=variant_row_fieldnames)
+        writer.writeheader()
+        for row in variant_rows:
+            serialized_row = {name: row.get(name, "") for name in variant_row_fieldnames}
+            serialized_row["formula_raw"] = _serialize_formula_list(list(row.get("formula_raw", [])))
+            serialized_row["formula_display"] = _serialize_formula_list(list(row.get("formula_display", [])))
+            writer.writerow(serialized_row)
+
     by_task_rows = {task_name: [row for row in rows if row["task"] == task_name] for task_name in resolved_tasks}
     by_task_metrics = {task_name: _build_metric_stats(task_rows) for task_name, task_rows in by_task_rows.items()}
     overall_metrics = _build_metric_stats(rows)
+    challenge_evidence_overall = _build_challenge_evidence_stats(rows)
+    challenge_evidence_by_task = {
+        task_name: _build_challenge_evidence_stats(task_rows)
+        for task_name, task_rows in by_task_rows.items()
+    }
     by_task_significance = {
         task_name: _build_significance(task_rows, task_label=task_name) for task_name, task_rows in by_task_rows.items()
     }
     overall_significance = _build_significance(rows, task_label="__overall__")
+
+    variant_by_task = {task_name: [row for row in variant_rows if row["task"] == task_name] for task_name in resolved_tasks}
+    variant_overall_rows_by_variant = {
+        variant_name: [row for row in variant_rows if row["variant"] == variant_name]
+        for variant_name in effective_variants
+    }
+    variant_by_task_rows_by_variant = {
+        task_name: {
+            variant_name: [row for row in variant_by_task[task_name] if row["variant"] == variant_name]
+            for variant_name in effective_variants
+        }
+        for task_name in resolved_tasks
+    }
+    variant_overall_stats = {
+        variant_name: {
+            "row_count": len(variant_overall_rows_by_variant[variant_name]),
+            "metrics": _build_variant_metric_stats(variant_overall_rows_by_variant[variant_name]),
+        }
+        for variant_name in effective_variants
+    }
+    variant_task_stats = {
+        task_name: {
+            variant_name: {
+                "row_count": len(variant_by_task_rows_by_variant[task_name][variant_name]),
+                "metrics": _build_variant_metric_stats(variant_by_task_rows_by_variant[task_name][variant_name]),
+            }
+            for variant_name in effective_variants
+        }
+        for task_name in resolved_tasks
+    }
 
     task_stats_rows = _build_task_stats_rows(
         tasks=resolved_tasks,
@@ -1542,6 +2056,13 @@ def run_benchmark(
             "topk": topk,
             "grid_number": grid_number,
             "iteration": iteration,
+            "variants": list(effective_variants),
+            "teacher_prune_policy": {
+                "enabled": bool(effective_enable_teacher_prune),
+                "default_rule": "enabled_by_default_when_profile_is_quality",
+                "node_th": float(teacher_prune_node_th),
+                "edge_th": float(teacher_prune_edge_th),
+            },
             "teacher_quality_gate": {
                 "enabled": True,
                 "teacher_max_test_mse_default": float(teacher_max_test_mse),
@@ -1615,9 +2136,18 @@ def run_benchmark(
                 }
                 for task_name in resolved_tasks
             },
+            "challenge_evidence": {
+                "overall": challenge_evidence_overall,
+                "by_task": challenge_evidence_by_task,
+            },
+            "variant_ablation": {
+                "overall": variant_overall_stats,
+                "by_task": variant_task_stats,
+            },
         },
         "artifacts": {
             "rows_csv": str(rows_csv),
+            "variant_rows_csv": str(variant_rows_csv),
             "task_stats_csv": str(task_stats_csv),
             "significance_csv": str(significance_csv),
             "visualizations": visualization,
@@ -1631,11 +2161,24 @@ def run_benchmark(
                 "teacher_cache_hit": "Whether teacher model was loaded from persistent cache.",
                 "symbolic_target_mse_shift": "icbr_target_mse - baseline_target_mse; negative means ICBR is closer to real targets.",
                 "symbolic_target_r2_shift": "icbr_target_r2 - baseline_target_r2; positive means ICBR has higher target R2.",
+                "shared_tensor_candidate_time_ratio_no_shared_vs_full": "Q1 evidence: icbr_no_shared candidate time / icbr_full candidate time; >1 suggests shared tensor helps.",
+                "shared_tensor_symbolic_time_ratio_no_shared_vs_full": "Q1 evidence: icbr_no_shared total symbolic time / icbr_full total symbolic time.",
+                "contextual_replay_mse_gain_full_vs_no_replay": "Q2 evidence: icbr_no_replay mse - icbr_full mse; >0 suggests replay rerank improves imitation error.",
+                "contextual_replay_rank_inversion_rate_full": "Q2 evidence: fraction of edges where replay-selected candidate differs from local top-1 in icbr_full.",
+                "explicit_commit_mse_gain_explicit_vs_refit": "Q3 evidence: icbr_refit_commit mse - icbr_full mse; >0 suggests explicit commit avoids refit drift.",
+                "explicit_commit_refit_commit_param_drift_l2_mean": "Q3 evidence: mean L2 drift between selected params and refit params under icbr_refit_commit.",
                 "stats_schema": "Each metric includes count | mean | median | std | min | max",
             },
             "significance_guide": {
                 "sign_test_pvalue_two_sided": "Two-sided sign test p-value on non-tie seeds.",
                 "mean_delta_ci95": "Bootstrap 95% CI of mean delta across seeds.",
+            },
+            "variant_ablation_guide": {
+                "baseline": "MultKAN.auto_symbolic() baseline.",
+                "icbr_full": "ICBR with shared candidate evaluation + replay rerank + explicit commit.",
+                "icbr_no_replay": "ICBR with local-r2 rerank (replay disabled).",
+                "icbr_no_shared": "ICBR with per-edge serial candidate generation (shared batching disabled).",
+                "icbr_refit_commit": "ICBR with refit commit path (explicit commit disabled).",
             },
             "teacher_quality_gate": {
                 "pass_rule": "teacher_test_mse <= threshold_mse AND teacher_test_r2 >= threshold_r2",
@@ -1651,7 +2194,7 @@ def run_benchmark(
                 },
             },
             "teacher_training": {
-                "feynman_reference_policy": "For feynman_file tasks: train -> prune(node_th=1e-2, edge_th=1e-2) -> refit(steps=100, lr=1e-3, lamb=1e-2, early_stop_check_every=5) -> cache.",
+                "feynman_reference_policy": "For feynman_file tasks: train(opt=Adam by default; override via --feynman-fit-opt) -> prune(node_th=1e-2, edge_th=1e-2) -> refit(steps=100, lr=1e-3, lamb=1e-2, early_stop_check_every=5) -> cache.",
             },
             "extensibility": [
                 "Add new tasks in the resolver layer (core task specs or feynman token expansion).",
@@ -1676,6 +2219,10 @@ def run_benchmark(
         f"- Train steps: {train_steps}, lr: {lr}, lamb: {lamb}",
         f"- Teacher cache: mode={teacher_cache_mode}, dir={teacher_cache_dir}, version={teacher_cache_version}",
         f"- ICBR shortlist topk: {topk}, grid_number: {grid_number}, iteration: {iteration}",
+        f"- Variants: {', '.join(summary['config']['variants'])}",
+        f"- Teacher prune policy: enabled={summary['config']['teacher_prune_policy']['enabled']}, "
+        f"node_th={summary['config']['teacher_prune_policy']['node_th']}, "
+        f"edge_th={summary['config']['teacher_prune_policy']['edge_th']}",
     ]
     if bool(summary["config"]["feynman"]["enabled"]):
         md_lines.append(
@@ -1745,6 +2292,73 @@ def run_benchmark(
                 + f"{metric_sig['sign_test_pvalue_two_sided']:.6f} | "
                 + f"[{float(ci[0]):.6e}, {float(ci[1]):.6e}] |"
             )
+    md_lines.append("")
+
+    md_lines.extend(
+        [
+            "## Variant Ablation Aggregate Stats (Stage 15)",
+            "",
+            "| task | variant | n | teacher_gate_pass_mean | formula_pass_mean | symbolic_mean_s | speedup_mean_x | mse_shift_mean | target_mse_shift_mean | replay_rank_inversion_mean | refit_drift_l2_mean |",
+            "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for task_name in resolved_tasks:
+        task_variants = summary["aggregates"]["variant_ablation"]["by_task"][task_name]
+        for variant_name in summary["config"]["variants"]:
+            variant_item = task_variants[variant_name]
+            metrics = variant_item["metrics"]
+            md_lines.append(
+                "| "
+                + f"{task_name} | "
+                + f"{variant_name} | "
+                + f"{variant_item['row_count']} | "
+                + f"{metrics['teacher_quality_gate_pass']['mean']:.4f} | "
+                + f"{metrics['formula_validation_result']['mean']:.4f} | "
+                + f"{metrics['symbolic_wall_time_s']['mean']:.6f} | "
+                + f"{metrics['symbolic_speedup_vs_baseline']['mean']:.4f} | "
+                + f"{metrics['final_mse_loss_shift']['mean']:.6e} | "
+                + f"{metrics['symbolic_target_mse_shift']['mean']:.6e} | "
+                + f"{metrics['replay_rank_inversion_rate']['mean']:.6f} | "
+                + f"{metrics['commit_param_drift_l2_mean']['mean']:.6e} |"
+            )
+    md_lines.append("")
+
+    md_lines.extend(
+        [
+            "## Critique Evidence Summary (Q1/Q2/Q3)",
+            "",
+            "| task | n | q1_candidate_ratio_mean | q1_symbolic_ratio_mean | q2_mse_gain_mean | q2_target_mse_gain_mean | q2_rank_inversion_mean | q3_mse_gain_mean | q3_target_mse_gain_mean | q3_refit_drift_mean |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    overall_evidence = summary["aggregates"]["challenge_evidence"]["overall"]
+    md_lines.append(
+        "| __overall__ | "
+        + f"{int(overall_evidence['shared_tensor_candidate_time_ratio_no_shared_vs_full']['count'])} | "
+        + f"{overall_evidence['shared_tensor_candidate_time_ratio_no_shared_vs_full']['mean']:.6f} | "
+        + f"{overall_evidence['shared_tensor_symbolic_time_ratio_no_shared_vs_full']['mean']:.6f} | "
+        + f"{overall_evidence['contextual_replay_mse_gain_full_vs_no_replay']['mean']:.6e} | "
+        + f"{overall_evidence['contextual_replay_target_mse_gain_full_vs_no_replay']['mean']:.6e} | "
+        + f"{overall_evidence['contextual_replay_rank_inversion_rate_full']['mean']:.6f} | "
+        + f"{overall_evidence['explicit_commit_mse_gain_explicit_vs_refit']['mean']:.6e} | "
+        + f"{overall_evidence['explicit_commit_target_mse_gain_explicit_vs_refit']['mean']:.6e} | "
+        + f"{overall_evidence['explicit_commit_refit_commit_param_drift_l2_mean']['mean']:.6e} |"
+    )
+    for task_name in resolved_tasks:
+        task_evidence = summary["aggregates"]["challenge_evidence"]["by_task"][task_name]
+        md_lines.append(
+            "| "
+            + f"{task_name} | "
+            + f"{int(task_evidence['shared_tensor_candidate_time_ratio_no_shared_vs_full']['count'])} | "
+            + f"{task_evidence['shared_tensor_candidate_time_ratio_no_shared_vs_full']['mean']:.6f} | "
+            + f"{task_evidence['shared_tensor_symbolic_time_ratio_no_shared_vs_full']['mean']:.6f} | "
+            + f"{task_evidence['contextual_replay_mse_gain_full_vs_no_replay']['mean']:.6e} | "
+            + f"{task_evidence['contextual_replay_target_mse_gain_full_vs_no_replay']['mean']:.6e} | "
+            + f"{task_evidence['contextual_replay_rank_inversion_rate_full']['mean']:.6f} | "
+            + f"{task_evidence['explicit_commit_mse_gain_explicit_vs_refit']['mean']:.6e} | "
+            + f"{task_evidence['explicit_commit_target_mse_gain_explicit_vs_refit']['mean']:.6e} | "
+            + f"{task_evidence['explicit_commit_refit_commit_param_drift_l2_mean']['mean']:.6e} |"
+        )
     md_lines.append("")
 
     md_lines.extend(
@@ -1859,7 +2473,12 @@ def run_benchmark(
     )
     (output_dir / "icbr_benchmark_summary.md").write_text("\n".join(md_lines) + "\n", encoding="utf-8")
 
-    return {"rows": rows, "summary": summary, "output_dir": str(output_dir)}
+    return {
+        "rows": rows,
+        "variant_rows": variant_rows,
+        "summary": summary,
+        "output_dir": str(output_dir),
+    }
 
 
 def _parse_int_list(text: str) -> list[int]:
@@ -1874,6 +2493,26 @@ def _parse_str_list(text: str) -> list[str]:
     if not values:
         raise ValueError("Expected at least one task.")
     return values
+
+
+def _normalize_variants(variants_raw: str | None) -> list[str]:
+    if variants_raw is None:
+        return ["baseline", "icbr_full"]
+    parsed = _parse_str_list(variants_raw)
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for variant in parsed:
+        if variant not in _BENCHMARK_VARIANTS:
+            raise ValueError(f"Unknown benchmark variant: {variant}")
+        if variant in seen:
+            continue
+        seen.add(variant)
+        deduped.append(variant)
+    if "baseline" not in seen:
+        deduped.insert(0, "baseline")
+    if "icbr_full" not in seen:
+        deduped.append("icbr_full")
+    return deduped
 
 
 def _resolve_default_tasks_and_seeds(
@@ -2003,6 +2642,48 @@ def main(argv: list[str] | None = None) -> None:
         help="Comma-separated hidden widths used for feynman tasks, e.g. 5,2 -> width=[n_var,5,2,1].",
     )
     parser.add_argument(
+        "--feynman-post-prune-steps",
+        type=int,
+        default=None,
+        help="Optional override for Feynman post-prune refit steps.",
+    )
+    parser.add_argument(
+        "--feynman-post-prune-lr",
+        type=float,
+        default=None,
+        help="Optional override for Feynman post-prune refit learning rate.",
+    )
+    parser.add_argument(
+        "--feynman-post-prune-lamb",
+        type=float,
+        default=None,
+        help="Optional override for Feynman post-prune refit lamb.",
+    )
+    parser.add_argument(
+        "--feynman-post-prune-eval-every",
+        type=int,
+        default=None,
+        help="Optional override for Feynman post-prune early-stop eval cadence.",
+    )
+    parser.add_argument(
+        "--feynman-post-prune-min-delta",
+        type=float,
+        default=None,
+        help="Optional override for Feynman post-prune early-stop min delta.",
+    )
+    parser.add_argument(
+        "--feynman-post-prune-patience",
+        type=int,
+        default=None,
+        help="Optional override for Feynman post-prune early-stop patience.",
+    )
+    parser.add_argument(
+        "--feynman-fit-opt",
+        default=None,
+        choices=list(_FEYNMAN_FIT_OPTS),
+        help="Optional override for Feynman teacher optimizer (Adam or LBFGS).",
+    )
+    parser.add_argument(
         "--seeds",
         default=None,
         help="Comma-separated integer seeds. If omitted, profile-dependent defaults are used.",
@@ -2016,6 +2697,38 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--topk", type=int, default=3, help="Replay shortlist size")
     parser.add_argument("--grid-number", type=int, default=21, help="Grid size for (a,b) search")
     parser.add_argument("--iteration", type=int, default=2, help="Zoom iterations for (a,b) search")
+    parser.add_argument(
+        "--variants",
+        default=None,
+        help=(
+            "Comma-separated benchmark variants. Supported: "
+            "baseline,icbr_full,icbr_no_replay,icbr_no_shared,icbr_refit_commit. "
+            "baseline/icbr_full will be auto-included if omitted."
+        ),
+    )
+    prune_group = parser.add_mutually_exclusive_group()
+    prune_group.add_argument(
+        "--enable-teacher-prune",
+        action="store_true",
+        help="Force-enable post-train prune for synthetic teacher tasks.",
+    )
+    prune_group.add_argument(
+        "--disable-teacher-prune",
+        action="store_true",
+        help="Force-disable post-train prune for synthetic teacher tasks.",
+    )
+    parser.add_argument(
+        "--teacher-prune-node-th",
+        type=float,
+        default=1e-2,
+        help="Synthetic teacher prune node threshold when prune is enabled.",
+    )
+    parser.add_argument(
+        "--teacher-prune-edge-th",
+        type=float,
+        default=1e-2,
+        help="Synthetic teacher prune edge threshold when prune is enabled.",
+    )
     parser.add_argument(
         "--teacher-max-test-mse",
         type=float,
@@ -2068,6 +2781,12 @@ def main(argv: list[str] | None = None) -> None:
         lr=args.lr,
         lamb=args.lamb,
     )
+    variants = _normalize_variants(args.variants)
+    enable_teacher_prune: bool | None = None
+    if args.enable_teacher_prune:
+        enable_teacher_prune = True
+    elif args.disable_teacher_prune:
+        enable_teacher_prune = False
 
     run_benchmark(
         tasks=tasks,
@@ -2094,9 +2813,20 @@ def main(argv: list[str] | None = None) -> None:
         feynman_equations_csv=feynman_equations_csv,
         feynman_split_strategy=args.feynman_split_strategy,
         feynman_split_strategy_seed=args.feynman_split_strategy_seed,
+        feynman_post_prune_steps=args.feynman_post_prune_steps,
+        feynman_post_prune_lr=args.feynman_post_prune_lr,
+        feynman_post_prune_lamb=args.feynman_post_prune_lamb,
+        feynman_post_prune_eval_every=args.feynman_post_prune_eval_every,
+        feynman_post_prune_min_delta=args.feynman_post_prune_min_delta,
+        feynman_post_prune_patience=args.feynman_post_prune_patience,
+        feynman_fit_opt=args.feynman_fit_opt,
         feynman_width_mid=feynman_width_mid,
         feynman_max_datasets=args.feynman_max_datasets,
         feynman_dataset_select_seed=args.feynman_dataset_select_seed,
+        variants=variants,
+        enable_teacher_prune=enable_teacher_prune,
+        teacher_prune_node_th=args.teacher_prune_node_th,
+        teacher_prune_edge_th=args.teacher_prune_edge_th,
         make_plots=not args.no_plots,
         quiet=args.quiet,
     )

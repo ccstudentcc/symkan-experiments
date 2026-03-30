@@ -5,7 +5,7 @@ import math
 import torch
 
 from kan.MultKAN import MultKAN
-from kan.icbr import benchmark_icbr_vs_baseline
+from kan.icbr import benchmark_icbr_vs_baseline, benchmark_symbolic_variants
 
 
 def test_icbr_benchmark_smoke_reports_core_metrics() -> None:
@@ -55,3 +55,38 @@ def test_icbr_benchmark_smoke_reports_core_metrics() -> None:
     assert isinstance(metrics["baseline_formula_display"], list)
     assert isinstance(metrics["icbr_formula_raw"], list)
     assert isinstance(metrics["icbr_formula_display"], list)
+
+
+def test_benchmark_symbolic_variants_reports_challenge_evidence() -> None:
+    torch.manual_seed(0)
+    model = MultKAN(width=[1, 1], grid=5, k=3, auto_save=False)
+    calibration_input = torch.linspace(-1.0, 1.0, steps=24).unsqueeze(1)
+    calibration_target = torch.sin(torch.pi * calibration_input)
+
+    bundle = benchmark_symbolic_variants(
+        model,
+        calibration_split=calibration_input,
+        calibration_target=calibration_target,
+        lib=["x", "x^2"],
+        topk=2,
+        a_range=(-2.0, 2.0),
+        b_range=(-2.0, 2.0),
+        grid_number=11,
+        iteration=1,
+        variants=["baseline", "icbr_full", "icbr_no_replay", "icbr_no_shared", "icbr_refit_commit"],
+    )
+
+    assert bundle["variants_requested"] == [
+        "baseline",
+        "icbr_full",
+        "icbr_no_replay",
+        "icbr_no_shared",
+        "icbr_refit_commit",
+    ]
+    assert "challenge_evidence" in bundle
+    assert "shared_tensor" in bundle["challenge_evidence"]
+    assert "contextual_replay" in bundle["challenge_evidence"]
+    assert "explicit_commit" in bundle["challenge_evidence"]
+    assert "icbr_no_replay" in bundle["variants"]
+    assert "icbr_no_shared" in bundle["variants"]
+    assert "icbr_refit_commit" in bundle["variants"]
