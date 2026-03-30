@@ -982,6 +982,128 @@ Status:
 
 Complete
 
+### Stage 16: Quality 4-Task Ablation 10-Seed Extension Validation
+
+Goal:
+
+将 Stage 15 的四任务多变体质量消融基准从 `2 seeds` 扩展到 `10 seeds`，并完成可复查产物沉淀。
+
+Target Files:
+
+- `scripts/icbr_benchmark.py`
+- `IMPLEMENTATION_PLAN.md`
+- `TASK_STATUS.md`
+- `outputs/icbr_benchmark_stage16_quality_ablation_4tasks_10seeds/*`
+
+Required Behavior:
+
+- 沿用 Stage 15 变体集合（`baseline,icbr_full,icbr_no_replay,icbr_no_shared,icbr_refit_commit`）与四任务集合（`minimal,combo,poly_cubic,trig_interaction`）。
+- 将 seeds 扩展为 `0,1,2,3,4,5,6,7,8,9`，并输出完整 summary/rows/variant_rows 证据。
+- 运行结果固定沉淀在 `outputs/icbr_benchmark_stage16_quality_ablation_4tasks_10seeds/`。
+
+Implementation Constraints:
+
+- 不改变 ICBR 算法语义；仅做规模扩展验证与结果归档。
+- 不回退 Stage 15 已有多变体导出字段与报告结构。
+
+Success Criteria:
+
+- 10-seed 运行完成且产物目录齐全可读。
+- summary 中包含四任务、多变体、Q1/Q2/Q3 相关聚合证据。
+
+Validation:
+
+- `python -m scripts.icbr_benchmark --profile quality --tasks minimal,combo,poly_cubic,trig_interaction --seeds 0,1,2,3,4,5,6,7,8,9 --variants baseline,icbr_full,icbr_no_replay,icbr_no_shared,icbr_refit_commit --output-dir outputs/icbr_benchmark_stage16_quality_ablation_4tasks_10seeds --teacher-cache-dir outputs/teacher_cache_stage16_quality_10seeds --teacher-cache-mode readwrite --teacher-cache-version stage16_v1 --quiet`
+- 人工核对 `outputs/icbr_benchmark_stage16_quality_ablation_4tasks_10seeds` 目录下 `summary.{json,md}` 与 rows/variant_rows 文件。
+
+Status:
+
+Complete
+
+### Stage 17: Multi-Variant Formula Report Completeness Fix
+
+Goal:
+
+修复 Stage 16 报告可读性缺口：`icbr_benchmark_summary.md` 的 `## Formula Comparison` 必须覆盖当前运行启用的全部 benchmark variants，而不仅是 `baseline` 与 `icbr_full`。
+
+Target Files:
+
+- `scripts/icbr_benchmark.py`
+- `tests/test_icbr_benchmark_script_smoke.py`
+- `IMPLEMENTATION_PLAN.md`
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- `Formula Comparison` 按 `config.variants` 展示每个 `task+seed` 的全部变体：
+  - 变体级概要（`symbolic_wall_time_s / mse / target_mse / formula_ok`）
+  - `display` 公式列表
+  - `raw` 公式列表
+  - 变体级 `formula_error`（如有）
+- 当 teacher gate 导致符号化跳过时，变体项要保持显式可读（例如 `<none>` 与跳过原因），不得静默缺失。
+- 不破坏既有 CSV/JSON 结构与 baseline/icbr_full 主指标兼容。
+
+Implementation Constraints:
+
+- 不改动 ICBR 算法路径，仅修复报告层渲染逻辑与测试覆盖。
+- 保持 Stage 16 的变体与证据导出结构不回退。
+
+Success Criteria:
+
+- 运行含 `icbr_no_replay/icbr_no_shared/icbr_refit_commit` 的 benchmark 后，`summary.md` 中可直接看到这些变体的公式与状态。
+- smoke 测试覆盖“非 baseline/icbr_full 变体出现在 Formula Comparison”并通过。
+
+Validation:
+
+- `python -m py_compile scripts/icbr_benchmark.py tests/test_icbr_benchmark_script_smoke.py`
+- `pytest tests/test_icbr_benchmark_script_smoke.py -k "variants or generates_outputs or formula_comparison"`
+
+Status:
+
+Not Started
+
+### Stage 18: Visualization Upgrade for Stage 16 10-Seed Outputs
+
+Goal:
+
+针对 `outputs/icbr_benchmark_stage16_quality_ablation_4tasks_10seeds` 已完成实跑结果，补齐当前“画图不够完善”的问题，提升报告可读性与变体对照清晰度。
+
+Target Files:
+
+- `scripts/icbr_benchmark.py`
+- `tests/test_icbr_benchmark_script_smoke.py`
+- `IMPLEMENTATION_PLAN.md`
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- 在保留现有 3 张图的基础上，新增至少以下可读图：
+  - 变体级总览图（`baseline/icbr_full/icbr_no_replay/icbr_no_shared/icbr_refit_commit` 的 symbolic time 与 mse/target_mse 对照）
+  - Q1/Q2/Q3 证据图（按 task 聚合展示）
+- 新图必须写入 `summary.json -> artifacts.visualizations.files`，并在 `summary.md` 的可视化摘要中列出。
+- 图表标题与坐标轴必须明确“指标定义与方向性”（例如 gain>0 表示哪种方法更优）。
+
+Implementation Constraints:
+
+- 不改 ICBR 算法路径，仅增强 benchmark 报告层可视化。
+- 不删除既有图与既有产物路径，保持向后兼容。
+
+Success Criteria:
+
+- 基于 Stage 16 10-seed 运行参数再次生成报告时，可得到更完整的变体对照图与证据图。
+- smoke 测试覆盖新增图产物存在性并通过。
+
+Validation:
+
+- `python -m py_compile scripts/icbr_benchmark.py tests/test_icbr_benchmark_script_smoke.py`
+- `pytest tests/test_icbr_benchmark_script_smoke.py -k visual`
+- `pytest tests/test_icbr_benchmark_script_smoke.py -k "variants or generates_outputs or formula_comparison"`
+- `python -m scripts.icbr_benchmark --profile quality --tasks minimal,combo,poly_cubic,trig_interaction --seeds 0,1,2,3,4,5,6,7,8,9 --variants baseline,icbr_full,icbr_no_replay,icbr_no_shared,icbr_refit_commit --output-dir outputs/icbr_benchmark_stage16_quality_ablation_4tasks_10seeds --teacher-cache-dir outputs/teacher_cache_stage16_quality_10seeds --teacher-cache-mode readwrite --teacher-cache-version stage16_v1 --quiet`
+
+Status:
+
+Complete
+
 ## 5. Acceptance Criteria
 
 Phase I 仅在以下条件全部满足时视为完成:
@@ -1020,3 +1142,7 @@ Phase I 仅在以下条件全部满足时视为完成:
 12. Stage 12: Add Feynman Dataset Support to `icbr_benchmark.py`
 13. Stage 13: Add Feynman Reference Preset and Prune-Refit Teacher Flow
 14. Stage 14: Feynman Pilot Run on I.12.1 and I.12.4 (Seeds 1,2)
+15. Stage 15: Quality 4-Task Ablation Benchmark and Critique-Evidence Validation
+16. Stage 16: Quality 4-Task Ablation 10-Seed Extension Validation
+17. Stage 17: Multi-Variant Formula Report Completeness Fix
+18. Stage 18: Visualization Upgrade for Stage 16 10-Seed Outputs
