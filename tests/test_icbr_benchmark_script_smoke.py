@@ -188,8 +188,8 @@ def test_quality_profile_resolves_expected_defaults() -> None:
     )
     assert resolved["train_num"] == 1000
     assert resolved["test_num"] == 500
-    assert resolved["train_steps"] == 80
-    assert resolved["lr"] == 0.03
+    assert resolved["train_steps"] == 200
+    assert resolved["lr"] == 1e-2
     assert resolved["lamb"] == 1e-3
     assert overrides == {
         "train_num": False,
@@ -370,6 +370,7 @@ def test_visualization_upgrade_emits_variant_and_q123_plots() -> None:
     summary = result["summary"]
     visuals = summary["artifacts"]["visualizations"]
     assert visuals["enabled"] is True
+    assert "plots" in visuals
     file_names = {Path(path).name for path in visuals["files"]}
     expected = {
         "icbr_benchmark_symbolic_time_errorbar.png",
@@ -382,9 +383,106 @@ def test_visualization_upgrade_emits_variant_and_q123_plots() -> None:
     for path in visuals["files"]:
         assert Path(path).exists()
 
+    import matplotlib.image as mpimg
+
+    variant_overview_path = out_dir / "icbr_benchmark_variant_overview.png"
+    variant_overview_img = mpimg.imread(variant_overview_path)
+    # Final Stage20 layout: one task per row, but each row contains two horizontal panels.
+    assert variant_overview_img.shape[1] > variant_overview_img.shape[0]
+    assert visuals["plots"]["symbolic_time_errorbar"]["chart_type"] == "point_ci95"
+    assert visuals["plots"]["symbolic_time_errorbar"]["stat_note"].startswith("point=geometric mean")
+    assert visuals["plots"]["symbolic_time_errorbar"]["legend_placement"] == "figure_top_outside"
+    assert "scale" in visuals["plots"]["symbolic_time_errorbar"]["y_label"]
+    assert visuals["plots"]["speedup_boxplot"]["chart_type"] == "violin_box_points"
+    assert visuals["plots"]["speedup_boxplot"]["kde_bandwidth_rule"] == "silverman"
+    assert visuals["plots"]["speedup_boxplot"]["y_label"] == "Speedup x (linear scale; higher is better)"
+    assert visuals["plots"]["mse_shift_boxplot"]["chart_type"] == "violin_box_points"
+    assert "scale" in visuals["plots"]["mse_shift_boxplot"]["y_label"]
+    assert visuals["plots"]["variant_overview"]["chart_type"] == "task_row_two_panel_point_ci95"
+    assert visuals["plots"]["variant_overview"]["layout"] == "one task per row; two columns = SymbolicTime / merged MSEs"
+    assert visuals["plots"]["variant_overview"]["legend_placement"] == "figure_top_outside"
+    assert visuals["plots"]["variant_overview"]["scale_label_placement"] == "title_band_left"
+    assert all("scale" in label for label in visuals["plots"]["variant_overview"]["time_y_label_by_task"].values())
+    assert visuals["plots"]["variant_overview"]["mse_y_label"] == "MSE / Target MSE (log scale)"
+    assert visuals["plots"]["q123_evidence_by_task"]["chart_type"] == "point_ci95"
+    assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["shared_tensor_symbolic_time_ratio_no_shared_vs_full"] == "log2_ratio"
+    assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["contextual_replay_mse_ratio_no_replay_vs_full"] == "log2_ratio"
+    assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["explicit_commit_mse_ratio_refit_vs_full"] == "log2_ratio"
+    assert visuals["plots"]["q123_evidence_by_task"]["scale_label_placement"] == "title_band_left"
+    assert visuals["plots"]["q123_evidence_by_task"]["y_label_by_panel"]["contextual_replay_mse_ratio_no_replay_vs_full"] == "log2(no_replay MSE / full MSE)"
+    assert visuals["plots"]["q123_evidence_by_task"]["y_label_by_panel"]["explicit_commit_mse_ratio_refit_vs_full"] == "log2(refit_commit MSE / full MSE)"
+
     summary_md = (out_dir / "icbr_benchmark_summary.md").read_text(encoding="utf-8")
     assert "icbr_benchmark_variant_overview.png" in summary_md
     assert "icbr_benchmark_q123_evidence_by_task.png" in summary_md
+
+
+def test_replot_only_rebuilds_visualizations_from_existing_artifacts() -> None:
+    out_dir = Path("tmp") / f"icbr_benchmark_replot_only_{uuid.uuid4().hex}"
+    run_benchmark(
+        tasks=["minimal", "combo"],
+        seeds=[0],
+        output_dir=out_dir,
+        train_num=16,
+        test_num=16,
+        train_steps=2,
+        lr=0.05,
+        lamb=1e-3,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=1.0,
+        teacher_min_test_r2=-1.0,
+        teacher_cache_dir=out_dir / "teacher_cache",
+        teacher_cache_mode="off",
+        teacher_cache_version="stage21_replot_test_v1",
+        variants=["baseline", "icbr_full", "icbr_no_replay", "icbr_no_shared", "icbr_refit_commit"],
+        make_plots=False,
+        quiet=True,
+    )
+
+    summary_md_before = (out_dir / "icbr_benchmark_summary.md").read_text(encoding="utf-8")
+    assert "Visualization disabled" in summary_md_before
+
+    main(
+        [
+            "--replot-only",
+            "--replot-summary-json",
+            str(out_dir / "icbr_benchmark_summary.json"),
+            "--replot-rows-csv",
+            str(out_dir / "icbr_benchmark_rows.csv"),
+            "--replot-variant-rows-csv",
+            str(out_dir / "icbr_benchmark_variant_rows.csv"),
+            "--output-dir",
+            str(out_dir),
+            "--quiet",
+        ]
+    )
+
+    summary = json.loads((out_dir / "icbr_benchmark_summary.json").read_text(encoding="utf-8"))
+    visuals = summary["artifacts"]["visualizations"]
+    assert visuals["enabled"] is True
+    assert "plots" in visuals
+    expected = {
+        "icbr_benchmark_symbolic_time_errorbar.png",
+        "icbr_benchmark_speedup_boxplot.png",
+        "icbr_benchmark_mse_shift_boxplot.png",
+        "icbr_benchmark_variant_overview.png",
+        "icbr_benchmark_q123_evidence_by_task.png",
+    }
+    assert expected.issubset({Path(path).name for path in visuals["files"]})
+    assert all(Path(path).exists() for path in visuals["files"])
+    assert visuals["plots"]["speedup_boxplot"]["kde_bandwidth_rule"] == "silverman"
+    assert visuals["plots"]["variant_overview"]["chart_type"] == "task_row_two_panel_point_ci95"
+    assert visuals["plots"]["variant_overview"]["legend_placement"] == "figure_top_outside"
+    assert visuals["plots"]["variant_overview"]["scale_label_placement"] == "title_band_left"
+    assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["shared_tensor_symbolic_time_ratio_no_shared_vs_full"] == "log2_ratio"
+    assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["contextual_replay_mse_ratio_no_replay_vs_full"] == "log2_ratio"
+    assert visuals["plots"]["q123_evidence_by_task"]["scale_label_placement"] == "title_band_left"
+
+    summary_md_after = (out_dir / "icbr_benchmark_summary.md").read_text(encoding="utf-8")
+    assert "Visualization disabled" not in summary_md_after
+    assert "icbr_benchmark_variant_overview.png" in summary_md_after
 
 
 def test_quality_profile_enables_teacher_prune_by_default() -> None:

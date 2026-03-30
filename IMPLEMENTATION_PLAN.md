@@ -1158,6 +1158,67 @@ Status:
 
 Complete
 
+### Stage 20: Per-Task Vertical Variant Overview Layout
+
+Goal:
+
+围绕论文使用场景，完成 benchmark 图导出层的最终定稿：统一视觉语言、重构关键统计图的统计口径与尺度选择，并支持基于已有产物的只重绘流程。
+
+Target Files:
+
+- `scripts/icbr_benchmark.py`
+- `tests/test_icbr_benchmark_script_smoke.py`
+- `IMPLEMENTATION_PLAN.md`
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- 新增统一样式层：字体、字号、配色、网格、图注盒样式统一，五张图共用同一套统计注释模板。
+- `symbolic_time_errorbar` 使用 `point + 95% CI`，但对正值偏态时间指标采用几何均值与 log 轴，避免极端 task 挤压其他 task。
+- `speedup_boxplot` 与 `mse_shift_boxplot` 保留 `violin + box + points`，固定 KDE 带宽规则为 `Silverman`。
+- `mse_shift_boxplot` 需对贴近 0 且带长尾的分布采用更稳健的零中心尺度。
+- `q123_evidence_by_task` 使用 `point + 95% CI`，其中：
+  - `Q1` 采用 `log2(no_shared/full)` 变换后再做 `95% CI`
+  - `Q2` 采用 `log2(no_replay/full)` 的 imitation-MSE 比值后再做 `95% CI`
+  - `Q3` 采用 `log2(refit_commit/full)` 的 imitation-MSE 比值后再做 `95% CI`
+- `Q123` 主图只保留每个假设最核心的一条 primary evidence；target-MSE、rank inversion、param drift 等次级证据保留在表格/summary 中，不堆叠进主图。
+- 图例与 `scale=...` 标注不得遮挡数据：
+  - 单图图例移到 figure 顶部保留区
+  - 多 panel 的尺度标注放到 title band，而不是 axes 内部数据区
+- y 轴说明必须与真实尺度一致；若图使用 `log` / `symlog` / `log2_ratio` 语义，标签需显式写明。
+- `variant_overview` 图按 task 分面（每个 task 一行），每行只保留两列：
+  - 左列：`SymbolicTime`，使用 `point + 95% CI + log`，并在 title band 标注 scale
+  - 右列：合并 `ImitationMSE + TargetMSE`，使用 `point + 95% CI + log`，通过图外图例区分两种 MSE
+- 新增基于现有 `summary.json + rows.csv + variant_rows.csv` 的只重绘入口，用于“已有结果没图”与“图逻辑更新后重导出”。
+
+Implementation Constraints:
+
+- 图形选择必须结合当前已跑结果暴露的问题，不做与数据特征无关的随机改图。
+- 不改 benchmark 指标定义与导出结构，仅调整可视化布局、统计表达与重绘能力。
+- 保持图文件名不变：`icbr_benchmark_variant_overview.png`。
+
+Success Criteria:
+
+- 五张图均使用统一视觉风格与统计注释模板。
+- 五张图的图例、尺度标注与数据点不再互相遮挡。
+- 五张图的 y 轴文字与实际尺度语义一致，不再出现“log 图但线性标签”的歧义。
+- `symbolic_time` 与 `variant_overview` 的时间相关子图在大跨度 task 上仍保持可比性。
+- `Q1` 相对 1 的乘法证据关系通过 `log2 ratio` 表达得更对称。
+- `Q2/Q3` 改用相对 `full` 的 `log2 ratio` 后，不再因原始 MSE 本身很小而把机制差异压缩成“看起来接近 0 的小差值”。
+- `variant_overview` 合并两种 MSE 后仍保持可读性，并直接在图上标出 scale。
+- `--replot-only` 能在不重跑实验的情况下补齐/重导出 PNG，并回写 `summary.json` 的 `artifacts.visualizations`。
+
+Validation:
+
+- `python -m py_compile scripts/icbr_benchmark.py tests/test_icbr_benchmark_script_smoke.py`
+- `pytest tests/test_icbr_benchmark_script_smoke.py -k "quality_profile_resolves_expected_defaults or visualization_upgrade_emits_variant_and_q123_plots or replot_only_rebuilds_visualizations_from_existing_artifacts"`
+- `python -m scripts.icbr_benchmark --replot-only --output-dir outputs/icbr_benchmark_stage20_quality_ablation_4tasks_10seeds --quiet`
+
+Status:
+
+Complete
+
+
 ## 5. Acceptance Criteria
 
 Phase I 仅在以下条件全部满足时视为完成:
@@ -1201,3 +1262,4 @@ Phase I 仅在以下条件全部满足时视为完成:
 17. Stage 17: Multi-Variant Formula Report Completeness Fix
 18. Stage 18: Visualization Upgrade for Stage 16 10-Seed Outputs
 19. Stage 19: Benchmark Quietness, Formula Display Cleanup, and Pipeline Sanity Audit
+20. Stage 20: Per-Task Vertical Variant Overview Layout
