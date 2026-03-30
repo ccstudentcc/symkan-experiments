@@ -317,6 +317,25 @@ def _serialize_width_tokens(width_tokens: list[_WidthToken]) -> _WidthToken | li
     return serialized
 
 
+def _tasks_request_feynman_defaults(tasks: list[str]) -> bool:
+    feynman_tokens = {"feynman_paper10", "feynman_random"}
+    return any(task.startswith("feynman_") or task in feynman_tokens for task in tasks)
+
+
+def _seed_everything(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+
+def _resolve_dataset_split_seed(spec: _TaskSpec, *, benchmark_seed: int) -> int | None:
+    if spec.dataset_kind != "feynman_file":
+        return None
+    if spec.dataset_split_seed is not None:
+        return int(spec.dataset_split_seed)
+    return int(benchmark_seed)
+
+
 def _parse_width_mid(text: str) -> list[_WidthToken]:
     raw_text = text.strip()
     if not raw_text:
@@ -499,7 +518,7 @@ def _build_feynman_task_spec(
     feynman_variant: str,
     feynman_width_mid: list[_WidthToken],
     feynman_split_strategy: str,
-    feynman_split_strategy_seed: int,
+    feynman_split_strategy_seed: int | None,
     feynman_post_prune_steps: int | None,
     feynman_post_prune_lr: float | None,
     feynman_post_prune_lamb: float | None,
@@ -559,7 +578,7 @@ def _build_feynman_task_spec(
         dataset_path=str(dataset_path),
         dataset_variant=feynman_variant,
         dataset_split_strategy=feynman_split_strategy,
-        dataset_split_seed=int(feynman_split_strategy_seed),
+        dataset_split_seed=(int(feynman_split_strategy_seed) if feynman_split_strategy_seed is not None else None),
         dataset_filename=filename,
         dataset_total_rows=int(raw.shape[0]),
         dataset_total_columns=int(raw.shape[1]),
@@ -591,7 +610,7 @@ def _resolve_task_specs(
     feynman_variant: str,
     feynman_width_mid: list[_WidthToken],
     feynman_split_strategy: str,
-    feynman_split_strategy_seed: int,
+    feynman_split_strategy_seed: int | None,
     feynman_post_prune_steps: int | None,
     feynman_post_prune_lr: float | None,
     feynman_post_prune_lamb: float | None,
@@ -674,7 +693,12 @@ def _resolve_task_specs(
         "equations_csv": str(feynman_equations_csv) if feynman_equations_csv is not None else None,
         "equations_metadata_columns": equations_metadata_columns,
         "split_strategy": feynman_split_strategy,
-        "split_strategy_seed": int(feynman_split_strategy_seed),
+        "split_strategy_seed": (
+            int(feynman_split_strategy_seed) if feynman_split_strategy_seed is not None else None
+        ),
+        "split_strategy_seed_policy": (
+            "explicit_override" if feynman_split_strategy_seed is not None else "follow_benchmark_seed"
+        ),
         "post_prune_overrides": {
             "steps": feynman_post_prune_steps,
             "lr": feynman_post_prune_lr,
@@ -701,13 +725,13 @@ def _build_teacher_dataset(
     train_num: int,
     test_num: int,
 ) -> dict[str, torch.Tensor]:
-    torch.manual_seed(seed)
+    _seed_everything(seed)
     if spec.dataset_kind == "feynman_file":
         if spec.dataset_path is None:
             raise ValueError(f"Feynman task '{spec.name}' is missing dataset_path.")
         return _load_local_feynman_dataset_as_kan(
             dataset_path=Path(spec.dataset_path),
-            split_seed=int(spec.dataset_split_seed) if spec.dataset_split_seed is not None else int(seed),
+            split_seed=int(_resolve_dataset_split_seed(spec, benchmark_seed=seed)),
             train_num=train_num,
             test_num=test_num,
             split_strategy=spec.dataset_split_strategy,
@@ -725,11 +749,12 @@ def _build_teacher_dataset(
     )
 
 
-def _build_teacher_model(spec: _TaskSpec) -> MultKAN:
+def _build_teacher_model(spec: _TaskSpec, *, seed: int) -> MultKAN:
     return MultKAN(
         width=spec.width,
         grid=int(spec.teacher_grid),
         k=int(spec.teacher_k),
+        seed=int(seed),
         auto_save=False,
         device="cpu",
     )
@@ -739,12 +764,14 @@ def _train_teacher_model(
     spec: _TaskSpec,
     dataset: dict[str, torch.Tensor],
     *,
+    seed: int,
     train_steps: int,
     lr: float,
     lamb: float,
     quiet: bool = False,
 ) -> MultKAN:
-    model = _build_teacher_model(spec)
+    _seed_everything(seed)
+    model = _build_teacher_model(spec, seed=seed)
     with _suppress_console_output(quiet):
         model.fit(
             dataset,
@@ -871,9 +898,7 @@ def _build_teacher_cache_identity(
         "dataset_path": spec.dataset_path,
         "dataset_variant": spec.dataset_variant,
         "dataset_split_strategy": spec.dataset_split_strategy,
-        "dataset_split_seed": (
-            int(spec.dataset_split_seed) if spec.dataset_split_seed is not None else None
-        ),
+        "dataset_split_seed": _resolve_dataset_split_seed(spec, benchmark_seed=seed),
         "teacher_grid": int(spec.teacher_grid),
         "teacher_k": int(spec.teacher_k),
         "teacher_fit_opt": spec.teacher_fit_opt,
@@ -979,6 +1004,7 @@ def _resolve_teacher_model_with_cache(
         return _train_teacher_model(
             spec,
             dataset,
+            seed=seed,
             train_steps=train_steps,
             lr=lr,
             lamb=lamb,
@@ -987,7 +1013,7 @@ def _resolve_teacher_model_with_cache(
 
     if cache_mode in {"readwrite", "readonly"} and state_path.exists() and meta_path.exists():
         try:
-            model = _build_teacher_model(spec)
+            model = _build_teacher_model(spec, seed=seed)
             state = torch.load(state_path, map_location="cpu")
             model.load_state_dict(state)
             return model, dataset, {
@@ -2687,7 +2713,7 @@ def run_benchmark(
     feynman_variant: str = "Feynman_with_units",
     feynman_equations_csv: Path | None = None,
     feynman_split_strategy: str = "random",
-    feynman_split_strategy_seed: int = 1,
+    feynman_split_strategy_seed: int | None = None,
     feynman_post_prune_steps: int | None = None,
     feynman_post_prune_lr: float | None = None,
     feynman_post_prune_lamb: float | None = None,
@@ -2696,7 +2722,7 @@ def run_benchmark(
     feynman_post_prune_patience: int | None = None,
     feynman_fit_opt: str | None = None,
     feynman_width_mid: list[_WidthToken] | None = None,
-    prune_iters: int = 1,
+    prune_iters: int | None = None,
     feynman_max_datasets: int = 10,
     feynman_dataset_select_seed: int = 1,
     variants: list[str] | None = None,
@@ -2710,14 +2736,16 @@ def run_benchmark(
         raise ValueError(f"Unsupported feynman variant: {feynman_variant}")
     if feynman_split_strategy not in {"random", "linspace"}:
         raise ValueError(f"Unsupported feynman split strategy: {feynman_split_strategy}")
-    if int(feynman_split_strategy_seed) < 0:
+    if feynman_split_strategy_seed is not None and int(feynman_split_strategy_seed) < 0:
         raise ValueError("feynman_split_strategy_seed must be >= 0.")
-    if int(prune_iters) < 0:
+    if prune_iters is not None and int(prune_iters) < 0:
         raise ValueError("prune_iters must be >= 0.")
     if feynman_fit_opt is not None and feynman_fit_opt not in _FEYNMAN_FIT_OPTS:
         raise ValueError(f"Unsupported feynman_fit_opt: {feynman_fit_opt}")
     if feynman_width_mid is None:
         feynman_width_mid = [[5, 2]]
+    if prune_iters is None:
+        prune_iters = 3 if _tasks_request_feynman_defaults(tasks) or profile_name == "feynman_reference" else 1
 
     resolved_tasks, specs, _equations_map, feynman_config = _resolve_task_specs(
         tasks=tasks,
@@ -2725,7 +2753,9 @@ def run_benchmark(
         feynman_variant=feynman_variant,
         feynman_width_mid=feynman_width_mid,
         feynman_split_strategy=feynman_split_strategy,
-        feynman_split_strategy_seed=int(feynman_split_strategy_seed),
+        feynman_split_strategy_seed=(
+            int(feynman_split_strategy_seed) if feynman_split_strategy_seed is not None else None
+        ),
         feynman_post_prune_steps=feynman_post_prune_steps,
         feynman_post_prune_lr=feynman_post_prune_lr,
         feynman_post_prune_lamb=feynman_post_prune_lamb,
@@ -2871,7 +2901,7 @@ def run_benchmark(
                 "feynman_dataset_filename": spec.dataset_filename,
                 "feynman_dataset_rows": spec.dataset_total_rows,
                 "feynman_dataset_columns": spec.dataset_total_columns,
-                "feynman_split_seed": spec.dataset_split_seed,
+                "feynman_split_seed": _resolve_dataset_split_seed(spec, benchmark_seed=seed),
                 "feynman_equation_metadata": dict(spec.equation_metadata or {}),
                 "n_var": spec.n_var,
                 "width": list(spec.width),
@@ -3390,7 +3420,7 @@ def run_benchmark(
                 },
             },
             "teacher_training": {
-                "feynman_reference_policy": "For feynman_file tasks: train(opt=Adam by default; override via --feynman-fit-opt) -> repeat prune(node_th=1e-2, edge_th=1e-2) + refit(steps=100, lr=1e-3, lamb=1e-3, early_stop_check_every=5) for prune_iters rounds (default 1) -> cache.",
+                "feynman_reference_policy": "For feynman_file tasks: train(opt=Adam by default; override via --feynman-fit-opt) -> repeat prune(node_th=1e-2, edge_th=1e-2) + refit(steps=100, lr=1e-3, lamb=1e-3, early_stop_check_every=5) for prune_iters rounds (default 3) -> cache.",
             },
             "extensibility": [
                 "Add new tasks in the resolver layer (core task specs or feynman token expansion).",
@@ -3426,7 +3456,7 @@ def run_benchmark(
             f"- Feynman data: root={summary['config']['feynman']['root']}, "
             f"variant={summary['config']['feynman']['variant']}, "
             f"split={summary['config']['feynman']['split_strategy']}, "
-            f"split_seed={summary['config']['feynman']['split_strategy_seed']}, "
+            f"split_seed={summary['config']['feynman']['split_strategy_seed'] if summary['config']['feynman']['split_strategy_seed'] is not None else 'per-benchmark-seed'}, "
             f"select_seed={summary['config']['feynman']['dataset_select_seed']}, "
             f"width_mid={summary['config']['feynman']['width_mid']}, "
             f"prune_iters={summary['config']['feynman']['prune_iters']}"
@@ -3605,7 +3635,7 @@ def run_benchmark(
                 f"- Raw data shape: rows={spec.dataset_total_rows}, columns={spec.dataset_total_columns}, n_var={spec.n_var}"
             )
             md_lines.append(
-                f"- Split setting: strategy={spec.dataset_split_strategy}, split_seed={spec.dataset_split_seed}, train_num={train_num}, test_num={test_num}"
+                f"- Split setting: strategy={spec.dataset_split_strategy}, split_seed={row['feynman_split_seed']}, train_num={train_num}, test_num={test_num}"
             )
             md_lines.append(f"- Target formula: `{spec.target_formula}`")
             metadata = dict(spec.equation_metadata or {})
@@ -3872,8 +3902,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--feynman-split-strategy-seed",
         type=int,
-        default=1,
-        help="Random seed used by feynman random split strategy.",
+        default=None,
+        help=(
+            "Random seed used by Feynman random split strategy. "
+            "If omitted, each benchmark seed drives its own split."
+        ),
     )
     parser.add_argument(
         "--feynman-width-mid",
@@ -3929,8 +3962,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--prune-iters",
         type=int,
-        default=1,
-        help="Number of prune+refit rounds for teacher tuning. Each round means prune once, then refit once. Default: 1.",
+        default=None,
+        help=(
+            "Number of prune+refit rounds for teacher tuning. "
+            "Defaults to 3 for Feynman tasks / feynman_reference, otherwise 1."
+        ),
     )
     parser.add_argument(
         "--seeds",

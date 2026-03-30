@@ -856,7 +856,7 @@ Required Behavior:
   - `device=cpu`
   - `opt=Adam`
   - `feynman_dataset_select_seed=1`
-  - `feynman_split_strategy_seed=1`
+  - `feynman_split_strategy_seed` 默认跟随当前 benchmark `seed`；显式传参时才固定覆盖
 - Feynman teacher 训练完成后，执行：
   - `model.prune(...)`（阈值采用参考口径 `1e-2`）
   - 再微调 `100` 步（`lr=1e-3`，`lamb=1e-2`）
@@ -1260,7 +1260,12 @@ Required Behavior:
   - `teacher_min_test_r2` 默认不要求
 - 新增 `prune_iters`，适用于所有 teacher prune 路径（不止 Feynman）：
   - `prune + refit` 记作一轮
-  - 默认值为 `1`
+  - Feynman 任务 / `feynman_reference` 默认值为 `3`
+  - 其他非 Feynman 任务默认值保持为 `1`
+- Feynman 数据路径中的相关随机性默认与 benchmark `seed` 对齐：
+  - teacher 初始化随机数
+  - Feynman `random` split 的 `split_seed`
+  - 未显式覆盖时，row 导出的 `feynman_split_seed` 应等于当前 benchmark `seed`
 - 画图格式口径补充：
   - 除已确认正确的 `icbr_benchmark_symbolic_time_errorbar.png` 外，其余图在 log 轴下的 y 轴标签必须保留原始单位/原始量纲，不把 `log` 写进标签文本
   - 所有 ratio 图改为“ratio 值 + log 轴 + 1 为基准线”，而不是直接画 `log2(ratio)` 数值
@@ -1290,6 +1295,8 @@ Success Criteria:
   - `post_prune_patience=3`
   - `teacher_min_test_r2=None`
 - benchmark 支持 `prune_iters`，且可传递到 synthetic / Feynman teacher 训练配置与 cache key
+- Feynman 任务在未显式传入 `--prune-iters` 时默认采用 `3` 轮 prune+refit，synthetic 默认仍为 `1`
+- Feynman 任务在未显式传入 `--feynman-split-strategy-seed` 时，数据随机切分默认跟随当前 benchmark `seed`
 - `speedup` / `Q1-Q3` 等 ratio 图改为 ratio 值的 log 轴表达，基准线为 `1`
 - `variant_overview` / `mse_shift` 等图的 y 轴标签不再把 scale 写入标签文本
 - `symbolic_time_errorbar` / `speedup_boxplot` / `mse_shift_boxplot` / `q123_evidence_by_task` 在对数尺度时显式显示 `scale=log`

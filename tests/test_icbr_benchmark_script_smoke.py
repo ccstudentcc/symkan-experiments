@@ -541,6 +541,7 @@ def test_quality_profile_enables_teacher_prune_by_default() -> None:
 
     summary = result["summary"]
     assert summary["config"]["teacher_prune_policy"]["enabled"] is True
+    assert summary["config"]["teacher_prune_policy"]["prune_iters"] == 1
     assert summary["config"]["teacher_training"]["minimal"]["post_train_prune"] is True
 
 
@@ -730,12 +731,13 @@ def test_feynman_dataset_file_loading_smoke() -> None:
     assert summary["config"]["feynman"]["enabled"] is True
     assert summary["config"]["feynman"]["variant"] == "Feynman_with_units"
     assert summary["config"]["feynman"]["dataset_select_seed"] == 1
-    assert summary["config"]["feynman"]["split_strategy_seed"] == 1
+    assert summary["config"]["feynman"]["split_strategy_seed"] is None
+    assert summary["config"]["feynman"]["split_strategy_seed_policy"] == "follow_benchmark_seed"
     assert summary["config"]["feynman"]["width_mid"] == [5, 2]
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["grid"] == 20
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["k"] == 3
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_train_prune"] is True
-    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["prune_iters"] == 1
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["prune_iters"] == 3
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_steps"] == 100
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_lr"] == 1e-3
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_lamb"] == 1e-3
@@ -751,7 +753,7 @@ def test_feynman_dataset_file_loading_smoke() -> None:
     assert row["feynman_dataset_filename"] == "I.10.7"
     assert row["feynman_dataset_rows"] == 96
     assert row["feynman_dataset_columns"] == 4
-    assert row["feynman_split_seed"] == 1
+    assert row["feynman_split_seed"] == 0
     assert row["width"][1] == [5, 2]
     assert row["feynman_equation_metadata"]["Filename"] == "I.10.7"
     assert row["feynman_equation_metadata"]["Formula"] == "m0/sqrt(1-v^2/c^2)"
@@ -821,6 +823,8 @@ def test_feynman_post_prune_override_smoke() -> None:
             "LBFGS",
             "--feynman-split-strategy",
             "random",
+            "--feynman-split-strategy-seed",
+            "7",
             "--feynman-width-mid",
             "[5,2]",
             "--feynman-post-prune-steps",
@@ -841,6 +845,9 @@ def test_feynman_post_prune_override_smoke() -> None:
     )
 
     summary = json.loads((out_dir / "icbr_benchmark_summary.json").read_text(encoding="utf-8"))
+    assert summary["config"]["feynman"]["split_strategy_seed"] == 7
+    assert summary["config"]["feynman"]["split_strategy_seed_policy"] == "explicit_override"
+    assert summary["rows"][0]["feynman_split_seed"] == 7
     task_cfg = summary["config"]["teacher_training"]["feynman_I_10_7"]
     assert task_cfg["post_prune_steps"] == 7
     assert task_cfg["post_prune_lr"] == 0.002
@@ -892,11 +899,12 @@ def test_feynman_run_defaults_width_mid_to_mult_layer_shape() -> None:
     summary = result["summary"]
     assert summary["config"]["feynman"]["width_mid"] == [5, 2]
     assert summary["config"]["feynman"]["split_strategy"] == "random"
-    assert summary["config"]["feynman"]["split_strategy_seed"] == 1
+    assert summary["config"]["feynman"]["split_strategy_seed"] is None
+    assert summary["config"]["feynman"]["split_strategy_seed_policy"] == "follow_benchmark_seed"
     assert summary["config"]["feynman"]["dataset_select_seed"] == 1
-    assert summary["config"]["feynman"]["prune_iters"] == 1
+    assert summary["config"]["feynman"]["prune_iters"] == 3
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["opt"] == "Adam"
-    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["prune_iters"] == 1
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["prune_iters"] == 3
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_steps"] == 100
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_lr"] == 1e-3
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_lamb"] == 1e-3
@@ -908,6 +916,7 @@ def test_feynman_run_defaults_width_mid_to_mult_layer_shape() -> None:
     assert summary["rows"][0]["teacher_max_test_mse_threshold"] == 0.1
     assert summary["rows"][0]["teacher_min_test_r2_threshold"] is None
     assert summary["rows"][0]["width"][1] == [5, 2]
+    assert summary["rows"][0]["feynman_split_seed"] == 0
 
 
 def test_feynman_task_tokens_expand() -> None:

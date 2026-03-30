@@ -33,9 +33,14 @@ Complete
     - `teacher_max_test_mse=0.1`
     - `teacher_min_test_r2=None`（默认不要求）
   - teacher quality gate 现在支持“阈值为空即不检查该指标”，用于 Feynman 默认不要求 `R2`
+  - Feynman 路径的随机性进一步对齐到当前 benchmark `seed`：
+    - teacher 初始化显式使用当前 `seed`
+    - 未显式传 `--feynman-split-strategy-seed` 时，`random` split 自动使用当前 `seed`
+    - row / cache 语义中记录实际生效的 `feynman_split_seed`
   - 新增 `--prune-iters` / `run_benchmark(prune_iters=...)`
     - `prune + refit` 记作一轮
-    - 默认值 `1`
+    - Feynman 任务 / `feynman_reference` 默认值 `3`
+    - 非 Feynman 任务默认值保持 `1`
     - 适用于 synthetic / Feynman teacher prune 路径
   - teacher cache key、summary config、markdown run config 已纳入 `prune_iters`
   - 图表格式补充：
@@ -91,6 +96,8 @@ Complete
   - Feynman 默认 `post_prune_lamb=1e-3`、`post_prune_patience=3`
   - Feynman 默认 teacher quality gate 为 `max_mse=0.1` 且不要求 `min_r2`
   - `prune_iters` 已透传到 teacher config，并进入 benchmark summary / cache 语义
+  - Feynman 默认 `prune_iters` 已上调为 `3`，synthetic 默认仍保持 `1`
+  - Feynman 默认 `random` split seed 已改为跟随 benchmark `seed`，便于分批续跑时保持“seed 控制整条随机链路”
   - `speedup` / `q123` ratio 图已改为 log 轴 + `1x` 基准线
   - `variant_overview` / `mse_shift` 标签已改为保留原始单位/量纲，不再把 `log` 写进标签文本
   - 对数尺度图现在统一以左侧 `scale=log` badge 标注，ratio 刻度不再重复显示 `×`
