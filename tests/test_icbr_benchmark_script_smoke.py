@@ -8,8 +8,10 @@ from pathlib import Path
 import numpy as np
 
 from scripts.icbr_benchmark import (
+    _build_teacher_quality_gate_result,
     _expand_feynman_task_tokens,
     _normalize_variants,
+    _parse_width_mid,
     _resolve_default_tasks_and_seeds,
     _resolve_training_config,
     main,
@@ -233,6 +235,23 @@ def test_feynman_reference_defaults_task_and_seed() -> None:
     assert seeds == [1]
 
 
+def test_parse_width_mid_supports_multiplication_layer_specs() -> None:
+    assert _parse_width_mid("[5,2]") == [[5, 2]]
+    assert _parse_width_mid("5,2") == [5, 2]
+    assert _parse_width_mid("[[5,2],3]") == [[5, 2], 3]
+
+
+def test_teacher_quality_gate_can_disable_r2_requirement() -> None:
+    passed, reason = _build_teacher_quality_gate_result(
+        teacher_test_mse=0.05,
+        teacher_test_r2=-10.0,
+        max_test_mse=0.1,
+        min_test_r2=None,
+    )
+    assert passed is True
+    assert reason == ""
+
+
 def test_normalize_variants_keeps_baseline_and_icbr_full() -> None:
     assert _normalize_variants("icbr_no_replay") == ["baseline", "icbr_no_replay", "icbr_full"]
     assert _normalize_variants("baseline,icbr_full,icbr_no_shared") == [
@@ -392,25 +411,30 @@ def test_visualization_upgrade_emits_variant_and_q123_plots() -> None:
     assert visuals["plots"]["symbolic_time_errorbar"]["chart_type"] == "point_ci95"
     assert visuals["plots"]["symbolic_time_errorbar"]["stat_note"].startswith("point=geometric mean")
     assert visuals["plots"]["symbolic_time_errorbar"]["legend_placement"] == "figure_top_outside"
-    assert "scale" in visuals["plots"]["symbolic_time_errorbar"]["y_label"]
+    assert visuals["plots"]["symbolic_time_errorbar"]["y_label"] == "Symbolic Wall Time (s)"
+    assert visuals["plots"]["symbolic_time_errorbar"]["scale_label_placement"] == "title_band_left"
     assert visuals["plots"]["speedup_boxplot"]["chart_type"] == "violin_box_points"
     assert visuals["plots"]["speedup_boxplot"]["kde_bandwidth_rule"] == "silverman"
-    assert visuals["plots"]["speedup_boxplot"]["y_label"] == "Speedup x (linear scale; higher is better)"
+    assert visuals["plots"]["speedup_boxplot"]["y_scale"] == "log"
+    assert visuals["plots"]["speedup_boxplot"]["y_label"] == "Speedup Ratio (×)"
+    assert visuals["plots"]["speedup_boxplot"]["scale_label_placement"] == "title_band_left"
     assert visuals["plots"]["mse_shift_boxplot"]["chart_type"] == "violin_box_points"
-    assert "scale" in visuals["plots"]["mse_shift_boxplot"]["y_label"]
+    assert visuals["plots"]["mse_shift_boxplot"]["y_label"] == "ICBR MSE - Baseline MSE"
+    assert visuals["plots"]["mse_shift_boxplot"]["scale_label_placement"] == "title_band_left"
     assert visuals["plots"]["variant_overview"]["chart_type"] == "task_row_two_panel_point_ci95"
     assert visuals["plots"]["variant_overview"]["layout"] == "one task per row; two columns = SymbolicTime / merged MSEs"
     assert visuals["plots"]["variant_overview"]["legend_placement"] == "figure_top_outside"
     assert visuals["plots"]["variant_overview"]["scale_label_placement"] == "title_band_left"
-    assert all("scale" in label for label in visuals["plots"]["variant_overview"]["time_y_label_by_task"].values())
-    assert visuals["plots"]["variant_overview"]["mse_y_label"] == "MSE / Target MSE (log scale)"
+    assert all(label == "Symbolic Wall Time (s)" for label in visuals["plots"]["variant_overview"]["time_y_label_by_task"].values())
+    assert visuals["plots"]["variant_overview"]["mse_y_label"] == "MSE"
     assert visuals["plots"]["q123_evidence_by_task"]["chart_type"] == "point_ci95"
-    assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["shared_tensor_symbolic_time_ratio_no_shared_vs_full"] == "log2_ratio"
-    assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["contextual_replay_mse_ratio_no_replay_vs_full"] == "log2_ratio"
-    assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["explicit_commit_mse_ratio_refit_vs_full"] == "log2_ratio"
+    assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["shared_tensor_symbolic_time_ratio_no_shared_vs_full"] == "log"
+    assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["contextual_replay_mse_ratio_no_replay_vs_full"] == "log"
+    assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["explicit_commit_mse_ratio_refit_vs_full"] == "log"
     assert visuals["plots"]["q123_evidence_by_task"]["scale_label_placement"] == "title_band_left"
-    assert visuals["plots"]["q123_evidence_by_task"]["y_label_by_panel"]["contextual_replay_mse_ratio_no_replay_vs_full"] == "log2(no_replay MSE / full MSE)"
-    assert visuals["plots"]["q123_evidence_by_task"]["y_label_by_panel"]["explicit_commit_mse_ratio_refit_vs_full"] == "log2(refit_commit MSE / full MSE)"
+    assert visuals["plots"]["q123_evidence_by_task"]["y_label_by_panel"]["shared_tensor_symbolic_time_ratio_no_shared_vs_full"] == "Symbolic Wall Time Ratio\n(icbr_no_shared / icbr_full, ×)"
+    assert visuals["plots"]["q123_evidence_by_task"]["y_label_by_panel"]["contextual_replay_mse_ratio_no_replay_vs_full"] == "Imitation MSE Ratio\n(icbr_no_replay / icbr_full, ×)"
+    assert visuals["plots"]["q123_evidence_by_task"]["y_label_by_panel"]["explicit_commit_mse_ratio_refit_vs_full"] == "Imitation MSE Ratio\n(icbr_refit_commit / icbr_full, ×)"
 
     summary_md = (out_dir / "icbr_benchmark_summary.md").read_text(encoding="utf-8")
     assert "icbr_benchmark_variant_overview.png" in summary_md
@@ -473,12 +497,18 @@ def test_replot_only_rebuilds_visualizations_from_existing_artifacts() -> None:
     assert expected.issubset({Path(path).name for path in visuals["files"]})
     assert all(Path(path).exists() for path in visuals["files"])
     assert visuals["plots"]["speedup_boxplot"]["kde_bandwidth_rule"] == "silverman"
+    assert visuals["plots"]["speedup_boxplot"]["y_scale"] == "log"
+    assert visuals["plots"]["speedup_boxplot"]["y_label"] == "Speedup Ratio (×)"
+    assert visuals["plots"]["speedup_boxplot"]["scale_label_placement"] == "title_band_left"
     assert visuals["plots"]["variant_overview"]["chart_type"] == "task_row_two_panel_point_ci95"
     assert visuals["plots"]["variant_overview"]["legend_placement"] == "figure_top_outside"
     assert visuals["plots"]["variant_overview"]["scale_label_placement"] == "title_band_left"
-    assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["shared_tensor_symbolic_time_ratio_no_shared_vs_full"] == "log2_ratio"
-    assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["contextual_replay_mse_ratio_no_replay_vs_full"] == "log2_ratio"
+    assert all(label == "Symbolic Wall Time (s)" for label in visuals["plots"]["variant_overview"]["time_y_label_by_task"].values())
+    assert visuals["plots"]["variant_overview"]["mse_y_label"] == "MSE"
+    assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["shared_tensor_symbolic_time_ratio_no_shared_vs_full"] == "log"
+    assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["contextual_replay_mse_ratio_no_replay_vs_full"] == "log"
     assert visuals["plots"]["q123_evidence_by_task"]["scale_label_placement"] == "title_band_left"
+    assert visuals["plots"]["q123_evidence_by_task"]["y_label_by_panel"]["shared_tensor_symbolic_time_ratio_no_shared_vs_full"] == "Symbolic Wall Time Ratio\n(icbr_no_shared / icbr_full, ×)"
 
     summary_md_after = (out_dir / "icbr_benchmark_summary.md").read_text(encoding="utf-8")
     assert "Visualization disabled" not in summary_md_after
@@ -689,7 +719,7 @@ def test_feynman_dataset_file_loading_smoke() -> None:
             "--feynman-split-strategy",
             "random",
             "--feynman-width-mid",
-            "5,2",
+            "[5,2]",
             "--quiet",
             "--no-plots",
         ]
@@ -701,16 +731,18 @@ def test_feynman_dataset_file_loading_smoke() -> None:
     assert summary["config"]["feynman"]["variant"] == "Feynman_with_units"
     assert summary["config"]["feynman"]["dataset_select_seed"] == 1
     assert summary["config"]["feynman"]["split_strategy_seed"] == 1
+    assert summary["config"]["feynman"]["width_mid"] == [5, 2]
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["grid"] == 20
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["k"] == 3
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_train_prune"] is True
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["prune_iters"] == 1
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_steps"] == 100
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_lr"] == 1e-3
-    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_lamb"] == 1e-2
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_lamb"] == 1e-3
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_early_stop"] is True
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_eval_every"] == 5
     assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_min_delta"] == 1e-6
-    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_patience"] == 2
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_patience"] == 3
     row = summary["rows"][0]
     assert row["task"] == "feynman_I_10_7"
     assert row["task_kind"] == "feynman_file"
@@ -720,6 +752,7 @@ def test_feynman_dataset_file_loading_smoke() -> None:
     assert row["feynman_dataset_rows"] == 96
     assert row["feynman_dataset_columns"] == 4
     assert row["feynman_split_seed"] == 1
+    assert row["width"][1] == [5, 2]
     assert row["feynman_equation_metadata"]["Filename"] == "I.10.7"
     assert row["feynman_equation_metadata"]["Formula"] == "m0/sqrt(1-v^2/c^2)"
     task_meta = summary["config"]["feynman"]["task_metadata"]["feynman_I_10_7"]
@@ -789,7 +822,7 @@ def test_feynman_post_prune_override_smoke() -> None:
             "--feynman-split-strategy",
             "random",
             "--feynman-width-mid",
-            "5,2",
+            "[5,2]",
             "--feynman-post-prune-steps",
             "7",
             "--feynman-post-prune-lr",
@@ -818,6 +851,65 @@ def test_feynman_post_prune_override_smoke() -> None:
     assert task_cfg["opt"] == "LBFGS"
 
 
+def test_feynman_run_defaults_width_mid_to_mult_layer_shape() -> None:
+    base_dir = Path("tmp") / f"icbr_benchmark_feynman_default_width_{uuid.uuid4().hex}"
+    dataset_root = base_dir / "datasets"
+    variant_dir = dataset_root / "Feynman_with_units"
+    variant_dir.mkdir(parents=True, exist_ok=True)
+
+    rng = np.random.default_rng(0)
+    m0 = rng.uniform(0.1, 1.0, size=(48, 1))
+    v = rng.uniform(0.0, 0.9, size=(48, 1))
+    c = rng.uniform(1.0, 2.0, size=(48, 1))
+    y = m0 / np.sqrt(1.0 - (v**2) / (c**2))
+    raw = np.concatenate([m0, v, c, y], axis=1).astype(np.float32)
+    np.savetxt(variant_dir / "I.10.7", raw)
+
+    result = run_benchmark(
+        tasks=["feynman_I_10_7"],
+        seeds=[0],
+        output_dir=base_dir / "out",
+        train_num=24,
+        test_num=12,
+        train_steps=1,
+        lr=0.03,
+        lamb=1e-3,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=10.0,
+        teacher_min_test_r2=-10.0,
+        teacher_cache_dir=base_dir / "cache",
+        teacher_cache_mode="off",
+        teacher_cache_version="stage21_default_width_v1",
+        profile_name="feynman_reference",
+        feynman_root=dataset_root,
+        feynman_variant="Feynman_with_units",
+        make_plots=False,
+        quiet=True,
+    )
+
+    summary = result["summary"]
+    assert summary["config"]["feynman"]["width_mid"] == [5, 2]
+    assert summary["config"]["feynman"]["split_strategy"] == "random"
+    assert summary["config"]["feynman"]["split_strategy_seed"] == 1
+    assert summary["config"]["feynman"]["dataset_select_seed"] == 1
+    assert summary["config"]["feynman"]["prune_iters"] == 1
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["opt"] == "Adam"
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["prune_iters"] == 1
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_steps"] == 100
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_lr"] == 1e-3
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_lamb"] == 1e-3
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_eval_every"] == 5
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_min_delta"] == 1e-6
+    assert summary["config"]["teacher_training"]["feynman_I_10_7"]["post_prune_patience"] == 3
+    assert summary["config"]["teacher_quality_gate"]["task_overrides"]["feynman_I_10_7"]["teacher_max_test_mse"] == 0.1
+    assert summary["config"]["teacher_quality_gate"]["task_overrides"]["feynman_I_10_7"]["teacher_min_test_r2"] is None
+    assert summary["rows"][0]["teacher_max_test_mse_threshold"] == 0.1
+    assert summary["rows"][0]["teacher_min_test_r2_threshold"] is None
+    assert summary["rows"][0]["width"][1] == [5, 2]
+
+
 def test_feynman_task_tokens_expand() -> None:
     assert _expand_feynman_task_tokens(
         ["feynman_paper10"],
@@ -837,3 +929,33 @@ def test_feynman_task_tokens_expand() -> None:
         "feynman_II_21_32",
         "feynman_II_34_29a",
     ]
+
+
+def test_prune_iters_override_propagates_to_synthetic_teacher_training() -> None:
+    out_dir = Path("tmp") / f"icbr_benchmark_prune_iters_{uuid.uuid4().hex}"
+    result = run_benchmark(
+        tasks=["minimal"],
+        seeds=[0],
+        output_dir=out_dir,
+        train_num=16,
+        test_num=16,
+        train_steps=2,
+        lr=0.05,
+        lamb=1e-3,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=1.0,
+        teacher_min_test_r2=-1.0,
+        teacher_cache_dir=out_dir / "teacher_cache",
+        teacher_cache_mode="off",
+        teacher_cache_version="stage21_prune_iters_v1",
+        profile_name="quality",
+        prune_iters=2,
+        make_plots=False,
+        quiet=True,
+    )
+
+    summary = result["summary"]
+    assert summary["config"]["teacher_prune_policy"]["prune_iters"] == 2
+    assert summary["config"]["teacher_training"]["minimal"]["prune_iters"] == 2

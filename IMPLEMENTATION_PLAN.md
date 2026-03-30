@@ -1218,6 +1218,94 @@ Status:
 
 Complete
 
+### Stage 21: Support Multiplication-Aware Feynman Width Specs and Teacher Default Alignment
+
+Goal:
+
+修正 `scripts/icbr_benchmark.py` 对 KAN canonical `width` 语义的支持，使 Feynman benchmark 能表达包含乘法单元的中间层宽度，例如 `width=[n_var, [5,2], 1]`；同时对齐 Feynman teacher 默认配置，新增可控制“剪枝 + 微调”轮数的 `prune_iters` 参数，并补齐 benchmark 图表对 log/radio 轴的标签与尺度口径。
+
+Target Files:
+
+- `scripts/icbr_benchmark.py`
+- `tests/test_icbr_benchmark_script_smoke.py`
+- `IMPLEMENTATION_PLAN.md`
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- `--feynman-width-mid` 支持显式 multiplication-aware layer spec：
+  - `[5,2]` 表示一个中间层，含 `5` 个加法节点与 `2` 个乘法节点
+- 保持对旧式纯整数写法的兼容：
+  - `5,3` 仍表示 `width=[n_var, 5, 3, 1]`
+- Feynman task 构造 width 时，允许把 multiplication-aware layer 原样插入完整 width：
+  - `width=[n_var, [5,2], 1]`
+- `feynman_reference` / CLI 默认的 `feynman_width_mid` 切换为 `[5,2]`
+- Feynman 默认 teacher 配置需与以下口径一致：
+  - `feynman_fit_opt=Adam`
+  - `train_num=2000`
+  - `test_num=1000`
+  - `train_steps=200`
+  - `lr=1e-2`
+  - `lamb=1e-2`
+  - `feynman_split_strategy=random`
+  - `feynman_split_strategy_seed=1`
+  - `feynman_dataset_select_seed=1`
+  - `feynman_post_prune_steps=100`
+  - `feynman_post_prune_lr=1e-3`
+  - `feynman_post_prune_lamb=1e-3`
+  - `feynman_post_prune_eval_every=5`
+  - `feynman_post_prune_min_delta=1e-6`
+  - `feynman_post_prune_patience=3`
+  - `teacher_max_test_mse=0.1`
+  - `teacher_min_test_r2` 默认不要求
+- 新增 `prune_iters`，适用于所有 teacher prune 路径（不止 Feynman）：
+  - `prune + refit` 记作一轮
+  - 默认值为 `1`
+- 画图格式口径补充：
+  - 除已确认正确的 `icbr_benchmark_symbolic_time_errorbar.png` 外，其余图在 log 轴下的 y 轴标签必须保留原始单位/原始量纲，不把 `log` 写进标签文本
+  - 所有 ratio 图改为“ratio 值 + log 轴 + 1 为基准线”，而不是直接画 `log2(ratio)` 数值
+  - log 轴刻度应显示为类似 `10^-1, 10^0, 10^1` 的数学形式
+  - 所有在 log 轴上的 point+CI 汇总图继续使用几何均值
+  - Stage 21 补充：
+    - 所有对数尺度图统一在标题左侧显示 `scale=log`
+    - `icbr_benchmark_symbolic_time_errorbar.png` 的 y 轴标签仅保留 `Symbolic Wall Time (s)`，不再把 scale 写进标签
+    - `icbr_benchmark_q123_evidence_by_task.png` 的长 y 轴标签拆成两行，括号部分置于第二行
+    - ratio 图的刻度文本不再重复追加 `×`，并优先显示普通数值（例如 `10` 而不是 `1e1`）
+    - `speedup` ratio 轴的自适应边界要收紧到已有数据附近，避免基准线下方出现明显空白
+- summary/config/report 中记录的 Feynman `width_mid` 应反映新的默认口径，而不是退化为旧式平铺整数列表
+
+Implementation Constraints:
+
+- 不改动 ICBR 主算法路径，只修正 benchmark 侧 Feynman width 解析、teacher 默认值与 prune/refit 编排层
+- 不破坏现有 synthetic task 的 `width` 行为
+- 对已有纯整数 Feynman width 写法保持兼容
+
+Success Criteria:
+
+- benchmark 可接受 `--feynman-width-mid [5,2]`
+- Feynman task spec 的实际 `width` 可正确生成为 `[n_var, [5,2], 1]`
+- 省略 `--feynman-width-mid` 时，summary 中默认显示 `[5,2]`
+- Feynman 默认 teacher 配置与 Stage 21 指定值一致，特别是：
+  - `post_prune_lamb=1e-3`
+  - `post_prune_patience=3`
+  - `teacher_min_test_r2=None`
+- benchmark 支持 `prune_iters`，且可传递到 synthetic / Feynman teacher 训练配置与 cache key
+- `speedup` / `Q1-Q3` 等 ratio 图改为 ratio 值的 log 轴表达，基准线为 `1`
+- `variant_overview` / `mse_shift` 等图的 y 轴标签不再把 scale 写入标签文本
+- `symbolic_time_errorbar` / `speedup_boxplot` / `mse_shift_boxplot` / `q123_evidence_by_task` 在对数尺度时显式显示 `scale=log`
+- `q123` 面板标签换行后不再与刻度区重叠，ratio 刻度不重复显示 `×`
+- 相关 smoke test 通过，且现有 benchmark 相关测试不回归
+
+Validation:
+
+- `python -m py_compile scripts/icbr_benchmark.py tests/test_icbr_benchmark_script_smoke.py`
+- `pytest tests/test_icbr_benchmark_script_smoke.py -k "feynman or width_mid or prune_iters or teacher_quality_gate_can_disable_r2_requirement or quality_profile_enables_teacher_prune_by_default"`
+- `pytest tests/test_icbr_benchmark_script_smoke.py -k "visualization_upgrade_emits_variant_and_q123_plots or replot_only_rebuilds_visualizations_from_existing_artifacts"`
+
+Status:
+
+Complete
+
 
 ## 5. Acceptance Criteria
 
@@ -1263,3 +1351,4 @@ Phase I 仅在以下条件全部满足时视为完成:
 18. Stage 18: Visualization Upgrade for Stage 16 10-Seed Outputs
 19. Stage 19: Benchmark Quietness, Formula Display Cleanup, and Pipeline Sanity Audit
 20. Stage 20: Per-Task Vertical Variant Overview Layout
+21. Stage 21: Support Multiplication-Aware Feynman Width Specs and Teacher Default Alignment

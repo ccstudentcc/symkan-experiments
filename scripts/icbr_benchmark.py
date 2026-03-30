@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import argparse
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 import csv
@@ -14,7 +15,7 @@ import warnings
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Union
 
 import numpy as np
 import torch
@@ -161,6 +162,8 @@ _FEYNMAN_PAPER10_DATASETS = [
     "feynman_II_34_29a",
 ]
 
+_WidthToken = Union[int, list[int]]
+
 
 @dataclass(frozen=True)
 class _VisualizationStyle:
@@ -215,7 +218,7 @@ _REPLOT_VARIANT_METRICS = {
 class _TaskSpec:
     name: str
     n_var: int
-    width: list[int]
+    width: list[_WidthToken]
     target_fn: Callable[[torch.Tensor], torch.Tensor] | None
     lib: list[str] | None
     icbr_topk: int | None = None
@@ -238,6 +241,7 @@ class _TaskSpec:
     teacher_post_train_prune: bool = False
     teacher_prune_node_th: float = 1e-2
     teacher_prune_edge_th: float = 3e-2
+    teacher_prune_iters: int = 1
     teacher_post_prune_steps: int = 0
     teacher_post_prune_lr: float = 1e-3
     teacher_post_prune_lamb: float = 1e-2
@@ -287,14 +291,53 @@ def _task_specs() -> dict[str, _TaskSpec]:
     }
 
 
-def _parse_width_mid(text: str) -> list[int]:
-    values = [chunk.strip() for chunk in text.split(",") if chunk.strip()]
+def _normalize_width_token(value: object) -> _WidthToken:
+    if isinstance(value, (int, np.integer)):
+        normalized = int(value)
+        if normalized <= 0:
+            raise ValueError("Width values must be positive.")
+        return normalized
+    if isinstance(value, tuple):
+        value = list(value)
+    if isinstance(value, list):
+        if len(value) != 2:
+            raise ValueError("Multiplication-aware width entries must have exactly two integers: [num_sum, num_mult].")
+        normalized_pair = [_normalize_width_token(item) for item in value]
+        if not all(isinstance(item, int) for item in normalized_pair):
+            raise ValueError("Nested width entries cannot contain further nested structures.")
+        return [int(normalized_pair[0]), int(normalized_pair[1])]
+    raise ValueError("Width entries must be integers or two-integer lists like [5,2].")
+
+
+def _serialize_width_tokens(width_tokens: list[_WidthToken]) -> _WidthToken | list[_WidthToken]:
+    serialized = [list(token) if isinstance(token, list) else int(token) for token in width_tokens]
+    if len(serialized) == 1:
+        single = serialized[0]
+        return list(single) if isinstance(single, list) else int(single)
+    return serialized
+
+
+def _parse_width_mid(text: str) -> list[_WidthToken]:
+    raw_text = text.strip()
+    if not raw_text:
+        raise ValueError("feynman_width_mid must contain at least one width entry.")
+
+    if raw_text.startswith("[") and raw_text.endswith("]"):
+        parsed = ast.literal_eval(raw_text)
+        if isinstance(parsed, tuple):
+            parsed = list(parsed)
+        if isinstance(parsed, list):
+            if all(isinstance(item, (int, np.integer)) for item in parsed):
+                if len(parsed) == 2:
+                    return [_normalize_width_token(parsed)]
+                return [_normalize_width_token(item) for item in parsed]
+            return [_normalize_width_token(item) for item in parsed]
+        return [_normalize_width_token(parsed)]
+
+    values = [chunk.strip() for chunk in raw_text.split(",") if chunk.strip()]
     if not values:
         raise ValueError("feynman_width_mid must contain at least one integer.")
-    parsed = [int(value) for value in values]
-    if any(value <= 0 for value in parsed):
-        raise ValueError("feynman_width_mid values must be positive.")
-    return parsed
+    return [_normalize_width_token(int(value)) for value in values]
 
 
 def _feynman_cli_to_filename(ds_name: str) -> str:
@@ -454,7 +497,7 @@ def _build_feynman_task_spec(
     task_name: str,
     feynman_root: Path,
     feynman_variant: str,
-    feynman_width_mid: list[int],
+    feynman_width_mid: list[_WidthToken],
     feynman_split_strategy: str,
     feynman_split_strategy_seed: int,
     feynman_post_prune_steps: int | None,
@@ -463,6 +506,7 @@ def _build_feynman_task_spec(
     feynman_post_prune_eval_every: int | None,
     feynman_post_prune_min_delta: float | None,
     feynman_post_prune_patience: int | None,
+    prune_iters: int,
     feynman_fit_opt: str | None,
     equations_map: dict[str, str],
     equations_metadata_map: dict[str, dict[str, str]],
@@ -484,6 +528,8 @@ def _build_feynman_task_spec(
         raise ValueError("feynman_post_prune_eval_every must be > 0 when provided.")
     if feynman_post_prune_patience is not None and int(feynman_post_prune_patience) <= 0:
         raise ValueError("feynman_post_prune_patience must be > 0 when provided.")
+    if int(prune_iters) < 0:
+        raise ValueError("prune_iters must be >= 0.")
     if feynman_fit_opt is not None and feynman_fit_opt not in _FEYNMAN_FIT_OPTS:
         raise ValueError(
             f"Unsupported feynman_fit_opt: {feynman_fit_opt}. Expected one of {list(_FEYNMAN_FIT_OPTS)}"
@@ -494,14 +540,14 @@ def _build_feynman_task_spec(
 
     post_prune_steps = int(feynman_post_prune_steps) if feynman_post_prune_steps is not None else 100
     post_prune_lr = float(feynman_post_prune_lr) if feynman_post_prune_lr is not None else 1e-3
-    post_prune_lamb = float(feynman_post_prune_lamb) if feynman_post_prune_lamb is not None else 1e-2
+    post_prune_lamb = float(feynman_post_prune_lamb) if feynman_post_prune_lamb is not None else 1e-3
     post_prune_eval_every = (
         int(feynman_post_prune_eval_every) if feynman_post_prune_eval_every is not None else 5
     )
     post_prune_min_delta = (
         float(feynman_post_prune_min_delta) if feynman_post_prune_min_delta is not None else 1e-6
     )
-    post_prune_patience = int(feynman_post_prune_patience) if feynman_post_prune_patience is not None else 2
+    post_prune_patience = int(feynman_post_prune_patience) if feynman_post_prune_patience is not None else 3
 
     return _TaskSpec(
         name=task_name,
@@ -519,12 +565,15 @@ def _build_feynman_task_spec(
         dataset_total_columns=int(raw.shape[1]),
         target_formula=equations_map.get(filename),
         equation_metadata=dict(equations_metadata_map.get(filename, {})),
+        teacher_max_test_mse=0.1,
+        teacher_min_test_r2=None,
         teacher_grid=20,
         teacher_k=3,
         teacher_fit_opt=fit_opt,
         teacher_post_train_prune=True,
         teacher_prune_node_th=1e-2,
         teacher_prune_edge_th=1e-2,
+        teacher_prune_iters=int(prune_iters),
         teacher_post_prune_steps=post_prune_steps,
         teacher_post_prune_lr=post_prune_lr,
         teacher_post_prune_lamb=post_prune_lamb,
@@ -540,7 +589,7 @@ def _resolve_task_specs(
     tasks: list[str],
     feynman_root: Path,
     feynman_variant: str,
-    feynman_width_mid: list[int],
+    feynman_width_mid: list[_WidthToken],
     feynman_split_strategy: str,
     feynman_split_strategy_seed: int,
     feynman_post_prune_steps: int | None,
@@ -549,6 +598,7 @@ def _resolve_task_specs(
     feynman_post_prune_eval_every: int | None,
     feynman_post_prune_min_delta: float | None,
     feynman_post_prune_patience: int | None,
+    prune_iters: int,
     feynman_fit_opt: str | None,
     feynman_max_datasets: int,
     feynman_dataset_select_seed: int,
@@ -595,6 +645,7 @@ def _resolve_task_specs(
                 feynman_post_prune_eval_every=feynman_post_prune_eval_every,
                 feynman_post_prune_min_delta=feynman_post_prune_min_delta,
                 feynman_post_prune_patience=feynman_post_prune_patience,
+                prune_iters=prune_iters,
                 feynman_fit_opt=feynman_fit_opt,
                 equations_map=equations_map,
                 equations_metadata_map=equations_metadata_map,
@@ -632,8 +683,9 @@ def _resolve_task_specs(
             "min_delta": feynman_post_prune_min_delta,
             "patience": feynman_post_prune_patience,
         },
+        "prune_iters": int(prune_iters),
         "fit_opt_override": feynman_fit_opt,
-        "width_mid": feynman_width_mid,
+        "width_mid": _serialize_width_tokens(feynman_width_mid),
         "max_datasets": int(feynman_max_datasets),
         "dataset_select_seed": int(feynman_dataset_select_seed),
         "paper10_datasets": list(_FEYNMAN_PAPER10_DATASETS),
@@ -717,78 +769,84 @@ def _train_teacher_model(
         pruned.auto_save = False
         return pruned
 
-    if spec.teacher_post_train_prune:
-        try:
-            model = _prune_teacher_once(
-                float(spec.teacher_prune_node_th),
-                float(spec.teacher_prune_edge_th),
-            )
-        except Exception as prune_exc:
-            warnings.warn(
-                f"Teacher prune failed for task={spec.name} with configured thresholds; "
-                f"falling back to no-threshold prune. error={prune_exc!r}",
-                RuntimeWarning,
-            )
-            try:
-                model = _prune_teacher_once(0.0, 0.0)
-            except Exception as prune_fallback_exc:
-                warnings.warn(
-                    f"Fallback prune also failed for task={spec.name}; keep unpruned teacher model. "
-                    f"error={prune_fallback_exc!r}",
-                    RuntimeWarning,
-                )
-        # Keep benchmark loops side-effect free: disable checkpoint auto-save throughout tuning.
-        model.auto_save = False
-        post_prune_steps = int(spec.teacher_post_prune_steps)
-        if post_prune_steps > 0:
-            post_prune_lr = float(spec.teacher_post_prune_lr)
-            post_prune_lamb = float(spec.teacher_post_prune_lamb)
-            if bool(spec.teacher_post_prune_early_stop):
-                eval_every = max(1, int(spec.teacher_post_prune_eval_every))
-                patience = max(1, int(spec.teacher_post_prune_patience))
-                min_delta = float(spec.teacher_post_prune_min_delta)
-                remaining_steps = post_prune_steps
-                prev_train_mse: float | None = None
-                stable_checks = 0
-                while remaining_steps > 0:
-                    chunk_steps = min(eval_every, remaining_steps)
-                    with _suppress_console_output(quiet):
-                        model.fit(
-                            dataset,
-                            opt=spec.teacher_fit_opt,
-                            steps=chunk_steps,
-                            lr=post_prune_lr,
-                            update_grid=False,
-                            batch=-1,
-                            lamb=post_prune_lamb,
-                            log=max(chunk_steps + 1, 999999),
-                        )
-                    remaining_steps -= chunk_steps
-                    with torch.no_grad():
-                        train_pred = model(dataset["train_input"])
-                        train_mse = float(
-                            torch.mean((train_pred - dataset["train_label"]).pow(2)).item()
-                        )
-                    if prev_train_mse is not None:
-                        if abs(prev_train_mse - train_mse) <= min_delta:
-                            stable_checks += 1
-                        else:
-                            stable_checks = 0
-                    prev_train_mse = train_mse
-                    if stable_checks >= patience:
-                        break
-            else:
+    def _refit_teacher_once(post_prune_steps: int, post_prune_lr: float, post_prune_lamb: float) -> None:
+        if post_prune_steps <= 0:
+            return
+        if bool(spec.teacher_post_prune_early_stop):
+            eval_every = max(1, int(spec.teacher_post_prune_eval_every))
+            patience = max(1, int(spec.teacher_post_prune_patience))
+            min_delta = float(spec.teacher_post_prune_min_delta)
+            remaining_steps = post_prune_steps
+            prev_train_mse: float | None = None
+            stable_checks = 0
+            while remaining_steps > 0:
+                chunk_steps = min(eval_every, remaining_steps)
                 with _suppress_console_output(quiet):
                     model.fit(
                         dataset,
                         opt=spec.teacher_fit_opt,
-                        steps=post_prune_steps,
+                        steps=chunk_steps,
                         lr=post_prune_lr,
                         update_grid=False,
                         batch=-1,
                         lamb=post_prune_lamb,
-                        log=max(post_prune_steps + 1, 999999),
+                        log=max(chunk_steps + 1, 999999),
                     )
+                remaining_steps -= chunk_steps
+                with torch.no_grad():
+                    train_pred = model(dataset["train_input"])
+                    train_mse = float(
+                        torch.mean((train_pred - dataset["train_label"]).pow(2)).item()
+                    )
+                if prev_train_mse is not None:
+                    if abs(prev_train_mse - train_mse) <= min_delta:
+                        stable_checks += 1
+                    else:
+                        stable_checks = 0
+                prev_train_mse = train_mse
+                if stable_checks >= patience:
+                    break
+        else:
+            with _suppress_console_output(quiet):
+                model.fit(
+                    dataset,
+                    opt=spec.teacher_fit_opt,
+                    steps=post_prune_steps,
+                    lr=post_prune_lr,
+                    update_grid=False,
+                    batch=-1,
+                    lamb=post_prune_lamb,
+                    log=max(post_prune_steps + 1, 999999),
+                )
+
+    if spec.teacher_post_train_prune:
+        prune_iters = max(0, int(spec.teacher_prune_iters))
+        post_prune_steps = int(spec.teacher_post_prune_steps)
+        post_prune_lr = float(spec.teacher_post_prune_lr)
+        post_prune_lamb = float(spec.teacher_post_prune_lamb)
+        for _ in range(prune_iters):
+            try:
+                model = _prune_teacher_once(
+                    float(spec.teacher_prune_node_th),
+                    float(spec.teacher_prune_edge_th),
+                )
+            except Exception as prune_exc:
+                warnings.warn(
+                    f"Teacher prune failed for task={spec.name} with configured thresholds; "
+                    f"falling back to no-threshold prune. error={prune_exc!r}",
+                    RuntimeWarning,
+                )
+                try:
+                    model = _prune_teacher_once(0.0, 0.0)
+                except Exception as prune_fallback_exc:
+                    warnings.warn(
+                        f"Fallback prune also failed for task={spec.name}; keep current teacher model for refit. "
+                        f"error={prune_fallback_exc!r}",
+                        RuntimeWarning,
+                    )
+            # Keep benchmark loops side-effect free: disable checkpoint auto-save throughout tuning.
+            model.auto_save = False
+            _refit_teacher_once(post_prune_steps, post_prune_lr, post_prune_lamb)
     return model
 
 
@@ -822,6 +880,7 @@ def _build_teacher_cache_identity(
         "teacher_post_train_prune": bool(spec.teacher_post_train_prune),
         "teacher_prune_node_th": float(spec.teacher_prune_node_th),
         "teacher_prune_edge_th": float(spec.teacher_prune_edge_th),
+        "teacher_prune_iters": int(spec.teacher_prune_iters),
         "teacher_post_prune_steps": int(spec.teacher_post_prune_steps),
         "teacher_post_prune_lr": float(spec.teacher_post_prune_lr),
         "teacher_post_prune_lamb": float(spec.teacher_post_prune_lamb),
@@ -1141,13 +1200,13 @@ def _build_teacher_quality_gate_result(
     *,
     teacher_test_mse: float,
     teacher_test_r2: float,
-    max_test_mse: float,
-    min_test_r2: float,
+    max_test_mse: float | None,
+    min_test_r2: float | None,
 ) -> tuple[bool, str]:
     gate_failures: list[str] = []
-    if not math.isfinite(teacher_test_mse) or teacher_test_mse > max_test_mse:
+    if max_test_mse is not None and (not math.isfinite(teacher_test_mse) or teacher_test_mse > max_test_mse):
         gate_failures.append(f"teacher_test_mse={teacher_test_mse:.6g} > {max_test_mse:.6g}")
-    if not math.isfinite(teacher_test_r2) or teacher_test_r2 < min_test_r2:
+    if min_test_r2 is not None and (not math.isfinite(teacher_test_r2) or teacher_test_r2 < min_test_r2):
         gate_failures.append(f"teacher_test_r2={teacher_test_r2:.6g} < {min_test_r2:.6g}")
     if gate_failures:
         return False, "; ".join(gate_failures)
@@ -1689,8 +1748,14 @@ def _generate_visualizations(
                 return "symlog"
             return scale
 
+        def _badge_scale_name(scale: str) -> str:
+            canonical = _canonical_scale_name(scale)
+            if canonical in {"log", "symlog"}:
+                return "log"
+            return canonical
+
         def _format_scale_badge(scale: str) -> str:
-            return f"scale={scale}"
+            return f"scale={_badge_scale_name(scale)}"
 
         def _format_scale_suffix(scale: str) -> str:
             canonical = _canonical_scale_name(scale)
@@ -1738,6 +1803,11 @@ def _generate_visualizations(
                 fontsize=style.annotation_font_size,
                 color=style.text_color,
             )
+
+        def _maybe_add_axis_scale_badge(ax, scale: str) -> None:
+            if _canonical_scale_name(scale) == "linear":
+                return
+            _add_axis_scale_badge(ax, scale)
 
         def _build_note_lines(*, summary_line: str, measure_line: str, extra_line: str | None = None) -> list[str]:
             lines = [f"Stats: {summary_line}", f"Measure: {measure_line}"]
@@ -1795,6 +1865,136 @@ def _generate_visualizations(
             _apply_value_axis(ax, positive)
             return "linear"
 
+        def _apply_log_tick_mathtext(ax) -> None:
+            ax.yaxis.set_major_locator(ticker.LogLocator(base=10.0))
+            ax.yaxis.set_major_formatter(ticker.LogFormatterMathtext(base=10.0))
+            ax.yaxis.set_minor_locator(ticker.LogLocator(base=10.0, subs=np.arange(2, 10) * 0.1))
+            ax.yaxis.set_minor_formatter(ticker.NullFormatter())
+
+        def _thin_y_major_ticks(
+            ax,
+            ticks: list[float],
+            *,
+            preferred_ticks: list[float] | None = None,
+            min_pixel_gap: float = 26.0,
+        ) -> list[float]:
+            visible_min, visible_max = sorted(ax.get_ylim())
+            visible_ticks = [
+                float(tick)
+                for tick in ticks
+                if math.isfinite(tick) and visible_min * 0.999 <= tick <= visible_max * 1.001
+            ]
+            if len(visible_ticks) <= 1:
+                return visible_ticks
+            ax.figure.canvas.draw()
+            preferred_keys = {round(float(tick), 12) for tick in (preferred_ticks or [])}
+            positions = {
+                tick: float(ax.transData.transform((0.0, tick))[1])
+                for tick in visible_ticks
+            }
+            ordered_ticks = sorted(visible_ticks, key=lambda tick: positions[tick])
+            kept_ticks: list[float] = [ordered_ticks[0]]
+            for idx, tick in enumerate(ordered_ticks[1:], start=1):
+                is_last = idx == len(ordered_ticks) - 1
+                is_preferred = round(tick, 12) in preferred_keys
+                gap = positions[tick] - positions[kept_ticks[-1]]
+                if gap >= min_pixel_gap:
+                    kept_ticks.append(tick)
+                    continue
+                if is_preferred and round(kept_ticks[-1], 12) not in preferred_keys:
+                    kept_ticks[-1] = tick
+                    continue
+                if is_last and round(kept_ticks[-1], 12) not in preferred_keys:
+                    kept_ticks[-1] = tick
+            if round(ordered_ticks[-1], 12) not in {round(tick, 12) for tick in kept_ticks}:
+                if len(kept_ticks) >= 2:
+                    previous_tick = kept_ticks[-2]
+                    if positions[ordered_ticks[-1]] - positions[previous_tick] >= min_pixel_gap:
+                        kept_ticks[-1] = ordered_ticks[-1]
+                else:
+                    kept_ticks.append(ordered_ticks[-1])
+            return sorted({float(round(tick, 12)) for tick in kept_ticks})
+
+        def _format_ratio_tick(value: float, _position: float | None = None) -> str:
+            if not math.isfinite(value) or value <= 0.0:
+                return ""
+            if math.isclose(value, 1.0, rel_tol=1e-9, abs_tol=1e-12):
+                return "1"
+            if math.isclose(value, round(value), rel_tol=1e-9, abs_tol=1e-12):
+                return str(int(round(value)))
+            if 1e-3 <= value <= 1e4:
+                return f"{value:.4g}"
+            if value >= 10.0 or value < 0.1:
+                return f"{value:.0e}".replace("e+0", "e").replace("e+", "e").replace("e-0", "e-")
+            return f"{value:.3g}"
+
+        def _build_ratio_ticks(lower: float, upper: float, *, baseline: float = 1.0) -> list[float]:
+            if not math.isfinite(lower) or not math.isfinite(upper) or lower <= 0.0 or upper <= 0.0:
+                return []
+            if lower >= upper:
+                return [lower]
+
+            span_ratio = upper / lower
+            ticks: list[float] = []
+            if span_ratio <= 3.5:
+                if lower < baseline < upper:
+                    lower_mid = math.sqrt(lower * baseline)
+                    upper_mid = math.sqrt(baseline * upper)
+                    ticks = [lower, lower_mid, baseline, upper_mid, upper]
+                else:
+                    ticks = list(np.geomspace(lower, upper, num=5))
+            else:
+                min_exp = int(math.floor(math.log10(lower))) - 1
+                max_exp = int(math.ceil(math.log10(upper))) + 1
+                preferred = (1.0, 2.0, 5.0)
+                for exp in range(min_exp, max_exp + 1):
+                    scale = 10.0**exp
+                    for mult in preferred:
+                        candidate = mult * scale
+                        if lower * 0.999 <= candidate <= upper * 1.001:
+                            ticks.append(candidate)
+                if lower < baseline < upper:
+                    ticks.append(baseline)
+                if not ticks:
+                    ticks = list(np.geomspace(lower, upper, num=5))
+
+            deduped = sorted(
+                {
+                    float(round(tick, 12))
+                    for tick in ticks
+                    if math.isfinite(tick) and lower * 0.999 <= tick <= upper * 1.001 and tick > 0.0
+                }
+            )
+            return deduped
+
+        def _apply_ratio_axis(
+            ax,
+            values: list[float],
+            *,
+            baseline: float = 1.0,
+            include_baseline_in_limits: bool = True,
+        ) -> str:
+            positive = [value for value in values if math.isfinite(value) and value > 0.0]
+            if not positive:
+                return "linear"
+            ax.set_yscale("log")
+            limit_values = positive + [baseline] if include_baseline_in_limits else positive
+            lower_raw = min(limit_values)
+            upper_raw = max(limit_values)
+            span_ratio = max(upper_raw / max(lower_raw, 1e-12), 1.0001)
+            lower = lower_raw / (span_ratio ** 0.025)
+            upper = upper_raw * (span_ratio ** 0.035)
+            ax.set_ylim(lower, upper)
+            ratio_ticks = _build_ratio_ticks(lower, upper, baseline=baseline)
+            if ratio_ticks:
+                ratio_ticks = _thin_y_major_ticks(ax, ratio_ticks, preferred_ticks=[baseline])
+                ax.yaxis.set_major_locator(ticker.FixedLocator(ratio_ticks))
+                ax.yaxis.set_major_formatter(ticker.FuncFormatter(_format_ratio_tick))
+                ax.yaxis.set_minor_locator(ticker.NullLocator())
+            else:
+                _apply_log_tick_mathtext(ax)
+            return "log"
+
         def _apply_symlog_axis(ax, values: list[float]) -> str:
             finite_nonzero = [value for value in values if math.isfinite(value) and abs(value) > 0.0]
             if len(finite_nonzero) < 2:
@@ -1807,6 +2007,8 @@ def _generate_visualizations(
             return f"symlog(linthresh={linthresh:.1e})"
 
         def _maybe_use_scientific_ticks(ax, values: list[float]) -> None:
+            if ax.get_yscale() != "linear":
+                return
             finite_values = [value for value in values if math.isfinite(value)]
             if not finite_values:
                 return
@@ -2033,10 +2235,11 @@ def _generate_visualizations(
                     },
                 ],
                 title="Symbolic Wall Time by Task",
-                ylabel="Symbolic wall time (s)",
+                ylabel="Symbolic Wall Time (s)",
             )
             time_scale = _apply_time_axis(ax, all_values)
-            ax.set_ylabel(_with_scale_ylabel("Symbolic wall time (s)", time_scale))
+            ax.set_ylabel("Symbolic Wall Time (s)")
+            _maybe_add_axis_scale_badge(ax, time_scale)
             _maybe_use_scientific_ticks(ax, all_values)
             handles, labels = ax.get_legend_handles_labels()
             legend = fig.legend(
@@ -2064,7 +2267,8 @@ def _generate_visualizations(
                 "path": str(time_plot),
                 "chart_type": "point_ci95",
                 "y_scale": time_scale,
-                "y_label": _with_scale_ylabel("Symbolic wall time (s)", time_scale),
+                "y_label": "Symbolic Wall Time (s)",
+                "scale_label_placement": "title_band_left",
                 "legend_placement": "figure_top_outside",
                 "stat_note": "point=geometric mean; whisker=95% CI on log-scale estimate",
                 "design_reason": "Timing metrics are strictly positive and right-skewed, so geometric mean on a log axis is more stable for paper comparison.",
@@ -2083,17 +2287,25 @@ def _generate_visualizations(
                 data=speedup_data,
                 labels=tasks,
                 title="ICBR Speedup vs Baseline",
-                ylabel="Speedup x (linear scale; higher is better)",
+                ylabel="Speedup Ratio (×)",
                 baseline=1.0,
                 rng_seed=7,
             )
+            speedup_scale = _apply_ratio_axis(
+                ax,
+                speedup_values,
+                baseline=1.0,
+                include_baseline_in_limits=False,
+            )
+            ax.set_ylabel("Speedup Ratio (×)")
+            _maybe_add_axis_scale_badge(ax, speedup_scale)
             _maybe_use_scientific_ticks(ax, speedup_values)
             _add_figure_note(
                 fig,
                 _build_note_lines(
                     summary_line=f"violin KDE bw={style.kde_bandwidth_rule}; box=median/IQR; dots=seed rows",
                     measure_line="per-task speedup distribution vs baseline",
-                    extra_line="Reference: dashed line at x1 means parity with baseline symbolic time",
+                    extra_line="Reference: dashed line at 1x means parity with baseline symbolic time; log axis keeps multiplicative gaps symmetric",
                 ),
             )
             fig.tight_layout(rect=(0.0, 0.08, 1.0, 1.0))
@@ -2103,11 +2315,12 @@ def _generate_visualizations(
             plot_metadata["speedup_boxplot"] = {
                 "path": str(speedup_plot),
                 "chart_type": "violin_box_points",
-                "y_scale": "linear",
-                "y_label": "Speedup x (linear scale; higher is better)",
+                "y_scale": speedup_scale,
+                "y_label": "Speedup Ratio (×)",
+                "scale_label_placement": "title_band_left",
                 "kde_bandwidth_rule": style.kde_bandwidth_rule,
                 "stat_note": "violin=density; box=median/IQR; points=seed rows",
-                "design_reason": "Speedup is distribution-shaped and benefits from showing dispersion, skew, and individual seeds together.",
+                "design_reason": "Speedup is multiplicative by definition, so a log axis with 1x as the neutral reference preserves ratio semantics.",
             }
         else:
             warnings_list.append(
@@ -2128,7 +2341,8 @@ def _generate_visualizations(
                 rng_seed=11,
             )
             mse_scale = _apply_symlog_axis(ax, mse_values)
-            ax.set_ylabel(_with_scale_ylabel("ICBR MSE - baseline MSE", mse_scale))
+            ax.set_ylabel("ICBR MSE - Baseline MSE")
+            _maybe_add_axis_scale_badge(ax, mse_scale)
             _maybe_use_scientific_ticks(ax, mse_values)
             _add_figure_note(
                 fig,
@@ -2146,7 +2360,8 @@ def _generate_visualizations(
                 "path": str(mse_plot),
                 "chart_type": "violin_box_points",
                 "y_scale": mse_scale,
-                "y_label": _with_scale_ylabel("ICBR MSE - baseline MSE", mse_scale),
+                "y_label": "ICBR MSE - Baseline MSE",
+                "scale_label_placement": "title_band_left",
                 "kde_bandwidth_rule": style.kde_bandwidth_rule,
                 "stat_note": "violin=density; box=median/IQR; points=seed rows",
                 "design_reason": "Most tasks cluster near zero while long-tail tasks can dominate, so a zero-centered robust scale is needed.",
@@ -2156,8 +2371,8 @@ def _generate_visualizations(
         plt.close(fig)
 
         variant_metrics = [
-            ("symbolic_wall_time_s", "SymbolicTime", "Time (s)", style.icbr_color),
-            ("merged_mse", "MSEs", "MSE / Target MSE", style.accent_green),
+            ("symbolic_wall_time_s", "SymbolicTime", "Symbolic Wall Time (s)", style.icbr_color),
+            ("merged_mse", "MSEs", "MSE", style.accent_green),
         ]
         fig, axes = plt.subplots(
             nrows=len(tasks),
@@ -2203,11 +2418,11 @@ def _generate_visualizations(
                             ylabel=ylabel,
                         )
                         time_scale_by_task[task_name] = _apply_time_axis(axis, all_values)
-                        _add_axis_scale_badge(axis, time_scale_by_task[task_name])
-                        axis.set_ylabel(_with_scale_ylabel("Time (s)", time_scale_by_task[task_name]))
+                        _maybe_add_axis_scale_badge(axis, time_scale_by_task[task_name])
+                        axis.set_ylabel("Symbolic Wall Time (s)")
                         _maybe_use_scientific_ticks(axis, all_values)
                     else:
-                        _apply_axes_style(axis, title=f"{task_name} | {metric_title}", ylabel="Time (s)")
+                        _apply_axes_style(axis, title=f"{task_name} | {metric_title}", ylabel="Symbolic Wall Time (s)")
                         axis.set_xticks(np.arange(len(variants), dtype=float))
                         axis.set_xticklabels(variants, rotation=20, ha="right")
                     continue
@@ -2260,13 +2475,14 @@ def _generate_visualizations(
                     axis.set_yscale("log")
                     mse_scale_by_task[task_name] = "log"
                     _apply_value_axis(axis, all_values)
-                    _add_axis_scale_badge(axis, mse_scale_by_task[task_name])
-                    axis.set_ylabel(_with_scale_ylabel("MSE / Target MSE", mse_scale_by_task[task_name]))
+                    _apply_log_tick_mathtext(axis)
+                    _maybe_add_axis_scale_badge(axis, mse_scale_by_task[task_name])
+                    axis.set_ylabel("MSE")
                     if variant_mse_legend_handles is None or variant_mse_legend_labels is None:
                         variant_mse_legend_handles, variant_mse_legend_labels = axis.get_legend_handles_labels()
                     _maybe_use_scientific_ticks(axis, all_values)
                 else:
-                    _apply_axes_style(axis, title=f"{task_name} | {metric_title}", ylabel="MSE / Target MSE")
+                    _apply_axes_style(axis, title=f"{task_name} | {metric_title}", ylabel="MSE")
                     axis.set_xticks(np.arange(len(variants), dtype=float))
                     axis.set_xticklabels(variants, rotation=20, ha="right")
         if has_variant_data:
@@ -2299,10 +2515,10 @@ def _generate_visualizations(
                 "time_scale_by_task": time_scale_by_task,
                 "mse_scale_by_task": mse_scale_by_task,
                 "time_y_label_by_task": {
-                    task_name: _with_scale_ylabel("Time (s)", scale)
+                    task_name: "Symbolic Wall Time (s)"
                     for task_name, scale in time_scale_by_task.items()
                 },
-                "mse_y_label": _with_scale_ylabel("MSE / Target MSE", "log"),
+                "mse_y_label": "MSE",
                 "scale_label_placement": "title_band_left",
                 "legend_placement": "figure_top_outside",
                 "stat_note": "point=geometric mean; whisker=95% CI on log-scale estimate",
@@ -2316,26 +2532,26 @@ def _generate_visualizations(
             (
                 "shared_tensor_symbolic_time_ratio_no_shared_vs_full",
                 "Q1 Shared-Tensor Evidence",
-                "log2(no_shared / full symbolic time ratio)",
-                0.0,
+                "Symbolic Wall Time Ratio\n(icbr_no_shared / icbr_full, ×)",
+                1.0,
                 style.accent_gold,
-                "log2_ratio",
+                "log",
             ),
             (
                 "contextual_replay_mse_ratio_no_replay_vs_full",
                 "Q2 Contextual-Replay Evidence",
-                "log2(no_replay MSE / full MSE)",
-                0.0,
+                "Imitation MSE Ratio\n(icbr_no_replay / icbr_full, ×)",
+                1.0,
                 style.accent_green,
-                "log2_ratio",
+                "log",
             ),
             (
                 "explicit_commit_mse_ratio_refit_vs_full",
                 "Q3 Explicit-Commit Evidence",
-                "log2(refit_commit MSE / full MSE)",
-                0.0,
+                "Imitation MSE Ratio\n(icbr_refit_commit / icbr_full, ×)",
+                1.0,
                 style.accent_red,
-                "log2_ratio",
+                "log",
             ),
         ]
         fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(10.8, 11.4), squeeze=False)
@@ -2343,7 +2559,8 @@ def _generate_visualizations(
         challenge_scale_map: dict[str, str] = {}
         for axis, (metric_name, title, ylabel, baseline_line, color, metric_scale) in zip(axes.flatten(), challenge_plot_specs):
             means: list[float] = []
-            ci95s: list[float] = []
+            lows: list[float] = []
+            highs: list[float] = []
             for task_name in tasks:
                 if metric_name == "contextual_replay_mse_ratio_no_replay_vs_full":
                     ratio_values = _finite_variant_log2_ratio_values(
@@ -2352,7 +2569,7 @@ def _generate_visualizations(
                         denominator_variant="icbr_full",
                         metric="mse",
                     )
-                    mean, ci95 = _safe_log2_ratio_ci95(ratio_values)
+                    mean, low, high = _safe_log_metric_ci95(ratio_values)
                 elif metric_name == "explicit_commit_mse_ratio_refit_vs_full":
                     ratio_values = _finite_variant_log2_ratio_values(
                         task_name=task_name,
@@ -2360,13 +2577,16 @@ def _generate_visualizations(
                         denominator_variant="icbr_full",
                         metric="mse",
                     )
-                    mean, ci95 = _safe_log2_ratio_ci95(ratio_values)
-                elif metric_scale == "log2_ratio":
-                    mean, ci95 = _safe_log2_ratio_ci95(_finite_metric_values(task_name, metric_name))
+                    mean, low, high = _safe_log_metric_ci95(ratio_values)
+                elif metric_scale == "log":
+                    mean, low, high = _safe_log_metric_ci95(_finite_metric_values(task_name, metric_name))
                 else:
                     mean, ci95 = _safe_mean_ci95(_finite_metric_values(task_name, metric_name))
+                    low = mean - ci95 if math.isfinite(mean) and math.isfinite(ci95) else float("nan")
+                    high = mean + ci95 if math.isfinite(mean) and math.isfinite(ci95) else float("nan")
                 means.append(mean)
-                ci95s.append(ci95)
+                lows.append(low)
+                highs.append(high)
             if any(math.isfinite(value) for value in means):
                 has_challenge_data = True
                 all_values = _plot_point_ci(
@@ -2374,9 +2594,10 @@ def _generate_visualizations(
                     labels=tasks,
                     series=[
                         {
-                            "label": "mean ± 95% CI",
+                            "label": "Geometric mean ± 95% CI",
                             "means": means,
-                            "ci95s": ci95s,
+                            "lows": lows,
+                            "highs": highs,
                             "offset": 0.0,
                             "color": color,
                         }
@@ -2385,15 +2606,9 @@ def _generate_visualizations(
                     ylabel=ylabel,
                     baseline_line=baseline_line,
                 )
-                if metric_name == "shared_tensor_symbolic_time_ratio_no_shared_vs_full":
-                    axis.set_ylabel("log2(no_shared / full symbolic time ratio)")
-                elif metric_name == "contextual_replay_mse_ratio_no_replay_vs_full":
-                    axis.set_ylabel("log2(no_replay MSE / full MSE)")
-                else:
-                    axis.set_ylabel("log2(refit_commit MSE / full MSE)")
-                _apply_value_axis(axis, all_values, floor=baseline_line)
-                challenge_scale_map[metric_name] = metric_scale
-                _add_axis_scale_badge(axis, metric_scale)
+                axis.set_ylabel(ylabel)
+                challenge_scale_map[metric_name] = _apply_ratio_axis(axis, all_values, baseline=baseline_line)
+                _maybe_add_axis_scale_badge(axis, challenge_scale_map[metric_name])
                 _maybe_use_scientific_ticks(axis, all_values)
             else:
                 _apply_axes_style(axis, title=title, ylabel=ylabel)
@@ -2410,9 +2625,9 @@ def _generate_visualizations(
             _add_figure_note(
                 fig,
                 _build_note_lines(
-                    summary_line="Q1/Q2/Q3 all use mean log2-ratio ± 95% CI",
+                    summary_line="Q1/Q2/Q3 all use geometric mean ± 95% CI on ratio values",
                     measure_line="task-wise primary challenge evidence against the icbr_full reference",
-                    extra_line="All three panels are ratio-type, so 0 means parity with full and positive values mean the ablated variant has higher metric than full",
+                    extra_line="All three panels are ratio-type on a log axis, so 1x means parity with full and larger values mean the ablated variant is higher than full",
                 ),
             )
             fig.tight_layout(rect=(0.0, 0.07, 1.0, 1.0))
@@ -2424,13 +2639,13 @@ def _generate_visualizations(
                 "chart_type": "point_ci95",
                 "scale_by_panel": challenge_scale_map,
                 "y_label_by_panel": {
-                    "shared_tensor_symbolic_time_ratio_no_shared_vs_full": "log2(no_shared / full symbolic time ratio)",
-                    "contextual_replay_mse_ratio_no_replay_vs_full": "log2(no_replay MSE / full MSE)",
-                    "explicit_commit_mse_ratio_refit_vs_full": "log2(refit_commit MSE / full MSE)",
+                    "shared_tensor_symbolic_time_ratio_no_shared_vs_full": "Symbolic Wall Time Ratio\n(icbr_no_shared / icbr_full, ×)",
+                    "contextual_replay_mse_ratio_no_replay_vs_full": "Imitation MSE Ratio\n(icbr_no_replay / icbr_full, ×)",
+                    "explicit_commit_mse_ratio_refit_vs_full": "Imitation MSE Ratio\n(icbr_refit_commit / icbr_full, ×)",
                 },
                 "scale_label_placement": "title_band_left",
-                "stat_note": "Q1/Q2/Q3=mean log2-ratio ± 95% CI; dashed lines=neutral reference at 0",
-                "design_reason": "All three challenge panels compare an ablated variant against icbr_full, so log2 ratios make cross-task relative effects more comparable than raw deltas.",
+                "stat_note": "Q1/Q2/Q3=geometric mean ratio ± 95% CI; dashed lines=neutral reference at 1x",
+                "design_reason": "All three challenge panels are multiplicative comparisons against icbr_full, so ratio values on a log axis preserve the original metric semantics.",
             }
         else:
             warnings_list.append("Insufficient finite Q1/Q2/Q3 evidence metrics for challenge-evidence visualization.")
@@ -2480,7 +2695,8 @@ def run_benchmark(
     feynman_post_prune_min_delta: float | None = None,
     feynman_post_prune_patience: int | None = None,
     feynman_fit_opt: str | None = None,
-    feynman_width_mid: list[int] | None = None,
+    feynman_width_mid: list[_WidthToken] | None = None,
+    prune_iters: int = 1,
     feynman_max_datasets: int = 10,
     feynman_dataset_select_seed: int = 1,
     variants: list[str] | None = None,
@@ -2496,10 +2712,12 @@ def run_benchmark(
         raise ValueError(f"Unsupported feynman split strategy: {feynman_split_strategy}")
     if int(feynman_split_strategy_seed) < 0:
         raise ValueError("feynman_split_strategy_seed must be >= 0.")
+    if int(prune_iters) < 0:
+        raise ValueError("prune_iters must be >= 0.")
     if feynman_fit_opt is not None and feynman_fit_opt not in _FEYNMAN_FIT_OPTS:
         raise ValueError(f"Unsupported feynman_fit_opt: {feynman_fit_opt}")
     if feynman_width_mid is None:
-        feynman_width_mid = [5, 2]
+        feynman_width_mid = [[5, 2]]
 
     resolved_tasks, specs, _equations_map, feynman_config = _resolve_task_specs(
         tasks=tasks,
@@ -2514,6 +2732,7 @@ def run_benchmark(
         feynman_post_prune_eval_every=feynman_post_prune_eval_every,
         feynman_post_prune_min_delta=feynman_post_prune_min_delta,
         feynman_post_prune_patience=feynman_post_prune_patience,
+        prune_iters=int(prune_iters),
         feynman_fit_opt=feynman_fit_opt,
         feynman_max_datasets=feynman_max_datasets,
         feynman_dataset_select_seed=feynman_dataset_select_seed,
@@ -2532,6 +2751,7 @@ def run_benchmark(
             teacher_post_train_prune=True,
             teacher_prune_node_th=float(teacher_prune_node_th),
             teacher_prune_edge_th=float(teacher_prune_edge_th),
+            teacher_prune_iters=int(prune_iters),
         )
     feynman_config["benchmark_variants"] = list(effective_variants)
 
@@ -2551,7 +2771,11 @@ def run_benchmark(
             effective_teacher_min_test_r2 = (
                 float(spec.teacher_min_test_r2)
                 if spec.teacher_min_test_r2 is not None
-                else float(teacher_min_test_r2)
+                else (
+                    None
+                    if spec.dataset_kind == "feynman_file" and spec.teacher_min_test_r2 is None
+                    else float(teacher_min_test_r2)
+                )
             )
             model, dataset, cache_info = _resolve_teacher_model_with_cache(
                 spec=spec,
@@ -2998,6 +3222,7 @@ def run_benchmark(
                 "default_rule": "enabled_by_default_when_profile_is_quality",
                 "node_th": float(teacher_prune_node_th),
                 "edge_th": float(teacher_prune_edge_th),
+                "prune_iters": int(prune_iters),
             },
             "teacher_quality_gate": {
                 "enabled": True,
@@ -3013,12 +3238,17 @@ def run_benchmark(
                         "teacher_min_test_r2": (
                             float(specs[task_name].teacher_min_test_r2)
                             if specs[task_name].teacher_min_test_r2 is not None
-                            else float(teacher_min_test_r2)
+                            else (
+                                None
+                                if specs[task_name].dataset_kind == "feynman_file"
+                                and specs[task_name].teacher_min_test_r2 is None
+                                else float(teacher_min_test_r2)
+                            )
                         ),
                     }
                     for task_name in resolved_tasks
                 },
-                "policy": "skip_symbolic_comparison_when_teacher_quality_fails",
+                "policy": "skip_symbolic_comparison_when_teacher_quality_fails; null threshold means that metric is not required",
             },
             "teacher_training": {
                 task_name: {
@@ -3028,6 +3258,7 @@ def run_benchmark(
                     "post_train_prune": bool(specs[task_name].teacher_post_train_prune),
                     "prune_node_th": float(specs[task_name].teacher_prune_node_th),
                     "prune_edge_th": float(specs[task_name].teacher_prune_edge_th),
+                    "prune_iters": int(specs[task_name].teacher_prune_iters),
                     "post_prune_steps": int(specs[task_name].teacher_post_prune_steps),
                     "post_prune_lr": float(specs[task_name].teacher_post_prune_lr),
                     "post_prune_lamb": float(specs[task_name].teacher_post_prune_lamb),
@@ -3146,11 +3377,11 @@ def run_benchmark(
                 },
             },
             "teacher_quality_gate": {
-                "pass_rule": "teacher_test_mse <= threshold_mse AND teacher_test_r2 >= threshold_r2",
+                "pass_rule": "teacher_test_mse <= threshold_mse AND teacher_test_r2 >= threshold_r2 when the corresponding threshold is set; null threshold disables that check",
                 "failure_policy": "Skip baseline/ICBR symbolic comparison for that row and keep explicit gate reason.",
             },
             "teacher_cache": {
-                "cache_key_rule": "hash(task, seed, width, dataset_kind, dataset_path, dataset_variant, dataset_split_strategy, dataset_split_seed, teacher_grid, teacher_k, teacher_fit_opt, teacher_post_train_prune, teacher_prune_node_th, teacher_prune_edge_th, teacher_post_prune_steps, teacher_post_prune_lr, teacher_post_prune_lamb, teacher_post_prune_early_stop, teacher_post_prune_eval_every, teacher_post_prune_min_delta, teacher_post_prune_patience, train_num, test_num, train_steps, lr, lamb, profile, cache_version)",
+                "cache_key_rule": "hash(task, seed, width, dataset_kind, dataset_path, dataset_variant, dataset_split_strategy, dataset_split_seed, teacher_grid, teacher_k, teacher_fit_opt, teacher_post_train_prune, teacher_prune_node_th, teacher_prune_edge_th, teacher_prune_iters, teacher_post_prune_steps, teacher_post_prune_lr, teacher_post_prune_lamb, teacher_post_prune_early_stop, teacher_post_prune_eval_every, teacher_post_prune_min_delta, teacher_post_prune_patience, train_num, test_num, train_steps, lr, lamb, profile, cache_version)",
                 "modes": {
                     "readwrite": "Read cache when available; train+write on miss.",
                     "readonly": "Read cache only; train without writing on miss.",
@@ -3159,7 +3390,7 @@ def run_benchmark(
                 },
             },
             "teacher_training": {
-                "feynman_reference_policy": "For feynman_file tasks: train(opt=Adam by default; override via --feynman-fit-opt) -> prune(node_th=1e-2, edge_th=1e-2) -> refit(steps=100, lr=1e-3, lamb=1e-2, early_stop_check_every=5) -> cache.",
+                "feynman_reference_policy": "For feynman_file tasks: train(opt=Adam by default; override via --feynman-fit-opt) -> repeat prune(node_th=1e-2, edge_th=1e-2) + refit(steps=100, lr=1e-3, lamb=1e-3, early_stop_check_every=5) for prune_iters rounds (default 1) -> cache.",
             },
             "extensibility": [
                 "Add new tasks in the resolver layer (core task specs or feynman token expansion).",
@@ -3187,7 +3418,8 @@ def run_benchmark(
         f"- Variants: {', '.join(summary['config']['variants'])}",
         f"- Teacher prune policy: enabled={summary['config']['teacher_prune_policy']['enabled']}, "
         f"node_th={summary['config']['teacher_prune_policy']['node_th']}, "
-        f"edge_th={summary['config']['teacher_prune_policy']['edge_th']}",
+        f"edge_th={summary['config']['teacher_prune_policy']['edge_th']}, "
+        f"prune_iters={summary['config']['teacher_prune_policy']['prune_iters']}",
     ]
     if bool(summary["config"]["feynman"]["enabled"]):
         md_lines.append(
@@ -3196,7 +3428,8 @@ def run_benchmark(
             f"split={summary['config']['feynman']['split_strategy']}, "
             f"split_seed={summary['config']['feynman']['split_strategy_seed']}, "
             f"select_seed={summary['config']['feynman']['dataset_select_seed']}, "
-            f"width_mid={summary['config']['feynman']['width_mid']}"
+            f"width_mid={summary['config']['feynman']['width_mid']}, "
+            f"prune_iters={summary['config']['feynman']['prune_iters']}"
         )
     md_lines.extend(
         [
@@ -3461,7 +3694,7 @@ def run_benchmark(
             "- `Point + 95% CI`: 适合论文里的主结论图；正值偏态指标优先用几何均值与 log 轴，不用柱面积暗示额外量感。",
             "- `Violin + Box + Points`: 适合 speedup / mse shift 这类分布图；当前固定 KDE 带宽规则为 `Silverman`。",
             "- `Task-Row Two-Panel Grid`: 适合 variant overview；每个 task 一行，左列 `SymbolicTime`，右列合并 `ImitationMSE + TargetMSE`，两列都显式标尺度。",
-            "- `Q1/Q2/Q3`: 三个 panel 都用相对 `icbr_full` 的 `log2 ratio + 95% CI`，0 表示与 full 持平。",
+            "- `Q1/Q2/Q3`: 三个 panel 都用相对 `icbr_full` 的 ratio 值，并在 log 轴上展示 `几何均值 + 95% CI`，1 表示与 full 持平。",
             "- `Recommended Combo`: A=point+95%CI（正值偏态指标用几何均值），B=violin+box+points（分布），C=task-row two-panel grid（多指标 overview）。",
         ]
     )
@@ -3644,8 +3877,12 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "--feynman-width-mid",
-        default="5,2",
-        help="Comma-separated hidden widths used for feynman tasks, e.g. 5,2 -> width=[n_var,5,2,1].",
+        default="[5,2]",
+        help=(
+            "Hidden width spec inserted between input/output for feynman tasks. "
+            "Examples: [5,2] -> width=[n_var,[5,2],1]; 5,3 -> width=[n_var,5,3,1]; "
+            "[[5,2],3] -> width=[n_var,[5,2],3,1]."
+        ),
     )
     parser.add_argument(
         "--feynman-post-prune-steps",
@@ -3688,6 +3925,12 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         choices=list(_FEYNMAN_FIT_OPTS),
         help="Optional override for Feynman teacher optimizer (Adam or LBFGS).",
+    )
+    parser.add_argument(
+        "--prune-iters",
+        type=int,
+        default=1,
+        help="Number of prune+refit rounds for teacher tuning. Each round means prune once, then refit once. Default: 1.",
     )
     parser.add_argument(
         "--seeds",
@@ -3873,6 +4116,7 @@ def main(argv: list[str] | None = None) -> None:
         feynman_post_prune_patience=args.feynman_post_prune_patience,
         feynman_fit_opt=args.feynman_fit_opt,
         feynman_width_mid=feynman_width_mid,
+        prune_iters=args.prune_iters,
         feynman_max_datasets=args.feynman_max_datasets,
         feynman_dataset_select_seed=args.feynman_dataset_select_seed,
         variants=variants,
