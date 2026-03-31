@@ -999,17 +999,18 @@ def _infer_teacher_model_width_from_state(
 
         node_width = int(state_dict[node_key].shape[0])
         subnode_width = int(state_dict[subnode_key].shape[0])
-        num_mult = int(subnode_width - node_width)
-        if num_mult < 0:
+        delta = int(subnode_width - node_width)
+        if delta < 0:
             raise ValueError(
                 f"Cannot infer cached teacher width for task={spec.name}: subnode_width={subnode_width} < node_width={node_width}."
             )
-        if num_mult > 0:
-            if subnode_width != node_width + (mult_arity * num_mult):
+        if delta > 0:
+            if mult_arity <= 1 or (delta % (mult_arity - 1)) != 0:
                 raise ValueError(
                     f"Cannot infer cached teacher width for task={spec.name}: incompatible node/subnode widths "
                     f"({node_width}, {subnode_width}) for mult_arity={mult_arity}."
                 )
+            num_mult = int(delta // (mult_arity - 1))
             num_sum = int(node_width - num_mult)
             if num_sum < 0:
                 raise ValueError(

@@ -13,6 +13,12 @@ Stage 23: Enforce Benchmark Symbolic-Fitting Memory Lifecycle
 Complete
 
 ## Latest Completed Work
+- `scripts/icbr_benchmark.py`：
+  - 修正 `_infer_teacher_model_width_from_state()` 对 pruning 后 multiplication-aware hidden layer 的宽度反推公式
+  - 旧逻辑误把 `num_mult = subnode_width - node_width` 直接代回校验，导致如 `feynman_I_9_18` 这类缓存中的 `(node_width, subnode_width) = (3, 4)` 在 `symbolic-only` 下被错误判定为不兼容
+  - 新逻辑按 `delta = subnode_width - node_width = (mult_arity - 1) * num_mult` 反推，因此 `mult_arity=2` 时能正确恢复为 `[num_sum, num_mult] = [2, 1]`
+- `tests/test_icbr_benchmark_script_smoke.py`：
+  - 新增 pruned multiplication-aware teacher cache 的宽度反推回归测试，防止 `symbolic-only` 载入旧缓存时再次回归
 - `kan/icbr.py`：
   - 新增 `_clear_model_runtime_caches()`，统一清理 `acts / spline_postacts / spline_postsplines / acts_scale / symbolic_acts` 等运行期大对象
   - `benchmark_symbolic_variants()` 重构为更清晰的生命周期：
@@ -110,12 +116,19 @@ Complete
 - tests/test_icbr_integration.py
 
 ## Validation Run
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m py_compile scripts\icbr_benchmark.py tests\test_icbr_benchmark_script_smoke.py`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_benchmark_script_smoke.py -k "feynman_symbolic_only or symbolic_only or teacher_cache or infer_teacher_model_width"`
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m py_compile kan\icbr.py tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py tests\test_icbr_benchmark_script_smoke.py scripts\icbr_benchmark.py`
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py tests\test_icbr_benchmark_script_smoke.py`
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m py_compile kan\icbr.py tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py`
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py`
 
 ## Validation Result
+- `py_compile`（本次 follow-up 修复）通过。
+- `pytest tests\test_icbr_benchmark_script_smoke.py -k "feynman_symbolic_only or symbolic_only or teacher_cache or infer_teacher_model_width"` 通过：`5 passed`。
+- 已验证：
+  - pruning 后的 multiplication-aware teacher cache 能正确恢复隐藏层宽度
+  - `symbolic-only` 仍能复用已有 Feynman teacher cache，且不会放宽“缓存 miss 直接报错停止”的约束
 - `py_compile`（Stage 23 相关 Python 文件）通过。
 - `pytest tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py tests\test_icbr_benchmark_script_smoke.py` 通过：`33 passed`。
 - 已验证：

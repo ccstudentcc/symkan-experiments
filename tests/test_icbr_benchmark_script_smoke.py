@@ -7,10 +7,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 
 from scripts.icbr_benchmark import (
+    _TaskSpec,
     _build_teacher_quality_gate_result,
     _expand_feynman_task_tokens,
+    _infer_teacher_model_width_from_state,
     _normalize_variants,
     _parse_width_mid,
     _resolve_default_tasks_and_seeds,
@@ -933,6 +936,25 @@ def test_feynman_symbolic_only_reuses_pruned_teacher_cache() -> None:
     assert row["teacher_cache_hit"] is True
     assert row["run_mode"] == "symbolic-only"
     assert row["symbolic_execution_status"] == "completed"
+
+
+def test_infer_teacher_model_width_from_pruned_mult_state() -> None:
+    spec = _TaskSpec(
+        name="feynman_I_9_18",
+        n_var=2,
+        width=[2, [5, 2], 1],
+        target_fn=None,
+        lib=None,
+        dataset_kind="feynman",
+    )
+    state_dict = {
+        "node_bias_0": torch.zeros(3),
+        "subnode_bias_0": torch.zeros(4),
+        "node_bias_1": torch.zeros(1),
+        "subnode_bias_1": torch.zeros(1),
+    }
+
+    assert _infer_teacher_model_width_from_state(state_dict=state_dict, spec=spec) == [2, [2, 1], 1]
 
 
 def test_feynman_run_defaults_width_mid_to_mult_layer_shape() -> None:
