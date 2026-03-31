@@ -1,18 +1,30 @@
 # TASK_STATUS
 
 ## Date
-2026-03-30
+2026-03-31
 
 ## Task
-完成 Stage 21：修正 `scripts/icbr_benchmark.py` 对 KAN multiplication-aware `width` 的支持，使 Feynman benchmark 能正确表达类似 `[n_var, [5,2], 1]` 的中间层配置；同时对齐 Feynman teacher 默认配置，新增 `prune_iters` 控制 teacher 的“剪枝 + 微调”轮数，并补齐 benchmark 图表在 log / ratio 轴下的标签与尺度口径。
+推进 Stage 22：在 ICBR benchmark 符号拟合路径中，只对活跃 edge 生成候选，并将 per-edge shortlist 改为固定容量 top-k 聚合；同时将更完整的 benchmark 符号拟合内存生命周期整理明确推迟到 Stage 23。
 
 ## Current Stage
-Stage 21: Support Multiplication-Aware Feynman Width Specs and Teacher Default Alignment
+Stage 22: Stream Active-Edge Candidate Generation and Fixed-Capacity Top-K Shortlists
 
 ## Status
 Complete
 
 ## Latest Completed Work
+- 文档边界已更新：
+  - `IMPLEMENTATION_PLAN.md` 新增 Stage 22 与 Stage 23
+  - Stage 22 固定只做两项：
+    - 只对活跃 edge 生成候选
+    - per-edge 固定容量 top-k shortlist 聚合
+  - Stage 23 固定承接 benchmark 符号拟合阶段的内存生命周期整理
+- `kan/icbr.py`：
+  - 新增 `_candidate_rank_key()` 与 `_update_edge_topk_shortlist()`，将 per-edge shortlist 改为固定容量 `top-k` 聚合，避免按函数保留全量候选列表
+  - 新增 `_is_edge_active_for_symbolic()` 与 `_collect_active_edges_for_layer()`，统一 active edge 判定口径
+  - `_build_layer_shortlists_shared()` 改为按函数流式处理候选，并对每条 edge 实时维护 top-k
+  - `_build_edge_shortlist()` 同步改为固定容量 top-k 聚合，shared / serial 两条候选路径排序语义保持一致
+  - `_run_auto_symbolic_icbr_with_models()` 的 shared 候选生成显式只对 active edges 构建 shortlist
 - `scripts/icbr_benchmark.py`：
   - 新增 width token 归一化逻辑，支持显式 multiplication-aware layer spec，例如 `[5,2]`
   - 保留旧式纯整数写法兼容：`5,3` 仍按 `width=[n_var,5,3,1]` 解析
@@ -73,34 +85,24 @@ Complete
   - 新增 Stage 21，记录需求、约束、成功标准与验证命令
 
 ## Files Changed
-- scripts/icbr_benchmark.py
-- tests/test_icbr_benchmark_script_smoke.py
 - IMPLEMENTATION_PLAN.md
 - TASK_STATUS.md
+- kan/icbr.py
+- scripts/icbr_benchmark.py
+- tests/test_icbr_benchmark_script_smoke.py
+- tests/test_icbr_integration.py
 
 ## Validation Run
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m py_compile scripts/icbr_benchmark.py tests/test_icbr_benchmark_script_smoke.py`
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests/test_icbr_benchmark_script_smoke.py -k "feynman or width_mid or prune_iters or teacher_quality_gate_can_disable_r2_requirement or quality_profile_enables_teacher_prune_by_default"`
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests/test_icbr_benchmark_script_smoke.py -k "visualization_upgrade_emits_variant_and_q123_plots or replot_only_rebuilds_visualizations_from_existing_artifacts"`
-- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests/test_icbr_benchmark_script_smoke.py -k "visualization_upgrade_emits_variant_and_q123_plots or replot_only_rebuilds_visualizations_from_existing_artifacts"`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m py_compile kan\icbr.py tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py`
 
 ## Validation Result
 - `py_compile` 通过。
-- `pytest tests/test_icbr_benchmark_script_smoke.py -k "feynman or width_mid or prune_iters or teacher_quality_gate_can_disable_r2_requirement or quality_profile_enables_teacher_prune_by_default"` 通过：`10 passed, 11 deselected`。
-- `pytest tests/test_icbr_benchmark_script_smoke.py -k "visualization_upgrade_emits_variant_and_q123_plots or replot_only_rebuilds_visualizations_from_existing_artifacts"` 通过：`2 passed, 19 deselected`。
-- Stage 21 补充后的可视化 smoke test 重新通过。
+- `pytest tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py` 通过：`8 passed`。
 - 已验证：
-  - `--feynman-width-mid [5,2]` 可正确生成 multiplication-aware 中间层
-  - 省略 `feynman_width_mid` 时默认落到 `[5,2]`
-  - 旧式 `5,2` 纯整数写法仍可由解析器按兼容路径处理
-  - Feynman 默认 `post_prune_lamb=1e-3`、`post_prune_patience=3`
-  - Feynman 默认 teacher quality gate 为 `max_mse=0.1` 且不要求 `min_r2`
-  - `prune_iters` 已透传到 teacher config，并进入 benchmark summary / cache 语义
-  - Feynman 默认 `prune_iters` 已上调为 `3`，synthetic 默认仍保持 `1`
-  - Feynman 默认 `random` split seed 已改为跟随 benchmark `seed`，便于分批续跑时保持“seed 控制整条随机链路”
-  - `speedup` / `q123` ratio 图已改为 log 轴 + `1x` 基准线
-  - `variant_overview` / `mse_shift` 标签已改为保留原始单位/量纲，不再把 `log` 写进标签文本
-  - 对数尺度图现在统一以左侧 `scale=log` badge 标注，ratio 刻度不再重复显示 `×`
+  - shared 候选生成只会对 active edges 构建候选
+  - per-edge shortlist 现在保持固定容量 `top-k`，并保留原有 `r2 desc + complexity asc` 排序语义
+  - benchmark smoke 与既有 ICBR integration 行为未回归
 
 ## Decisions
 - `feynman_width_mid` 对外仍保留“中间层配置”概念，但内部区分：
@@ -110,9 +112,13 @@ Complete
 - summary/config 在只有一个中间层时展示单层值，而不是额外包一层列表，便于与用户口径对齐
 - Feynman 默认 teacher gate 采用“只约束 MSE，不约束 R2”的策略；实现上使用 `teacher_min_test_r2=None`
 - `prune_iters` 不区分数据集类型；是否实际生效仍由 `teacher_post_train_prune` 控制
+- Stage 22 范围固定为候选生成层优化，不提前混入 replay 门控、两阶段搜索或完整 benchmark 生命周期重构。
+- Stage 23 预留给 benchmark 符号拟合阶段的内存生命周期整理，包含 baseline/variant 作用域隔离、teacher_output 共享边界与公式导出后立即释放。
 
 ## Remaining Work
-- 无
+- Stage 23：
+  - 按已写入 `IMPLEMENTATION_PLAN.md` 的生命周期口径整理 benchmark 符号拟合内存管理
+  - 进一步收敛 baseline / variant / formula export 的对象作用域
 
 ## Blockers
 - 无

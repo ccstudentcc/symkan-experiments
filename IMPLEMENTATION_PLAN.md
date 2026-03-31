@@ -1313,6 +1313,104 @@ Status:
 
 Complete
 
+### Stage 22: Stream Active-Edge Candidate Generation and Fixed-Capacity Top-K Shortlists
+
+Goal:
+
+在不改变 ICBR baseline 对照口径与 replay/commit 语义的前提下，收紧候选生成阶段的计算与内存占用：只对当前仍为 numeric-active 的 edge 生成候选，并将 per-edge shortlist 改为固定容量 `top-k` 聚合，不再长期保留全量候选列表。
+
+Target Files:
+
+- `kan/icbr.py`
+- `tests/test_icbr_benchmark_smoke.py`
+- `tests/test_icbr_integration.py`（如需补充行为约束）
+- `IMPLEMENTATION_PLAN.md`
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- 共享候选生成路径只能对当前 layer 中 `symbolic_mask == 0 && numeric_mask > 0` 的 active edges 生成候选。
+- 对已经是 `0` edge 或已完成 symbolic commit 的 edge，不再进入候选拟合。
+- `_build_layer_shortlists_shared(...)` 改为固定容量 per-edge `top-k` 聚合：
+  - 按函数流式处理候选
+  - 每条 edge 仅保留 top-k 候选
+  - 不再为每条 edge 长期保留“所有函数”的全量候选列表
+- 最终 shortlist 的排序语义保持不变：
+  - 先按 `r2` 降序
+  - 再按 `complexity` 升序
+- 不改变 replay rerank、explicit commit、benchmark summary 指标定义。
+
+Implementation Constraints:
+
+- Stage 22 只做候选生成与 shortlist 聚合层优化，不引入新的 replay 门控或两阶段 coarse-to-fine 搜索。
+- 不改变 baseline 与 ICBR 变体的起始条件与对照口径。
+- 不在本阶段展开完整内存生命周期重构；该项留给 Stage 23。
+
+Success Criteria:
+
+- 共享候选生成阶段不会为无效 edge 生成候选。
+- 每条 edge 在候选生成后最多只保留固定容量 `top-k` shortlist。
+- 在相同输入下，shortlist 选择结果与现有排序语义保持一致。
+- benchmark smoke 与 integration 测试不回归。
+
+Validation:
+
+- `python -m py_compile kan/icbr.py tests/test_icbr_benchmark_smoke.py tests/test_icbr_integration.py`
+- `pytest tests/test_icbr_benchmark_smoke.py tests/test_icbr_integration.py`
+- 如需补充，更细粒度测试应验证：
+  - inactive edges 不进入候选生成
+  - fixed-capacity top-k 聚合与原排序语义一致
+
+Status:
+
+Complete
+
+### Stage 23: Enforce Benchmark Symbolic-Fitting Memory Lifecycle
+
+Goal:
+
+在 Stage 22 候选层优化完成后，对 benchmark 符号拟合路径做一次显式的对象生命周期收敛，避免 baseline、各 ICBR 变体与公式导出阶段之间发生缓存残留、状态污染或不必要的峰值内存占用。
+
+Target Files:
+
+- `kan/icbr.py`
+- `scripts/icbr_benchmark.py`
+- `tests/test_icbr_benchmark_smoke.py`
+- `tests/test_icbr_benchmark_script_smoke.py`
+- `IMPLEMENTATION_PLAN.md`
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- `task/seed` 级别只保留一份教师缓存模型和一份校准数据。
+- 进入 `benchmark_symbolic_variants()` 后，只保留一份 `teacher_output` 作为跨 baseline/变体共享的只读基准张量。
+- `baseline` 必须单独 clone、单独运行、单独公式导出，结束后立即释放模型与输出。
+- 每个 ICBR 变体都必须从原始教师重新 clone 出 `teacher_model/work_model`，且只在当前变体作用域内存活。
+- `symbolic-only` 下不再重算 `teacher_test_mse/r2`，直接依赖命中的 teacher cache 进入符号拟合。
+- 公式导出只在单个变体完成后执行一次，导出后立即释放相关 `sympy`/模型引用。
+
+Implementation Constraints:
+
+- 不改变 benchmark 指标定义与 baseline/变体对照口径。
+- 不通过共享可变 `work_model` 状态来节省内存。
+- 内存管理改动必须以“作用域清晰、状态隔离”为主，而不是仅堆叠零散 `del`。
+
+Success Criteria:
+
+- baseline 与各变体互不污染，且开始符号拟合的条件一致。
+- benchmark 作用域内的大对象生命周期更清晰，避免前一变体的缓存残留到后一变体。
+- `symbolic-only` 路径避免无意义的 teacher 指标重算。
+
+Validation:
+
+- `python -m py_compile kan/icbr.py scripts/icbr_benchmark.py tests/test_icbr_benchmark_smoke.py tests/test_icbr_benchmark_script_smoke.py`
+- `pytest tests/test_icbr_benchmark_smoke.py tests/test_icbr_benchmark_script_smoke.py`
+- 必要时补充回归测试，验证 baseline/variant 状态隔离与 `symbolic-only` 行为。
+
+Status:
+
+Not Started
+
 
 ## 5. Acceptance Criteria
 
@@ -1359,3 +1457,5 @@ Phase I 仅在以下条件全部满足时视为完成:
 19. Stage 19: Benchmark Quietness, Formula Display Cleanup, and Pipeline Sanity Audit
 20. Stage 20: Per-Task Vertical Variant Overview Layout
 21. Stage 21: Support Multiplication-Aware Feynman Width Specs and Teacher Default Alignment
+22. Stage 22: Stream Active-Edge Candidate Generation and Fixed-Capacity Top-K Shortlists
+23. Stage 23: Enforce Benchmark Symbolic-Fitting Memory Lifecycle

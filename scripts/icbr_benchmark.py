@@ -135,6 +135,7 @@ _BENCHMARK_PROFILES: dict[str, dict[str, float | int]] = {
 }
 
 _TEACHER_CACHE_MODES = {"readwrite", "readonly", "refresh", "off"}
+_RUN_MODES = ("full", "teacher-cache-only", "symbolic-only")
 _BENCHMARK_VARIANTS = (
     "baseline",
     "icbr_full",
@@ -154,7 +155,7 @@ _FEYNMAN_PAPER10_DATASETS = [
     "feynman_I_10_7",
     "feynman_I_12_1",
     "feynman_I_12_4",
-    "feynman_I_13_4",
+    "feynman_I_6_2a",
     "feynman_I_34_1",
     "feynman_II_6_15a",
     "feynman_II_6_15b",
@@ -958,6 +959,96 @@ def _write_torch_state_atomic(path: Path, state_dict: dict[str, torch.Tensor]) -
     tmp.replace(path)
 
 
+def _load_json_if_exists(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _normalize_cached_width_value(value: object) -> list[object]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("cached_model_width must be a non-empty list.")
+
+    normalized: list[object] = []
+    for item in value:
+        if isinstance(item, list):
+            if len(item) != 2:
+                raise ValueError("cached_model_width pair entries must contain exactly two integers.")
+            normalized.append([int(item[0]), int(item[1])])
+        else:
+            normalized.append(int(item))
+    return normalized
+
+
+def _infer_teacher_model_width_from_state(
+    *,
+    state_dict: dict[str, torch.Tensor],
+    spec: _TaskSpec,
+    mult_arity: int = 2,
+) -> list[object]:
+    if mult_arity <= 0:
+        raise ValueError("mult_arity must be > 0.")
+
+    width: list[object] = [int(spec.n_var)]
+    layer_idx = 0
+    while True:
+        node_key = f"node_bias_{layer_idx}"
+        subnode_key = f"subnode_bias_{layer_idx}"
+        if node_key not in state_dict or subnode_key not in state_dict:
+            break
+
+        node_width = int(state_dict[node_key].shape[0])
+        subnode_width = int(state_dict[subnode_key].shape[0])
+        num_mult = int(subnode_width - node_width)
+        if num_mult < 0:
+            raise ValueError(
+                f"Cannot infer cached teacher width for task={spec.name}: subnode_width={subnode_width} < node_width={node_width}."
+            )
+        if num_mult > 0:
+            if subnode_width != node_width + (mult_arity * num_mult):
+                raise ValueError(
+                    f"Cannot infer cached teacher width for task={spec.name}: incompatible node/subnode widths "
+                    f"({node_width}, {subnode_width}) for mult_arity={mult_arity}."
+                )
+            num_sum = int(node_width - num_mult)
+            if num_sum < 0:
+                raise ValueError(
+                    f"Cannot infer cached teacher width for task={spec.name}: negative inferred num_sum={num_sum}."
+                )
+            width.append([num_sum, num_mult])
+        else:
+            width.append(int(node_width))
+        layer_idx += 1
+
+    if len(width) < 2:
+        raise ValueError(f"Cannot infer cached teacher width for task={spec.name}: no layer widths found in state_dict.")
+    return width
+
+
+def _build_teacher_model_from_cached_state(
+    *,
+    spec: _TaskSpec,
+    seed: int,
+    state_dict: dict[str, torch.Tensor],
+    meta_payload: dict[str, object] | None = None,
+) -> MultKAN:
+    cached_width_raw = None if meta_payload is None else meta_payload.get("cached_model_width")
+    if cached_width_raw is not None:
+        model_width = _normalize_cached_width_value(cached_width_raw)
+    else:
+        model_width = _infer_teacher_model_width_from_state(state_dict=state_dict, spec=spec)
+
+    model = MultKAN(
+        width=model_width,
+        grid=int(spec.teacher_grid),
+        k=int(spec.teacher_k),
+        seed=int(seed),
+        auto_save=False,
+        device="cpu",
+    )
+    return model
+
+
 def _resolve_teacher_model_with_cache(
     *,
     spec: _TaskSpec,
@@ -973,9 +1064,12 @@ def _resolve_teacher_model_with_cache(
     cache_version: str,
     quiet: bool = False,
     lock_timeout_s: float = 120.0,
+    require_cache_hit: bool = False,
 ) -> tuple[MultKAN, dict[str, torch.Tensor], dict[str, object]]:
     if cache_mode not in _TEACHER_CACHE_MODES:
         raise ValueError(f"Unsupported teacher cache mode: {cache_mode}")
+    if require_cache_hit and cache_mode == "off":
+        raise RuntimeError("symbolic-only mode requires teacher cache access, but teacher_cache_mode=off.")
 
     dataset = _build_teacher_dataset(
         spec,
@@ -1013,8 +1107,14 @@ def _resolve_teacher_model_with_cache(
 
     if cache_mode in {"readwrite", "readonly"} and state_path.exists() and meta_path.exists():
         try:
-            model = _build_teacher_model(spec, seed=seed)
             state = torch.load(state_path, map_location="cpu")
+            meta_payload = _load_json_if_exists(meta_path)
+            model = _build_teacher_model_from_cached_state(
+                spec=spec,
+                seed=seed,
+                state_dict=state,
+                meta_payload=meta_payload,
+            )
             model.load_state_dict(state)
             return model, dataset, {
                 "teacher_cache_hit": True,
@@ -1031,6 +1131,10 @@ def _resolve_teacher_model_with_cache(
         cache_load_error = ""
 
     if cache_mode == "off":
+        if require_cache_hit:
+            raise RuntimeError(
+                f"Teacher cache miss for task={spec.name} seed={seed}: symbolic-only mode requires a cached teacher model."
+            )
         model = _train()
         return model, dataset, {
             "teacher_cache_hit": False,
@@ -1041,6 +1145,13 @@ def _resolve_teacher_model_with_cache(
         }
 
     if cache_mode == "readonly":
+        if require_cache_hit:
+            reason = "cache entry missing"
+            if cache_load_error:
+                reason = f"cache load error ({cache_load_error})"
+            raise RuntimeError(
+                f"Teacher cache miss for task={spec.name} seed={seed}: symbolic-only mode requires a cache hit; {reason}."
+            )
         model = _train()
         status = "readonly_miss_no_write"
         if cache_load_error:
@@ -1052,6 +1163,14 @@ def _resolve_teacher_model_with_cache(
             "teacher_cache_mode": cache_mode,
             "teacher_cache_status": status,
         }
+
+    if require_cache_hit:
+        reason = "cache entry missing"
+        if cache_load_error:
+            reason = f"cache load error ({cache_load_error})"
+        raise RuntimeError(
+            f"Teacher cache miss for task={spec.name} seed={seed}: symbolic-only mode requires a cache hit; {reason}."
+        )
 
     model = _train()
     cache_root.mkdir(parents=True, exist_ok=True)
@@ -1065,6 +1184,7 @@ def _resolve_teacher_model_with_cache(
                 {
                     "cache_key": cache_key,
                     "cache_payload": cache_payload,
+                    "cached_model_width": model.width,
                     "cache_mode_written_by": cache_mode,
                     "generated_at_utc": datetime.now(timezone.utc).isoformat(),
                 },
@@ -1239,7 +1359,12 @@ def _build_teacher_quality_gate_result(
     return True, ""
 
 
-def _build_skipped_symbolic_metrics(*, reason: str) -> dict[str, object]:
+def _build_symbolic_skip_reason(*, skip_kind: str, reason: str) -> str:
+    return f"{skip_kind}: {reason}"
+
+
+def _build_skipped_symbolic_metrics(*, skip_kind: str, reason: str) -> dict[str, object]:
+    skip_reason = _build_symbolic_skip_reason(skip_kind=skip_kind, reason=reason)
     nan_metrics = {
         "candidate_generation_wall_time_s": float("nan"),
         "replay_rerank_wall_time_s": float("nan"),
@@ -1269,8 +1394,8 @@ def _build_skipped_symbolic_metrics(*, reason: str) -> dict[str, object]:
         "baseline_formula_display": [],
         "icbr_formula_raw": [],
         "icbr_formula_display": [],
-        "baseline_formula_error": f"skipped_by_teacher_quality_gate: {reason}",
-        "icbr_formula_error": f"skipped_by_teacher_quality_gate: {reason}",
+        "baseline_formula_error": skip_reason,
+        "icbr_formula_error": skip_reason,
     }
 
 
@@ -1319,6 +1444,7 @@ def _build_variant_rows_for_task_seed(
     variants_requested: list[str],
     teacher_quality_gate_pass: bool,
     teacher_quality_gate_reason: str,
+    run_mode: str,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     baseline = variant_bundle["baseline"]
@@ -1328,6 +1454,9 @@ def _build_variant_rows_for_task_seed(
         "task": task,
         "seed": seed,
         "variant": "baseline",
+        "run_mode": run_mode,
+        "symbolic_execution_status": "completed",
+        "symbolic_skip_reason": "",
         "variant_requested": bool("baseline" in variants_requested),
         "candidate_mode": "baseline",
         "rerank_mode": "baseline",
@@ -1367,6 +1496,9 @@ def _build_variant_rows_for_task_seed(
                 "task": task,
                 "seed": seed,
                 "variant": variant_name,
+                "run_mode": run_mode,
+                "symbolic_execution_status": "completed",
+                "symbolic_skip_reason": "",
                 "variant_requested": bool(variant_name in variants_requested),
                 "candidate_mode": variant.get("candidate_mode"),
                 "rerank_mode": variant.get("rerank_mode"),
@@ -1407,20 +1539,27 @@ def _build_skipped_variant_rows_for_task_seed(
     task: str,
     seed: int,
     variants_requested: list[str],
+    skip_kind: str,
     reason: str,
+    symbolic_execution_status: str,
+    run_mode: str,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
+    skip_reason = _build_symbolic_skip_reason(skip_kind=skip_kind, reason=reason)
     for variant_name in variants_requested:
         rows.append(
             {
                 "task": task,
                 "seed": seed,
                 "variant": variant_name,
+                "run_mode": run_mode,
+                "symbolic_execution_status": symbolic_execution_status,
+                "symbolic_skip_reason": skip_reason,
                 "variant_requested": True,
-                "candidate_mode": "skipped_by_teacher_quality_gate",
-                "rerank_mode": "skipped_by_teacher_quality_gate",
-                "commit_mode": "skipped_by_teacher_quality_gate",
-                "teacher_quality_gate_pass": False,
+                "candidate_mode": skip_kind,
+                "rerank_mode": skip_kind,
+                "commit_mode": skip_kind,
+                "teacher_quality_gate_pass": skip_kind != "skipped_by_teacher_quality_gate",
                 "teacher_quality_gate_reason": reason,
                 "candidate_generation_wall_time_s": float("nan"),
                 "replay_rerank_wall_time_s": float("nan"),
@@ -1431,7 +1570,7 @@ def _build_skipped_variant_rows_for_task_seed(
                 "formula_validation_result": False,
                 "formula_raw": [],
                 "formula_display": [],
-                "formula_error": f"skipped_by_teacher_quality_gate: {reason}",
+                "formula_error": skip_reason,
                 "replay_rank_inversion_count": float("nan"),
                 "replay_rank_inversion_total": float("nan"),
                 "replay_rank_inversion_rate": float("nan"),
@@ -2706,6 +2845,7 @@ def run_benchmark(
     teacher_cache_dir: Path = Path("outputs/teacher_cache"),
     teacher_cache_mode: str = "readwrite",
     teacher_cache_version: str = "v1",
+    run_mode: str = "full",
     profile_name: str = "custom",
     profile_defaults: dict[str, float | int] | None = None,
     profile_overrides: dict[str, bool] | None = None,
@@ -2732,6 +2872,8 @@ def run_benchmark(
     make_plots: bool,
     quiet: bool,
 ) -> dict[str, object]:
+    if run_mode not in _RUN_MODES:
+        raise ValueError(f"Unsupported run_mode: {run_mode}")
     if feynman_variant not in _FEYNMAN_VARIANTS:
         raise ValueError(f"Unsupported feynman variant: {feynman_variant}")
     if feynman_split_strategy not in {"random", "linspace"}:
@@ -2820,24 +2962,33 @@ def run_benchmark(
                 cache_mode=teacher_cache_mode,
                 cache_version=teacher_cache_version,
                 quiet=quiet,
+                require_cache_hit=(run_mode == "symbolic-only"),
             )
-            with torch.no_grad():
-                teacher_test_pred = model(dataset["test_input"])
-                if isinstance(teacher_test_pred, tuple):
-                    teacher_test_pred = teacher_test_pred[0]
-                teacher_test_pred = teacher_test_pred.detach()
-            teacher_test_mse, teacher_test_r2 = _compute_target_mse_and_r2(
-                teacher_test_pred,
-                dataset["test_label"],
-            )
-            teacher_quality_gate_pass, teacher_quality_gate_reason = _build_teacher_quality_gate_result(
-                teacher_test_mse=teacher_test_mse,
-                teacher_test_r2=teacher_test_r2,
-                max_test_mse=effective_teacher_max_test_mse,
-                min_test_r2=effective_teacher_min_test_r2,
-            )
+            if run_mode == "symbolic-only":
+                teacher_test_mse = float("nan")
+                teacher_test_r2 = float("nan")
+                teacher_quality_gate_pass = True
+                teacher_quality_gate_reason = "skipped_in_symbolic_only_cached_teacher"
+            else:
+                with torch.no_grad():
+                    teacher_test_pred = model(dataset["test_input"])
+                    if isinstance(teacher_test_pred, tuple):
+                        teacher_test_pred = teacher_test_pred[0]
+                    teacher_test_pred = teacher_test_pred.detach()
+                teacher_test_mse, teacher_test_r2 = _compute_target_mse_and_r2(
+                    teacher_test_pred,
+                    dataset["test_label"],
+                )
+                teacher_quality_gate_pass, teacher_quality_gate_reason = _build_teacher_quality_gate_result(
+                    teacher_test_mse=teacher_test_mse,
+                    teacher_test_r2=teacher_test_r2,
+                    max_test_mse=effective_teacher_max_test_mse,
+                    min_test_r2=effective_teacher_min_test_r2,
+                )
 
-            if teacher_quality_gate_pass:
+            symbolic_execution_status = "completed"
+            symbolic_skip_reason = ""
+            if teacher_quality_gate_pass and run_mode in {"full", "symbolic-only"}:
                 with _suppress_console_output(quiet):
                     variant_bundle = benchmark_symbolic_variants(
                         model,
@@ -2863,17 +3014,66 @@ def run_benchmark(
                         variants_requested=effective_variants,
                         teacher_quality_gate_pass=teacher_quality_gate_pass,
                         teacher_quality_gate_reason=teacher_quality_gate_reason,
+                        run_mode=run_mode,
                     )
                 )
                 challenge_evidence = dict(variant_bundle.get("challenge_evidence", {}))
-            else:
-                metrics = _build_skipped_symbolic_metrics(reason=teacher_quality_gate_reason)
+            elif teacher_quality_gate_pass and run_mode == "teacher-cache-only":
+                symbolic_execution_status = "skipped_by_run_mode"
+                symbolic_skip_reason = _build_symbolic_skip_reason(
+                    skip_kind="skipped_by_run_mode",
+                    reason="teacher-cache-only",
+                )
+                metrics = _build_skipped_symbolic_metrics(
+                    skip_kind="skipped_by_run_mode",
+                    reason="teacher-cache-only",
+                )
                 variant_rows.extend(
                     _build_skipped_variant_rows_for_task_seed(
                         task=task_name,
                         seed=seed,
                         variants_requested=effective_variants,
+                        skip_kind="skipped_by_run_mode",
+                        reason="teacher-cache-only",
+                        symbolic_execution_status=symbolic_execution_status,
+                        run_mode=run_mode,
+                    )
+                )
+                challenge_evidence = {
+                    "shared_tensor": {
+                        "candidate_time_ratio_no_shared_vs_full": float("nan"),
+                        "symbolic_time_ratio_no_shared_vs_full": float("nan"),
+                    },
+                    "contextual_replay": {
+                        "mse_gain_full_vs_no_replay": float("nan"),
+                        "target_mse_gain_full_vs_no_replay": float("nan"),
+                        "replay_rank_inversion_rate_full": float("nan"),
+                    },
+                    "explicit_commit": {
+                        "mse_gain_explicit_vs_refit": float("nan"),
+                        "target_mse_gain_explicit_vs_refit": float("nan"),
+                        "refit_commit_param_drift_l2_mean": float("nan"),
+                    },
+                }
+            else:
+                symbolic_execution_status = "skipped_by_teacher_quality_gate"
+                symbolic_skip_reason = _build_symbolic_skip_reason(
+                    skip_kind="skipped_by_teacher_quality_gate",
+                    reason=teacher_quality_gate_reason,
+                )
+                metrics = _build_skipped_symbolic_metrics(
+                    skip_kind="skipped_by_teacher_quality_gate",
+                    reason=teacher_quality_gate_reason,
+                )
+                variant_rows.extend(
+                    _build_skipped_variant_rows_for_task_seed(
+                        task=task_name,
+                        seed=seed,
+                        variants_requested=effective_variants,
+                        skip_kind="skipped_by_teacher_quality_gate",
                         reason=teacher_quality_gate_reason,
+                        symbolic_execution_status=symbolic_execution_status,
+                        run_mode=run_mode,
                     )
                 )
                 challenge_evidence = {
@@ -2895,6 +3095,9 @@ def run_benchmark(
             row = {
                 "task": task_name,
                 "seed": seed,
+                "run_mode": run_mode,
+                "symbolic_execution_status": symbolic_execution_status,
+                "symbolic_skip_reason": symbolic_skip_reason,
                 "task_kind": spec.dataset_kind,
                 "task_source": "feynman_file" if spec.dataset_kind == "feynman_file" else "synthetic_formula",
                 "target_formula": spec.target_formula,
@@ -2946,7 +3149,7 @@ def run_benchmark(
             }
             rows.append(row)
             if not quiet:
-                if teacher_quality_gate_pass:
+                if symbolic_execution_status == "completed":
                     print(
                         f"[icbr-benchmark] task={task_name} seed={seed} "
                         f"cache_hit={bool(cache_info['teacher_cache_hit'])} "
@@ -2962,13 +3165,17 @@ def run_benchmark(
                         f"[icbr-benchmark] task={task_name} seed={seed} "
                         f"cache_hit={bool(cache_info['teacher_cache_hit'])} "
                         f"teacher_mse={teacher_test_mse:.6e} teacher_r2={teacher_test_r2:.4f} "
-                        f"skipped_symbolic_by_gate reason={teacher_quality_gate_reason}"
+                        f"symbolic_status={symbolic_execution_status} "
+                        f"reason={symbolic_skip_reason or teacher_quality_gate_reason}"
                     )
 
     rows_csv = output_dir / "icbr_benchmark_rows.csv"
     row_fieldnames = [
         "task",
         "seed",
+        "run_mode",
+        "symbolic_execution_status",
+        "symbolic_skip_reason",
         "task_kind",
         "task_source",
         "target_formula",
@@ -3036,6 +3243,9 @@ def run_benchmark(
                 {
                     "task": row["task"],
                     "seed": row["seed"],
+                    "run_mode": row["run_mode"],
+                    "symbolic_execution_status": row["symbolic_execution_status"],
+                    "symbolic_skip_reason": row["symbolic_skip_reason"],
                     "task_kind": row["task_kind"],
                     "task_source": row["task_source"],
                     "target_formula": row["target_formula"],
@@ -3118,6 +3328,9 @@ def run_benchmark(
         "task",
         "seed",
         "variant",
+        "run_mode",
+        "symbolic_execution_status",
+        "symbolic_skip_reason",
         "variant_requested",
         "candidate_mode",
         "rerank_mode",
@@ -3238,6 +3451,7 @@ def run_benchmark(
                 "defaults": profile_defaults if profile_defaults is not None else {},
                 "overrides": profile_overrides if profile_overrides is not None else {},
             },
+            "run_mode": run_mode,
             "train_num": train_num,
             "test_num": test_num,
             "train_steps": train_steps,
@@ -3410,6 +3624,13 @@ def run_benchmark(
                 "pass_rule": "teacher_test_mse <= threshold_mse AND teacher_test_r2 >= threshold_r2 when the corresponding threshold is set; null threshold disables that check",
                 "failure_policy": "Skip baseline/ICBR symbolic comparison for that row and keep explicit gate reason.",
             },
+            "run_mode": {
+                "selected": run_mode,
+                "modes_supported": list(_RUN_MODES),
+                "full": "Train or load teacher, then run symbolic benchmark.",
+                "teacher-cache-only": "Train or load teacher and stop after cache/teacher metrics.",
+                "symbolic-only": "Require teacher cache hit and run symbolic benchmark without retraining teacher.",
+            },
             "teacher_cache": {
                 "cache_key_rule": "hash(task, seed, width, dataset_kind, dataset_path, dataset_variant, dataset_split_strategy, dataset_split_seed, teacher_grid, teacher_k, teacher_fit_opt, teacher_post_train_prune, teacher_prune_node_th, teacher_prune_edge_th, teacher_prune_iters, teacher_post_prune_steps, teacher_post_prune_lr, teacher_post_prune_lamb, teacher_post_prune_early_stop, teacher_post_prune_eval_every, teacher_post_prune_min_delta, teacher_post_prune_patience, train_num, test_num, train_steps, lr, lamb, profile, cache_version)",
                 "modes": {
@@ -3439,6 +3660,7 @@ def run_benchmark(
         "## Run Config",
         "",
         f"- Profile: {summary['config']['profile']['name']}",
+        f"- Run mode: {summary['config']['run_mode']}",
         f"- Tasks: {', '.join(resolved_tasks)}",
         f"- Seeds: {', '.join(str(seed) for seed in seeds)}",
         f"- Train/Test samples per task: {train_num}/{test_num}",
@@ -4062,6 +4284,12 @@ def main(argv: list[str] | None = None) -> None:
         default="v1",
         help="Teacher cache key version suffix for compatibility control.",
     )
+    parser.add_argument(
+        "--run-mode",
+        default="full",
+        choices=list(_RUN_MODES),
+        help="Execution mode: full, teacher-cache-only, or symbolic-only.",
+    )
     parser.add_argument("--no-plots", action="store_true", help="Disable plot generation")
     parser.add_argument("--quiet", action="store_true", help="Disable per-run progress prints")
     cli_tokens = list(argv) if argv is not None else list(os.sys.argv[1:])
@@ -4136,6 +4364,7 @@ def main(argv: list[str] | None = None) -> None:
         teacher_cache_dir=teacher_cache_dir,
         teacher_cache_mode=args.teacher_cache_mode,
         teacher_cache_version=args.teacher_cache_version,
+        run_mode=args.run_mode,
         profile_name=args.profile,
         profile_defaults=dict(_BENCHMARK_PROFILES[args.profile]),
         profile_overrides=profile_overrides,

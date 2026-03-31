@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from scripts.icbr_benchmark import (
     _build_teacher_quality_gate_result,
@@ -76,6 +77,9 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
     assert {row["task"] for row in rows} == {"minimal", "combo"}
     assert all(row["lib"] == "[\"__FULL_SYMBOLIC_LIB__\"]" for row in rows)
     required_cols = {
+        "run_mode",
+        "symbolic_execution_status",
+        "symbolic_skip_reason",
         "feynman_dataset_filename",
         "feynman_dataset_rows",
         "feynman_dataset_columns",
@@ -858,6 +862,79 @@ def test_feynman_post_prune_override_smoke() -> None:
     assert task_cfg["opt"] == "LBFGS"
 
 
+def test_feynman_symbolic_only_reuses_pruned_teacher_cache() -> None:
+    base_dir = Path("tmp") / f"icbr_benchmark_feynman_symbolic_only_{uuid.uuid4().hex}"
+    dataset_root = base_dir / "datasets"
+    variant_dir = dataset_root / "Feynman_with_units"
+    variant_dir.mkdir(parents=True, exist_ok=True)
+
+    rng = np.random.default_rng(0)
+    m0 = rng.uniform(0.1, 1.0, size=(96, 1))
+    v = rng.uniform(0.0, 0.9, size=(96, 1))
+    c = rng.uniform(1.0, 2.0, size=(96, 1))
+    y = m0 / np.sqrt(1.0 - (v**2) / (c**2))
+    raw = np.concatenate([m0, v, c, y], axis=1).astype(np.float32)
+    np.savetxt(variant_dir / "I.10.7", raw)
+
+    cache_dir = base_dir / "cache"
+    cache_version = "stage22_feynman_symbolic_only_cache_v1"
+
+    prep = run_benchmark(
+        tasks=["feynman_I_10_7"],
+        seeds=[0],
+        output_dir=base_dir / "prep",
+        train_num=48,
+        test_num=24,
+        train_steps=2,
+        lr=0.03,
+        lamb=1e-3,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=10.0,
+        teacher_min_test_r2=-10.0,
+        teacher_cache_dir=cache_dir,
+        teacher_cache_mode="readwrite",
+        teacher_cache_version=cache_version,
+        run_mode="teacher-cache-only",
+        profile_name="feynman_reference",
+        feynman_root=dataset_root,
+        feynman_variant="Feynman_with_units",
+        make_plots=False,
+        quiet=True,
+    )
+    assert prep["rows"][0]["symbolic_execution_status"] == "skipped_by_run_mode"
+
+    symbolic = run_benchmark(
+        tasks=["feynman_I_10_7"],
+        seeds=[0],
+        output_dir=base_dir / "symbolic",
+        train_num=48,
+        test_num=24,
+        train_steps=2,
+        lr=0.03,
+        lamb=1e-3,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=10.0,
+        teacher_min_test_r2=-10.0,
+        teacher_cache_dir=cache_dir,
+        teacher_cache_mode="readonly",
+        teacher_cache_version=cache_version,
+        run_mode="symbolic-only",
+        profile_name="feynman_reference",
+        feynman_root=dataset_root,
+        feynman_variant="Feynman_with_units",
+        make_plots=False,
+        quiet=True,
+    )
+    row = symbolic["rows"][0]
+    assert row["teacher_cache_hit"] is True
+    assert row["run_mode"] == "symbolic-only"
+    assert row["symbolic_execution_status"] == "completed"
+
+
 def test_feynman_run_defaults_width_mid_to_mult_layer_shape() -> None:
     base_dir = Path("tmp") / f"icbr_benchmark_feynman_default_width_{uuid.uuid4().hex}"
     dataset_root = base_dir / "datasets"
@@ -931,13 +1008,133 @@ def test_feynman_task_tokens_expand() -> None:
         "feynman_I_10_7",
         "feynman_I_12_1",
         "feynman_I_12_4",
-        "feynman_I_13_4",
+        "feynman_I_6_2a",
         "feynman_I_34_1",
         "feynman_II_6_15a",
         "feynman_II_6_15b",
         "feynman_II_21_32",
         "feynman_II_34_29a",
     ]
+
+
+def test_teacher_cache_only_mode_skips_symbolic_and_writes_cache() -> None:
+    base_dir = Path("tmp") / f"icbr_benchmark_teacher_cache_only_{uuid.uuid4().hex}"
+    out_dir = base_dir / "out"
+    cache_dir = base_dir / "cache"
+
+    result = run_benchmark(
+        tasks=["minimal"],
+        seeds=[0],
+        output_dir=out_dir,
+        train_num=16,
+        test_num=16,
+        train_steps=2,
+        lr=0.05,
+        lamb=1e-3,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=1.0,
+        teacher_min_test_r2=-1.0,
+        teacher_cache_dir=cache_dir,
+        teacher_cache_mode="readwrite",
+        teacher_cache_version="stage22_teacher_cache_only_v1",
+        run_mode="teacher-cache-only",
+        make_plots=False,
+        quiet=True,
+    )
+
+    row = result["rows"][0]
+    assert row["run_mode"] == "teacher-cache-only"
+    assert row["symbolic_execution_status"] == "skipped_by_run_mode"
+    assert row["symbolic_skip_reason"] == "skipped_by_run_mode: teacher-cache-only"
+    assert row["teacher_cache_hit"] is False
+    assert Path(row["teacher_cache_path"]).exists()
+    assert row["symbolic_wall_time_s"] != row["symbolic_wall_time_s"]
+
+    variant_rows = result["variant_rows"]
+    assert len(variant_rows) == 2
+    assert all(item["run_mode"] == "teacher-cache-only" for item in variant_rows)
+    assert all(item["symbolic_execution_status"] == "skipped_by_run_mode" for item in variant_rows)
+    assert all(item["formula_error"] == "skipped_by_run_mode: teacher-cache-only" for item in variant_rows)
+
+    summary = result["summary"]
+    assert summary["config"]["run_mode"] == "teacher-cache-only"
+
+
+def test_symbolic_only_mode_requires_cache_hit() -> None:
+    base_dir = Path("tmp") / f"icbr_benchmark_symbolic_only_{uuid.uuid4().hex}"
+    cache_dir = base_dir / "cache"
+
+    run_benchmark(
+        tasks=["minimal"],
+        seeds=[0],
+        output_dir=base_dir / "prep",
+        train_num=16,
+        test_num=16,
+        train_steps=2,
+        lr=0.05,
+        lamb=1e-3,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=1.0,
+        teacher_min_test_r2=-1.0,
+        teacher_cache_dir=cache_dir,
+        teacher_cache_mode="readwrite",
+        teacher_cache_version="stage22_symbolic_only_v1",
+        run_mode="teacher-cache-only",
+        make_plots=False,
+        quiet=True,
+    )
+
+    symbolic_result = run_benchmark(
+        tasks=["minimal"],
+        seeds=[0],
+        output_dir=base_dir / "symbolic",
+        train_num=16,
+        test_num=16,
+        train_steps=2,
+        lr=0.05,
+        lamb=1e-3,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=1.0,
+        teacher_min_test_r2=-1.0,
+        teacher_cache_dir=cache_dir,
+        teacher_cache_mode="readonly",
+        teacher_cache_version="stage22_symbolic_only_v1",
+        run_mode="symbolic-only",
+        make_plots=False,
+        quiet=True,
+    )
+    assert symbolic_result["rows"][0]["teacher_cache_hit"] is True
+    assert symbolic_result["rows"][0]["run_mode"] == "symbolic-only"
+    assert symbolic_result["rows"][0]["symbolic_execution_status"] == "completed"
+
+    with pytest.raises(RuntimeError, match="requires a cache hit"):
+        run_benchmark(
+            tasks=["minimal"],
+            seeds=[1],
+            output_dir=base_dir / "symbolic_miss",
+            train_num=16,
+            test_num=16,
+            train_steps=2,
+            lr=0.05,
+            lamb=1e-3,
+            topk=2,
+            grid_number=11,
+            iteration=1,
+            teacher_max_test_mse=1.0,
+            teacher_min_test_r2=-1.0,
+            teacher_cache_dir=cache_dir,
+            teacher_cache_mode="readonly",
+            teacher_cache_version="stage22_symbolic_only_v1",
+            run_mode="symbolic-only",
+            make_plots=False,
+            quiet=True,
+        )
 
 
 def test_prune_iters_override_propagates_to_synthetic_teacher_training() -> None:

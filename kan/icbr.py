@@ -558,6 +558,44 @@ def _ensure_fully_symbolic_completion(work_model) -> None:
             )
 
 
+def _candidate_rank_key(candidate: Mapping[str, object]) -> tuple[float, float]:
+    return (-float(candidate["r2"]), float(candidate["complexity"]))
+
+
+def _update_edge_topk_shortlist(
+    shortlist: list[dict[str, object]],
+    *,
+    candidate: Mapping[str, object],
+    topk: int,
+) -> None:
+    if topk <= 0:
+        raise ValueError("topk must be > 0")
+    shortlist.append(dict(candidate))
+    shortlist.sort(key=_candidate_rank_key)
+    if len(shortlist) > topk:
+        del shortlist[topk:]
+
+
+def _is_edge_active_for_symbolic(work_model, *, layer_idx: int, input_idx: int, output_idx: int) -> bool:
+    symbolic_mask = float(work_model.symbolic_fun[layer_idx].mask[output_idx, input_idx].item())
+    numeric_mask = float(work_model.act_fun[layer_idx].mask[input_idx][output_idx].item())
+    return symbolic_mask == 0.0 and numeric_mask > 0.0
+
+
+def _collect_active_edges_for_layer(work_model, *, layer_idx: int) -> list[tuple[int, int]]:
+    active_edges: list[tuple[int, int]] = []
+    for input_idx in range(work_model.width_in[layer_idx]):
+        for output_idx in range(work_model.width_out[layer_idx + 1]):
+            if _is_edge_active_for_symbolic(
+                work_model,
+                layer_idx=layer_idx,
+                input_idx=input_idx,
+                output_idx=output_idx,
+            ):
+                active_edges.append((input_idx, output_idx))
+    return active_edges
+
+
 def _build_edge_shortlist(
     teacher_acts_layer: torch.Tensor,
     teacher_edge_targets_layer: torch.Tensor,
@@ -583,11 +621,12 @@ def _build_edge_shortlist(
             grid_number=grid_number,
             iteration=iteration,
         )
-        candidates.append(result["candidates"][0])
-
-    candidates.sort(key=lambda item: (-float(item["r2"]), float(item["complexity"])))
-    topk = max(1, min(topk, len(candidates)))
-    return candidates[:topk]
+        _update_edge_topk_shortlist(
+            candidates,
+            candidate=result["candidates"][0],
+            topk=max(1, topk),
+        )
+    return candidates
 
 
 def _build_layer_shortlists_shared(
@@ -617,12 +656,11 @@ def _build_layer_shortlists_shared(
             iteration=iteration,
         )
         for edge, candidate in zip(edge_indices, result["candidates"]):
-            per_edge_candidates[edge].append(candidate)
-
-    for edge in edge_indices:
-        candidates = per_edge_candidates[edge]
-        candidates.sort(key=lambda item: (-float(item["r2"]), float(item["complexity"])))
-        per_edge_candidates[edge] = candidates[: max(1, min(topk, len(candidates)))]
+            _update_edge_topk_shortlist(
+                per_edge_candidates[edge],
+                candidate=candidate,
+                topk=topk,
+            )
     return per_edge_candidates
 
 
@@ -730,13 +768,7 @@ def _run_auto_symbolic_icbr_with_models(
         teacher_edge_targets_layer = teacher_model.spline_postacts[layer_idx]
         shared_shortlists: dict[tuple[int, int], list[dict[str, object]]] = {}
         if candidate_mode == "shared":
-            active_edges: list[tuple[int, int]] = []
-            for input_idx in range(work_model.width_in[layer_idx]):
-                for output_idx in range(work_model.width_out[layer_idx + 1]):
-                    symbolic_mask = float(work_model.symbolic_fun[layer_idx].mask[output_idx, input_idx].item())
-                    numeric_mask = float(work_model.act_fun[layer_idx].mask[input_idx][output_idx].item())
-                    if symbolic_mask == 0.0 and numeric_mask > 0.0:
-                        active_edges.append((input_idx, output_idx))
+            active_edges = _collect_active_edges_for_layer(work_model, layer_idx=layer_idx)
             candidate_start = perf_counter()
             shared_shortlists = _build_layer_shortlists_shared(
                 teacher_acts_layer,
@@ -771,6 +803,14 @@ def _run_auto_symbolic_icbr_with_models(
                     )
                     if verbose >= 1:
                         print(f"commit ({layer_idx},{input_idx},{output_idx}) as 0")
+                    continue
+
+                if not _is_edge_active_for_symbolic(
+                    work_model,
+                    layer_idx=layer_idx,
+                    input_idx=input_idx,
+                    output_idx=output_idx,
+                ):
                     continue
 
                 if candidate_mode == "shared":
@@ -994,6 +1034,7 @@ def benchmark_symbolic_variants(
     teacher_numeric.auto_save = False
     with torch.no_grad():
         teacher_output = teacher_numeric(calibration_input).detach()
+    del teacher_numeric
 
     if calibration_target is not None:
         target = calibration_target.to(device=teacher_output.device, dtype=teacher_output.dtype)
@@ -1041,6 +1082,9 @@ def benchmark_symbolic_variants(
         "formula_display": baseline_formula["display"],
         "formula_error": baseline_formula["error"],
     }
+    del baseline_model
+    del baseline_output
+    del baseline_formula
 
     variant_payloads: dict[str, dict[str, object]] = {}
     comparisons_vs_baseline: dict[str, dict[str, float | bool]] = {}
@@ -1112,6 +1156,10 @@ def benchmark_symbolic_variants(
             "symbolic_target_r2_shift": float(variant_target_r2 - baseline_payload["target_r2"]),
             "formula_validation_result": bool(variant_formula_ok and baseline_formula_ok),
         }
+        del teacher_model
+        del work_model
+        del variant_output
+        del variant_formula
 
     full = variant_payloads.get("icbr_full")
     no_shared = variant_payloads.get("icbr_no_shared")

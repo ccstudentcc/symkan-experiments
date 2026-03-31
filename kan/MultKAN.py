@@ -2291,10 +2291,12 @@ class MultKAN(nn.Module):
             for i in range(self.width_in[l]):
                 for j in range(self.width_out[l + 1]):
                     if self.symbolic_fun[l].mask[j, i] > 0. and self.act_fun[l].mask[i][j] == 0.:
-                        print(f'skipping ({l},{i},{j}) since already symbolic')
+                        if verbose >= 1:
+                            print(f'skipping ({l},{i},{j}) since already symbolic')
                     elif self.symbolic_fun[l].mask[j, i] == 0. and self.act_fun[l].mask[i][j] == 0.:
                         self.fix_symbolic(l, i, j, '0', verbose=verbose > 1, log_history=False)
-                        print(f'fixing ({l},{i},{j}) with 0')
+                        if verbose >= 1:
+                            print(f'fixing ({l},{i},{j}) with 0')
                     else:
                         name, fun, r2, c = self.suggest_symbolic(l, i, j, a_range=a_range, b_range=b_range, lib=lib, verbose=False, weight_simple=weight_simple)
                         if r2 >= r2_threshold:
@@ -2302,7 +2304,8 @@ class MultKAN(nn.Module):
                             if verbose >= 1:
                                 print(f'fixing ({l},{i},{j}) with {name}, r2={r2}, c={c}')
                         else:
-                            print(f'For ({l},{i},{j}) the best fit was {name}, but r^2 = {r2} and this is lower than {r2_threshold}. This edge was omitted, keep training or try a different threshold.')
+                            if verbose >= 1:
+                                print(f'For ({l},{i},{j}) the best fit was {name}, but r^2 = {r2} and this is lower than {r2_threshold}. This edge was omitted, keep training or try a different threshold.')
                             
         self.log_history('auto_symbolic')
 
