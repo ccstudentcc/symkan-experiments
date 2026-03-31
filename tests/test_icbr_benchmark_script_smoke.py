@@ -363,13 +363,45 @@ def test_teacher_quality_gate_can_disable_r2_requirement() -> None:
     assert reason == ""
 
 
-def test_normalize_variants_keeps_baseline_and_icbr_full() -> None:
-    assert _normalize_variants("icbr_no_replay") == ["baseline", "icbr_no_replay", "icbr_full"]
+def test_normalize_variants_respects_explicit_request_and_keeps_default() -> None:
+    assert _normalize_variants(None) == ["baseline", "icbr_full"]
+    assert _normalize_variants("icbr_no_replay") == ["icbr_no_replay"]
     assert _normalize_variants("baseline,icbr_full,icbr_no_shared") == [
         "baseline",
         "icbr_full",
         "icbr_no_shared",
     ]
+
+
+def test_run_benchmark_supports_icbr_only_variants_without_baseline() -> None:
+    out_dir = Path("tmp") / f"icbr_benchmark_icbr_only_{uuid.uuid4().hex}"
+    result = run_benchmark(
+        tasks=["minimal"],
+        seeds=[0],
+        output_dir=out_dir,
+        train_num=16,
+        test_num=16,
+        train_steps=2,
+        lr=0.05,
+        lamb=1e-3,
+        topk=2,
+        grid_number=11,
+        iteration=1,
+        teacher_max_test_mse=1.0,
+        teacher_min_test_r2=-1.0,
+        teacher_cache_dir=out_dir / "teacher_cache",
+        teacher_cache_mode="off",
+        teacher_cache_version="stage25_icbr_only_v1",
+        variants=["icbr_full", "icbr_no_replay"],
+        make_plots=False,
+        quiet=True,
+    )
+
+    variant_rows = result["variant_rows"]
+    assert {row["variant"] for row in variant_rows} == {"icbr_full", "icbr_no_replay"}
+    assert all(row["variant_requested"] for row in variant_rows)
+    assert result["summary"]["config"]["variants"] == ["icbr_full", "icbr_no_replay"]
+    assert result["rows"][0]["baseline_symbolic_wall_time_s"] != result["rows"][0]["baseline_symbolic_wall_time_s"]
 
 
 def test_run_benchmark_supports_ablation_variants() -> None:
@@ -543,9 +575,10 @@ def test_visualization_upgrade_emits_variant_and_q123_plots() -> None:
     assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["contextual_replay_mse_ratio_no_replay_vs_full"] == "log"
     assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["explicit_commit_mse_ratio_refit_vs_full"] == "log"
     assert visuals["plots"]["q123_evidence_by_task"]["scale_label_placement"] == "title_band_left"
+    assert visuals["plots"]["q123_evidence_by_task"]["legend_placement"] == "figure_top_outside"
     assert visuals["plots"]["q123_evidence_by_task"]["y_label_by_panel"]["shared_tensor_symbolic_time_ratio_no_shared_vs_full"] == "Symbolic Wall Time Ratio\n(icbr_no_shared / icbr_full, ×)"
-    assert visuals["plots"]["q123_evidence_by_task"]["y_label_by_panel"]["contextual_replay_mse_ratio_no_replay_vs_full"] == "Imitation MSE Ratio\n(icbr_no_replay / icbr_full, ×)"
-    assert visuals["plots"]["q123_evidence_by_task"]["y_label_by_panel"]["explicit_commit_mse_ratio_refit_vs_full"] == "Imitation MSE Ratio\n(icbr_refit_commit / icbr_full, ×)"
+    assert visuals["plots"]["q123_evidence_by_task"]["y_label_by_panel"]["contextual_replay_mse_ratio_no_replay_vs_full"] == "MSE Ratio\n(icbr_no_replay / icbr_full, ×)"
+    assert visuals["plots"]["q123_evidence_by_task"]["y_label_by_panel"]["explicit_commit_mse_ratio_refit_vs_full"] == "MSE Ratio\n(icbr_refit_commit / icbr_full, ×)"
 
     summary_md = (out_dir / "icbr_benchmark_summary.md").read_text(encoding="utf-8")
     assert "icbr_benchmark_variant_overview.png" in summary_md
@@ -619,6 +652,7 @@ def test_replot_only_rebuilds_visualizations_from_existing_artifacts() -> None:
     assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["shared_tensor_symbolic_time_ratio_no_shared_vs_full"] == "log"
     assert visuals["plots"]["q123_evidence_by_task"]["scale_by_panel"]["contextual_replay_mse_ratio_no_replay_vs_full"] == "log"
     assert visuals["plots"]["q123_evidence_by_task"]["scale_label_placement"] == "title_band_left"
+    assert visuals["plots"]["q123_evidence_by_task"]["legend_placement"] == "figure_top_outside"
     assert visuals["plots"]["q123_evidence_by_task"]["y_label_by_panel"]["shared_tensor_symbolic_time_ratio_no_shared_vs_full"] == "Symbolic Wall Time Ratio\n(icbr_no_shared / icbr_full, ×)"
 
     summary_md_after = (out_dir / "icbr_benchmark_summary.md").read_text(encoding="utf-8")

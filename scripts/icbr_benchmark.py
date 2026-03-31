@@ -185,6 +185,8 @@ class _VisualizationStyle:
     legend_edgecolor: str = "#D8DEE6"
     baseline_color: str = "#7A8796"
     icbr_color: str = "#1F4E79"
+    symbolic_time_baseline_color: str = "#C47A2C"
+    symbolic_time_icbr_color: str = "#0F6B8F"
     accent_green: str = "#2E8B57"
     accent_red: str = "#C65D4B"
     accent_gold: str = "#C69214"
@@ -1511,38 +1513,59 @@ def _build_skipped_symbolic_metrics(*, skip_kind: str, reason: str) -> dict[str,
 
 
 def _build_legacy_metrics_from_variant_bundle(bundle: dict[str, object]) -> dict[str, object]:
-    baseline = bundle["baseline"]
+    baseline = bundle.get("baseline")
     variants = bundle["variants"]
     comparisons = bundle["comparisons_vs_baseline"]
-    icbr = variants["icbr_full"]
-    cmp = comparisons["icbr_full"]
+    icbr = variants.get("icbr_full")
+    cmp = comparisons.get("icbr_full", {})
+
+    baseline_symbolic_wall_time = float(baseline["symbolic_wall_time_s"]) if baseline is not None else float("nan")
+    baseline_imitation_mse = float(baseline["imitation_mse"]) if baseline is not None else float("nan")
+    baseline_target_mse = float(baseline["target_mse"]) if baseline is not None else float("nan")
+    baseline_target_r2 = float(baseline["target_r2"]) if baseline is not None else float("nan")
+    baseline_formula_export_success = bool(baseline["formula_export_success"]) if baseline is not None else False
+    baseline_formula_raw = list(baseline["formula_raw"]) if baseline is not None else []
+    baseline_formula_display = list(baseline["formula_display"]) if baseline is not None else []
+    baseline_formula_error = baseline["formula_error"] if baseline is not None else "baseline_not_requested"
+
+    icbr_candidate_generation_wall_time = float(icbr["candidate_generation_wall_time_s"]) if icbr is not None else float("nan")
+    icbr_replay_rerank_wall_time = float(icbr["replay_rerank_wall_time_s"]) if icbr is not None else float("nan")
+    icbr_symbolic_wall_time = float(icbr["symbolic_wall_time_s"]) if icbr is not None else float("nan")
+    icbr_imitation_mse = float(icbr["imitation_mse"]) if icbr is not None else float("nan")
+    icbr_target_mse = float(icbr["target_mse"]) if icbr is not None else float("nan")
+    icbr_target_r2 = float(icbr["target_r2"]) if icbr is not None else float("nan")
+    icbr_formula_export_success = bool(icbr["formula_export_success"]) if icbr is not None else False
+    icbr_formula_raw = list(icbr["formula_raw"]) if icbr is not None else []
+    icbr_formula_display = list(icbr["formula_display"]) if icbr is not None else []
+    icbr_formula_error = icbr["formula_error"] if icbr is not None else "icbr_full_not_requested"
+
     return {
-        "candidate_generation_wall_time_s": float(icbr["candidate_generation_wall_time_s"]),
-        "replay_rerank_wall_time_s": float(icbr["replay_rerank_wall_time_s"]),
-        "symbolic_wall_time_s": float(icbr["symbolic_wall_time_s"]),
-        "baseline_symbolic_wall_time_s": float(baseline["symbolic_wall_time_s"]),
-        "symbolic_wall_time_delta_s": float(cmp["symbolic_wall_time_delta_s"]),
-        "symbolic_speedup_vs_baseline": float(cmp["symbolic_speedup_vs_baseline"]),
-        "baseline_imitation_mse": float(baseline["imitation_mse"]),
-        "icbr_imitation_mse": float(icbr["imitation_mse"]),
-        "imitation_mse_shift": float(cmp["imitation_mse_shift"]),
-        "formula_export_success": bool(cmp["formula_export_success"]),
-        "baseline_formula_export_success": bool(baseline["formula_export_success"]),
-        "icbr_formula_export_success": bool(icbr["formula_export_success"]),
-        "baseline_formula_raw": list(baseline["formula_raw"]),
-        "baseline_formula_display": list(baseline["formula_display"]),
-        "icbr_formula_raw": list(icbr["formula_raw"]),
-        "icbr_formula_display": list(icbr["formula_display"]),
-        "baseline_formula_error": baseline["formula_error"],
-        "icbr_formula_error": icbr["formula_error"],
+        "candidate_generation_wall_time_s": icbr_candidate_generation_wall_time,
+        "replay_rerank_wall_time_s": icbr_replay_rerank_wall_time,
+        "symbolic_wall_time_s": icbr_symbolic_wall_time,
+        "baseline_symbolic_wall_time_s": baseline_symbolic_wall_time,
+        "symbolic_wall_time_delta_s": float(cmp.get("symbolic_wall_time_delta_s", float("nan"))),
+        "symbolic_speedup_vs_baseline": float(cmp.get("symbolic_speedup_vs_baseline", float("nan"))),
+        "baseline_imitation_mse": baseline_imitation_mse,
+        "icbr_imitation_mse": icbr_imitation_mse,
+        "imitation_mse_shift": float(cmp.get("imitation_mse_shift", float("nan"))),
+        "formula_export_success": bool(cmp.get("formula_export_success", icbr_formula_export_success)),
+        "baseline_formula_export_success": baseline_formula_export_success,
+        "icbr_formula_export_success": icbr_formula_export_success,
+        "baseline_formula_raw": baseline_formula_raw,
+        "baseline_formula_display": baseline_formula_display,
+        "icbr_formula_raw": icbr_formula_raw,
+        "icbr_formula_display": icbr_formula_display,
+        "baseline_formula_error": baseline_formula_error,
+        "icbr_formula_error": icbr_formula_error,
         "teacher_target_mse": float(bundle["teacher_target_mse"]),
         "teacher_target_r2": float(bundle["teacher_target_r2"]),
-        "baseline_target_mse": float(baseline["target_mse"]),
-        "baseline_target_r2": float(baseline["target_r2"]),
-        "icbr_target_mse": float(icbr["target_mse"]),
-        "icbr_target_r2": float(icbr["target_r2"]),
-        "symbolic_target_mse_shift": float(cmp["target_mse_shift"]),
-        "symbolic_target_r2_shift": float(cmp["target_r2_shift"]),
+        "baseline_target_mse": baseline_target_mse,
+        "baseline_target_r2": baseline_target_r2,
+        "icbr_target_mse": icbr_target_mse,
+        "icbr_target_r2": icbr_target_r2,
+        "symbolic_target_mse_shift": float(cmp.get("target_mse_shift", float("nan"))),
+        "symbolic_target_r2_shift": float(cmp.get("target_r2_shift", float("nan"))),
     }
 
 
@@ -1557,48 +1580,53 @@ def _build_variant_rows_for_task_seed(
     run_mode: str,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
-    baseline = variant_bundle["baseline"]
+    baseline = variant_bundle.get("baseline")
     variants = variant_bundle["variants"]
     comparisons = variant_bundle["comparisons_vs_baseline"]
-    baseline_row = {
-        "task": task,
-        "seed": seed,
-        "variant": "baseline",
-        "run_mode": run_mode,
-        "symbolic_execution_status": "completed",
-        "symbolic_skip_reason": "",
-        "variant_requested": bool("baseline" in variants_requested),
-        "candidate_mode": "baseline",
-        "rerank_mode": "baseline",
-        "commit_mode": "baseline",
-        "teacher_quality_gate_pass": bool(teacher_quality_gate_pass),
-        "teacher_quality_gate_reason": teacher_quality_gate_reason,
-        "candidate_generation_wall_time_s": float("nan"),
-        "replay_rerank_wall_time_s": float("nan"),
-        "symbolic_wall_time_s": float(baseline["symbolic_wall_time_s"]),
-        "imitation_mse": float(baseline["imitation_mse"]),
-        "target_mse": float(baseline["target_mse"]),
-        "target_r2": float(baseline["target_r2"]),
-        "formula_export_success": bool(baseline["formula_export_success"]),
-        "formula_raw": list(baseline["formula_raw"]),
-        "formula_display": list(baseline["formula_display"]),
-        "formula_error": baseline["formula_error"],
-        "replay_rank_inversion_count": float("nan"),
-        "replay_rank_inversion_total": float("nan"),
-        "replay_rank_inversion_rate": float("nan"),
-        "commit_param_drift_l2_mean": float("nan"),
-        "commit_param_drift_l2_max": float("nan"),
-        "baseline_symbolic_wall_time_s": float(baseline["symbolic_wall_time_s"]),
-        "baseline_imitation_mse": float(baseline["imitation_mse"]),
-        "baseline_target_mse": float(baseline["target_mse"]),
-        "baseline_target_r2": float(baseline["target_r2"]),
-        "symbolic_wall_time_delta_s": 0.0,
-        "symbolic_speedup_vs_baseline": 1.0,
-        "imitation_mse_shift": 0.0,
-        "symbolic_target_mse_shift": 0.0,
-        "symbolic_target_r2_shift": 0.0,
-    }
-    rows.append(baseline_row)
+    baseline_symbolic_wall_time = float(baseline["symbolic_wall_time_s"]) if baseline is not None else float("nan")
+    baseline_imitation_mse = float(baseline["imitation_mse"]) if baseline is not None else float("nan")
+    baseline_target_mse = float(baseline["target_mse"]) if baseline is not None else float("nan")
+    baseline_target_r2 = float(baseline["target_r2"]) if baseline is not None else float("nan")
+    if baseline is not None:
+        baseline_row = {
+            "task": task,
+            "seed": seed,
+            "variant": "baseline",
+            "run_mode": run_mode,
+            "symbolic_execution_status": "completed",
+            "symbolic_skip_reason": "",
+            "variant_requested": bool("baseline" in variants_requested),
+            "candidate_mode": "baseline",
+            "rerank_mode": "baseline",
+            "commit_mode": "baseline",
+            "teacher_quality_gate_pass": bool(teacher_quality_gate_pass),
+            "teacher_quality_gate_reason": teacher_quality_gate_reason,
+            "candidate_generation_wall_time_s": float("nan"),
+            "replay_rerank_wall_time_s": float("nan"),
+            "symbolic_wall_time_s": baseline_symbolic_wall_time,
+            "imitation_mse": baseline_imitation_mse,
+            "target_mse": baseline_target_mse,
+            "target_r2": baseline_target_r2,
+            "formula_export_success": bool(baseline["formula_export_success"]),
+            "formula_raw": list(baseline["formula_raw"]),
+            "formula_display": list(baseline["formula_display"]),
+            "formula_error": baseline["formula_error"],
+            "replay_rank_inversion_count": float("nan"),
+            "replay_rank_inversion_total": float("nan"),
+            "replay_rank_inversion_rate": float("nan"),
+            "commit_param_drift_l2_mean": float("nan"),
+            "commit_param_drift_l2_max": float("nan"),
+            "baseline_symbolic_wall_time_s": baseline_symbolic_wall_time,
+            "baseline_imitation_mse": baseline_imitation_mse,
+            "baseline_target_mse": baseline_target_mse,
+            "baseline_target_r2": baseline_target_r2,
+            "symbolic_wall_time_delta_s": 0.0,
+            "symbolic_speedup_vs_baseline": 1.0,
+            "imitation_mse_shift": 0.0,
+            "symbolic_target_mse_shift": 0.0,
+            "symbolic_target_r2_shift": 0.0,
+        }
+        rows.append(baseline_row)
     for variant_name, variant in variants.items():
         cmp = comparisons.get(variant_name, {})
         rows.append(
@@ -1630,10 +1658,10 @@ def _build_variant_rows_for_task_seed(
                 "replay_rank_inversion_rate": float(variant["replay_rank_inversion_rate"]),
                 "commit_param_drift_l2_mean": float(variant["commit_param_drift_l2_mean"]),
                 "commit_param_drift_l2_max": float(variant["commit_param_drift_l2_max"]),
-                "baseline_symbolic_wall_time_s": float(baseline["symbolic_wall_time_s"]),
-                "baseline_imitation_mse": float(baseline["imitation_mse"]),
-                "baseline_target_mse": float(baseline["target_mse"]),
-                "baseline_target_r2": float(baseline["target_r2"]),
+                "baseline_symbolic_wall_time_s": baseline_symbolic_wall_time,
+                "baseline_imitation_mse": baseline_imitation_mse,
+                "baseline_target_mse": baseline_target_mse,
+                "baseline_target_r2": baseline_target_r2,
                 "symbolic_wall_time_delta_s": float(cmp.get("symbolic_wall_time_delta_s", float("nan"))),
                 "symbolic_speedup_vs_baseline": float(cmp.get("symbolic_speedup_vs_baseline", float("nan"))),
                 "imitation_mse_shift": float(cmp.get("imitation_mse_shift", float("nan"))),
@@ -2498,7 +2526,7 @@ def _generate_visualizations(
                         "lows": baseline_low,
                         "highs": baseline_high,
                         "offset": -0.12,
-                        "color": style.baseline_color,
+                        "color": style.symbolic_time_baseline_color,
                     },
                     {
                         "label": "ICBR geometric mean ± 95% CI",
@@ -2506,7 +2534,7 @@ def _generate_visualizations(
                         "lows": icbr_low,
                         "highs": icbr_high,
                         "offset": 0.12,
-                        "color": style.icbr_color,
+                        "color": style.symbolic_time_icbr_color,
                     },
                 ],
                 title="Symbolic Wall Time by Task",
@@ -2806,79 +2834,132 @@ def _generate_visualizations(
         plt.close(fig)
 
         challenge_plot_specs = [
-            (
-                "shared_tensor_symbolic_time_ratio_no_shared_vs_full",
-                "Q1 Shared-Tensor Evidence",
-                "Symbolic Wall Time Ratio\n(icbr_no_shared / icbr_full, ×)",
-                1.0,
-                style.accent_gold,
-                "log",
-            ),
-            (
-                "contextual_replay_mse_ratio_no_replay_vs_full",
-                "Q2 Contextual-Replay Evidence",
-                "Imitation MSE Ratio\n(icbr_no_replay / icbr_full, ×)",
-                1.0,
-                style.accent_green,
-                "log",
-            ),
-            (
-                "explicit_commit_mse_ratio_refit_vs_full",
-                "Q3 Explicit-Commit Evidence",
-                "Imitation MSE Ratio\n(icbr_refit_commit / icbr_full, ×)",
-                1.0,
-                style.accent_red,
-                "log",
-            ),
+            {
+                "metric_name": "shared_tensor_symbolic_time_ratio_no_shared_vs_full",
+                "title": "Q1 Shared-Tensor Evidence",
+                "ylabel": "Symbolic Wall Time Ratio\n(icbr_no_shared / icbr_full, ×)",
+                "baseline_line": 1.0,
+                "metric_scale": "log",
+                "series": [
+                    {
+                        "kind": "direct_metric",
+                        "metric": "shared_tensor_symbolic_time_ratio_no_shared_vs_full",
+                        "label": "Geometric mean ± 95% CI",
+                        "offset": 0.0,
+                        "color": style.accent_gold,
+                    }
+                ],
+            },
+            {
+                "metric_name": "contextual_replay_mse_ratio_no_replay_vs_full",
+                "title": "Q2 Contextual-Replay Evidence",
+                "ylabel": "MSE Ratio\n(icbr_no_replay / icbr_full, ×)",
+                "baseline_line": 1.0,
+                "metric_scale": "log",
+                "series": [
+                    {
+                        "kind": "variant_ratio",
+                        "metric": "imitation_mse",
+                        "numerator_variant": "icbr_no_replay",
+                        "denominator_variant": "icbr_full",
+                        "label": "Imitation MSE Ratio geometric mean ± 95% CI",
+                        "offset": -0.10,
+                        "color": style.accent_green,
+                    },
+                    {
+                        "kind": "variant_ratio",
+                        "metric": "target_mse",
+                        "numerator_variant": "icbr_no_replay",
+                        "denominator_variant": "icbr_full",
+                        "label": "Target MSE Ratio geometric mean ± 95% CI",
+                        "offset": 0.10,
+                        "color": style.accent_red,
+                    },
+                ],
+            },
+            {
+                "metric_name": "explicit_commit_mse_ratio_refit_vs_full",
+                "title": "Q3 Explicit-Commit Evidence",
+                "ylabel": "MSE Ratio\n(icbr_refit_commit / icbr_full, ×)",
+                "baseline_line": 1.0,
+                "metric_scale": "log",
+                "series": [
+                    {
+                        "kind": "variant_ratio",
+                        "metric": "imitation_mse",
+                        "numerator_variant": "icbr_refit_commit",
+                        "denominator_variant": "icbr_full",
+                        "label": "Imitation MSE Ratio geometric mean ± 95% CI",
+                        "offset": -0.10,
+                        "color": style.accent_green,
+                    },
+                    {
+                        "kind": "variant_ratio",
+                        "metric": "target_mse",
+                        "numerator_variant": "icbr_refit_commit",
+                        "denominator_variant": "icbr_full",
+                        "label": "Target MSE Ratio geometric mean ± 95% CI",
+                        "offset": 0.10,
+                        "color": style.accent_red,
+                    },
+                ],
+            },
         ]
         fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(10.8, 11.4), squeeze=False)
         has_challenge_data = False
         challenge_scale_map: dict[str, str] = {}
-        for axis, (metric_name, title, ylabel, baseline_line, color, metric_scale) in zip(axes.flatten(), challenge_plot_specs):
-            means: list[float] = []
-            lows: list[float] = []
-            highs: list[float] = []
-            for task_name in tasks:
-                if metric_name == "contextual_replay_mse_ratio_no_replay_vs_full":
-                    ratio_values = _finite_variant_log2_ratio_values(
-                        task_name=task_name,
-                        numerator_variant="icbr_no_replay",
-                        denominator_variant="icbr_full",
-                        metric="imitation_mse",
-                    )
-                    mean, low, high = _safe_log_metric_ci95(ratio_values)
-                elif metric_name == "explicit_commit_mse_ratio_refit_vs_full":
-                    ratio_values = _finite_variant_log2_ratio_values(
-                        task_name=task_name,
-                        numerator_variant="icbr_refit_commit",
-                        denominator_variant="icbr_full",
-                        metric="imitation_mse",
-                    )
-                    mean, low, high = _safe_log_metric_ci95(ratio_values)
-                elif metric_scale == "log":
-                    mean, low, high = _safe_log_metric_ci95(_finite_metric_values(task_name, metric_name))
-                else:
-                    mean, ci95 = _safe_mean_ci95(_finite_metric_values(task_name, metric_name))
-                    low = mean - ci95 if math.isfinite(mean) and math.isfinite(ci95) else float("nan")
-                    high = mean + ci95 if math.isfinite(mean) and math.isfinite(ci95) else float("nan")
-                means.append(mean)
-                lows.append(low)
-                highs.append(high)
-            if any(math.isfinite(value) for value in means):
+        challenge_legend_handles = None
+        challenge_legend_labels = None
+        for axis, panel_spec in zip(axes.flatten(), challenge_plot_specs):
+            metric_name = str(panel_spec["metric_name"])
+            title = str(panel_spec["title"])
+            ylabel = str(panel_spec["ylabel"])
+            baseline_line = float(panel_spec["baseline_line"])
+            metric_scale = str(panel_spec["metric_scale"])
+            series_payload: list[dict[str, object]] = []
+            panel_has_data = False
+            for series_spec in panel_spec["series"]:
+                means: list[float] = []
+                lows: list[float] = []
+                highs: list[float] = []
+                for task_name in tasks:
+                    if series_spec["kind"] == "variant_ratio":
+                        ratio_values = _finite_variant_log2_ratio_values(
+                            task_name=task_name,
+                            numerator_variant=str(series_spec["numerator_variant"]),
+                            denominator_variant=str(series_spec["denominator_variant"]),
+                            metric=str(series_spec["metric"]),
+                        )
+                        mean, low, high = _safe_log_metric_ci95(ratio_values)
+                    elif metric_scale == "log":
+                        mean, low, high = _safe_log_metric_ci95(
+                            _finite_metric_values(task_name, str(series_spec["metric"]))
+                        )
+                    else:
+                        mean, ci95 = _safe_mean_ci95(_finite_metric_values(task_name, str(series_spec["metric"])))
+                        low = mean - ci95 if math.isfinite(mean) and math.isfinite(ci95) else float("nan")
+                        high = mean + ci95 if math.isfinite(mean) and math.isfinite(ci95) else float("nan")
+                    means.append(mean)
+                    lows.append(low)
+                    highs.append(high)
+                if any(math.isfinite(value) for value in means):
+                    panel_has_data = True
+                series_payload.append(
+                    {
+                        "label": str(series_spec["label"]),
+                        "means": means,
+                        "lows": lows,
+                        "highs": highs,
+                        "offset": float(series_spec["offset"]),
+                        "color": str(series_spec["color"]),
+                    }
+                )
+            if panel_has_data:
                 has_challenge_data = True
                 all_values = _plot_point_ci(
                     ax=axis,
                     labels=tasks,
-                    series=[
-                        {
-                            "label": "Geometric mean ± 95% CI",
-                            "means": means,
-                            "lows": lows,
-                            "highs": highs,
-                            "offset": 0.0,
-                            "color": color,
-                        }
-                    ],
+                    series=series_payload,
                     title=title,
                     ylabel=ylabel,
                     baseline_line=baseline_line,
@@ -2886,6 +2967,12 @@ def _generate_visualizations(
                 axis.set_ylabel(ylabel)
                 challenge_scale_map[metric_name] = _apply_ratio_axis(axis, all_values, baseline=baseline_line)
                 _maybe_add_axis_scale_badge(axis, challenge_scale_map[metric_name])
+                if (
+                    len(series_payload) > 1
+                    and challenge_legend_handles is None
+                    and challenge_legend_labels is None
+                ):
+                    challenge_legend_handles, challenge_legend_labels = axis.get_legend_handles_labels()
                 _maybe_use_scientific_ticks(axis, all_values)
             else:
                 _apply_axes_style(axis, title=title, ylabel=ylabel)
@@ -2899,15 +2986,25 @@ def _generate_visualizations(
                     alpha=0.9,
                 )
         if has_challenge_data:
+            if challenge_legend_handles and challenge_legend_labels:
+                legend = fig.legend(
+                    challenge_legend_handles,
+                    challenge_legend_labels,
+                    loc="upper center",
+                    bbox_to_anchor=(0.5, 0.992),
+                    ncol=2,
+                    frameon=True,
+                )
+                _style_legend_frame(legend)
             _add_figure_note(
                 fig,
                 _build_note_lines(
-                    summary_line="Q1/Q2/Q3 all use geometric mean ± 95% CI on ratio values",
+                    summary_line="Q1/Q2/Q3 use geometric mean ± 95% CI on ratio values",
                     measure_line="task-wise primary challenge evidence against the icbr_full reference",
-                    extra_line="All three panels are ratio-type on a log axis, so 1x means parity with full and larger values mean the ablated variant is higher than full",
+                    extra_line="Q2/Q3 offset imitation-left and target-right with the same green/red legend mapping used in the variant overview",
                 ),
             )
-            fig.tight_layout(rect=(0.0, 0.07, 1.0, 1.0))
+            fig.tight_layout(rect=(0.0, 0.07, 1.0, 0.95))
             challenge_plot = output_dir / "icbr_benchmark_q123_evidence_by_task.png"
             fig.savefig(challenge_plot, dpi=160)
             created_files.append(str(challenge_plot))
@@ -2917,12 +3014,13 @@ def _generate_visualizations(
                 "scale_by_panel": challenge_scale_map,
                 "y_label_by_panel": {
                     "shared_tensor_symbolic_time_ratio_no_shared_vs_full": "Symbolic Wall Time Ratio\n(icbr_no_shared / icbr_full, ×)",
-                    "contextual_replay_mse_ratio_no_replay_vs_full": "Imitation MSE Ratio\n(icbr_no_replay / icbr_full, ×)",
-                    "explicit_commit_mse_ratio_refit_vs_full": "Imitation MSE Ratio\n(icbr_refit_commit / icbr_full, ×)",
+                    "contextual_replay_mse_ratio_no_replay_vs_full": "MSE Ratio\n(icbr_no_replay / icbr_full, ×)",
+                    "explicit_commit_mse_ratio_refit_vs_full": "MSE Ratio\n(icbr_refit_commit / icbr_full, ×)",
                 },
                 "scale_label_placement": "title_band_left",
+                "legend_placement": "figure_top_outside",
                 "stat_note": "Q1/Q2/Q3=geometric mean ratio ± 95% CI; dashed lines=neutral reference at 1x",
-                "design_reason": "All three challenge panels are multiplicative comparisons against icbr_full, so ratio values on a log axis preserve the original metric semantics.",
+                "design_reason": "All three challenge panels are multiplicative comparisons against icbr_full, and Q2/Q3 reuse the overview figure's imitation-vs-target split for clearer MSE comparison.",
             }
         else:
             warnings_list.append("Insufficient finite Q1/Q2/Q3 evidence metrics for challenge-evidence visualization.")
@@ -4145,10 +4243,6 @@ def _normalize_variants(variants_raw: str | None) -> list[str]:
             continue
         seen.add(variant)
         deduped.append(variant)
-    if "baseline" not in seen:
-        deduped.insert(0, "baseline")
-    if "icbr_full" not in seen:
-        deduped.append("icbr_full")
     return deduped
 
 
