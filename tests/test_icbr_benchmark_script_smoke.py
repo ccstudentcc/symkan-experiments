@@ -11,6 +11,8 @@ import torch
 
 from scripts.icbr_benchmark import (
     _TaskSpec,
+    _build_teacher_cache_identity,
+    _build_teacher_cache_identity_aliases,
     _build_teacher_quality_gate_result,
     _expand_feynman_task_tokens,
     _infer_teacher_model_width_from_state,
@@ -246,6 +248,96 @@ def test_parse_width_mid_supports_multiplication_layer_specs() -> None:
     assert _parse_width_mid("[5,2]") == [[5, 2]]
     assert _parse_width_mid("5,2") == [5, 2]
     assert _parse_width_mid("[[5,2],3]") == [[5, 2], 3]
+
+
+def test_teacher_cache_identity_normalizes_width_representation() -> None:
+    dataset_path = (Path("datasets") / "Feynman_with_units" / "I.9.18").resolve()
+    spec = _TaskSpec(
+        name="feynman_I_9_18",
+        n_var=9,
+        width=[9, [5, 2], 1],
+        target_fn=None,
+        lib=None,
+        dataset_kind="feynman_file",
+        dataset_path=str(dataset_path),
+        dataset_variant="Feynman_with_units",
+        dataset_split_strategy="random",
+        teacher_grid=20,
+        teacher_k=3,
+        teacher_fit_opt="Adam",
+        teacher_post_train_prune=True,
+        teacher_prune_node_th=1e-2,
+        teacher_prune_edge_th=1e-2,
+        teacher_prune_iters=3,
+        teacher_post_prune_steps=100,
+        teacher_post_prune_lr=1e-3,
+        teacher_post_prune_lamb=1e-3,
+        teacher_post_prune_early_stop=True,
+        teacher_post_prune_eval_every=5,
+        teacher_post_prune_min_delta=1e-6,
+        teacher_post_prune_patience=3,
+    )
+
+    key, payload = _build_teacher_cache_identity(
+        spec=spec,
+        seed=2,
+        train_num=2000,
+        test_num=1000,
+        train_steps=200,
+        lr=0.01,
+        lamb=0.01,
+        profile_name="feynman_reference",
+        cache_version="stage22_feynman_reference_paper10_seeds1_20_v1",
+    )
+
+    assert payload["width"] == [[9, 0], [5, 2], [1, 0]]
+    assert key == "feynman_I_9_18_seed2_c673a31c47af251b"
+
+
+def test_teacher_cache_identity_aliases_include_compact_width_legacy_key() -> None:
+    dataset_path = (Path("datasets") / "Feynman_with_units" / "I.9.18").resolve()
+    spec = _TaskSpec(
+        name="feynman_I_9_18",
+        n_var=9,
+        width=[9, [5, 2], 1],
+        target_fn=None,
+        lib=None,
+        dataset_kind="feynman_file",
+        dataset_path=str(dataset_path),
+        dataset_variant="Feynman_with_units",
+        dataset_split_strategy="random",
+        teacher_grid=20,
+        teacher_k=3,
+        teacher_fit_opt="Adam",
+        teacher_post_train_prune=True,
+        teacher_prune_node_th=1e-2,
+        teacher_prune_edge_th=1e-2,
+        teacher_prune_iters=3,
+        teacher_post_prune_steps=100,
+        teacher_post_prune_lr=1e-3,
+        teacher_post_prune_lamb=1e-3,
+        teacher_post_prune_early_stop=True,
+        teacher_post_prune_eval_every=5,
+        teacher_post_prune_min_delta=1e-6,
+        teacher_post_prune_patience=3,
+    )
+
+    aliases = _build_teacher_cache_identity_aliases(
+        spec=spec,
+        seed=2,
+        train_num=2000,
+        test_num=1000,
+        train_steps=200,
+        lr=0.01,
+        lamb=0.01,
+        profile_name="feynman_reference",
+        cache_version="stage22_feynman_reference_paper10_seeds1_20_v1",
+    )
+
+    assert [key for key, _ in aliases] == [
+        "feynman_I_9_18_seed2_c673a31c47af251b",
+        "feynman_I_9_18_seed2_a679acdf59bafd8e",
+    ]
 
 
 def test_teacher_quality_gate_can_disable_r2_requirement() -> None:

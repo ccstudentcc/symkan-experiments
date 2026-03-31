@@ -14,11 +14,18 @@ Complete
 
 ## Latest Completed Work
 - `scripts/icbr_benchmark.py`：
+  - 修正 teacher cache key 的 `width` 序列化口径，统一改为稳定的规范化表示（例如 `[9,[5,2],1]` 统一归一成 `[[9,0],[5,2],[1,0]]`）后再参与 digest
+  - 新增 cache key alias 兼容逻辑：读取缓存时除主 key 外，还会兼容尝试旧的 compact-width key，避免 stage22/stage23 期间同语义不同 `width` 表示导致的 cache miss
+  - 已现场验证：`feynman_I_9_18 seed=2` 能在 `readonly + symbolic-only` 路径下命中现有目录 `feynman_I_9_18_seed2_c673a31c47af251b`
+- `scripts/icbr_benchmark.py`：
   - 修正 `_infer_teacher_model_width_from_state()` 对 pruning 后 multiplication-aware hidden layer 的宽度反推公式
   - 旧逻辑误把 `num_mult = subnode_width - node_width` 直接代回校验，导致如 `feynman_I_9_18` 这类缓存中的 `(node_width, subnode_width) = (3, 4)` 在 `symbolic-only` 下被错误判定为不兼容
   - 新逻辑按 `delta = subnode_width - node_width = (mult_arity - 1) * num_mult` 反推，因此 `mult_arity=2` 时能正确恢复为 `[num_sum, num_mult] = [2, 1]`
 - `tests/test_icbr_benchmark_script_smoke.py`：
   - 新增 pruned multiplication-aware teacher cache 的宽度反推回归测试，防止 `symbolic-only` 载入旧缓存时再次回归
+  - 新增 teacher cache identity 回归测试，覆盖：
+    - cache key 对 `width` 的规范化序列化
+    - 旧 compact-width key alias 兼容
 - `kan/icbr.py`：
   - 新增 `_clear_model_runtime_caches()`，统一清理 `acts / spline_postacts / spline_postsplines / acts_scale / symbolic_acts` 等运行期大对象
   - `benchmark_symbolic_variants()` 重构为更清晰的生命周期：
@@ -117,6 +124,9 @@ Complete
 
 ## Validation Run
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m py_compile scripts\icbr_benchmark.py tests\test_icbr_benchmark_script_smoke.py`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_benchmark_script_smoke.py -k "teacher_cache_identity or feynman_symbolic_only or symbolic_only or infer_teacher_model_width"`
+- inline Python probe: `_resolve_teacher_model_with_cache(..., cache_mode='readonly', require_cache_hit=True)` for `feynman_I_9_18 seed=2`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m py_compile scripts\icbr_benchmark.py tests\test_icbr_benchmark_script_smoke.py`
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_benchmark_script_smoke.py -k "feynman_symbolic_only or symbolic_only or teacher_cache or infer_teacher_model_width"`
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m py_compile kan\icbr.py tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py tests\test_icbr_benchmark_script_smoke.py scripts\icbr_benchmark.py`
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py tests\test_icbr_benchmark_script_smoke.py`
@@ -124,6 +134,11 @@ Complete
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py`
 
 ## Validation Result
+- `py_compile`（cache key follow-up 修复）通过。
+- `pytest tests\test_icbr_benchmark_script_smoke.py -k "teacher_cache_identity or feynman_symbolic_only or symbolic_only or infer_teacher_model_width"` 通过：`5 passed`。
+- 只读现场探针已验证：
+  - `_resolve_teacher_model_with_cache(..., cache_mode='readonly', require_cache_hit=True)` 可命中现有 `feynman_I_9_18 seed=2` 缓存
+  - 返回 `teacher_cache_key = feynman_I_9_18_seed2_c673a31c47af251b`
 - `py_compile`（本次 follow-up 修复）通过。
 - `pytest tests\test_icbr_benchmark_script_smoke.py -k "feynman_symbolic_only or symbolic_only or teacher_cache or infer_teacher_model_width"` 通过：`5 passed`。
 - 已验证：

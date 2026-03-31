@@ -318,6 +318,17 @@ def _serialize_width_tokens(width_tokens: list[_WidthToken]) -> _WidthToken | li
     return serialized
 
 
+def _normalize_width_tokens_for_cache(width_tokens: list[_WidthToken]) -> list[list[int]]:
+    normalized: list[list[int]] = []
+    for token in width_tokens:
+        parsed = _normalize_width_token(token)
+        if isinstance(parsed, int):
+            normalized.append([int(parsed), 0])
+        else:
+            normalized.append([int(parsed[0]), int(parsed[1])])
+    return normalized
+
+
 def _tasks_request_feynman_defaults(tasks: list[str]) -> bool:
     feynman_tokens = {"feynman_paper10", "feynman_random"}
     return any(task.startswith("feynman_") or task in feynman_tokens for task in tasks)
@@ -894,7 +905,7 @@ def _build_teacher_cache_identity(
         "task": spec.name,
         "seed": int(seed),
         "n_var": int(spec.n_var),
-        "width": list(spec.width),
+        "width": _normalize_width_tokens_for_cache(spec.width),
         "dataset_kind": spec.dataset_kind,
         "dataset_path": spec.dataset_path,
         "dataset_variant": spec.dataset_variant,
@@ -925,6 +936,41 @@ def _build_teacher_cache_identity(
     serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
     return f"{spec.name}_seed{seed}_{digest}", payload
+
+
+def _build_teacher_cache_identity_aliases(
+    *,
+    spec: _TaskSpec,
+    seed: int,
+    train_num: int,
+    test_num: int,
+    train_steps: int,
+    lr: float,
+    lamb: float,
+    profile_name: str,
+    cache_version: str,
+) -> list[tuple[str, dict[str, object]]]:
+    primary_key, primary_payload = _build_teacher_cache_identity(
+        spec=spec,
+        seed=seed,
+        train_num=train_num,
+        test_num=test_num,
+        train_steps=train_steps,
+        lr=lr,
+        lamb=lamb,
+        profile_name=profile_name,
+        cache_version=cache_version,
+    )
+    aliases: list[tuple[str, dict[str, object]]] = [(primary_key, primary_payload)]
+
+    legacy_payload = dict(primary_payload)
+    legacy_payload["width"] = list(spec.width)
+    if legacy_payload["width"] != primary_payload["width"]:
+        legacy_serialized = json.dumps(legacy_payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        legacy_digest = hashlib.sha256(legacy_serialized.encode("utf-8")).hexdigest()[:16]
+        legacy_key = f"{spec.name}_seed{seed}_{legacy_digest}"
+        aliases.append((legacy_key, legacy_payload))
+    return aliases
 
 
 def _acquire_lock(lock_path: Path, *, timeout_s: float = 120.0) -> bool:
@@ -1078,7 +1124,7 @@ def _resolve_teacher_model_with_cache(
         train_num=train_num,
         test_num=test_num,
     )
-    cache_key, cache_payload = _build_teacher_cache_identity(
+    cache_aliases = _build_teacher_cache_identity_aliases(
         spec=spec,
         seed=seed,
         train_num=train_num,
@@ -1089,6 +1135,7 @@ def _resolve_teacher_model_with_cache(
         profile_name=profile_name,
         cache_version=cache_version,
     )
+    cache_key, cache_payload = cache_aliases[0]
 
     cache_root = cache_dir / cache_key
     state_path = cache_root / "teacher_state.pt"
@@ -1106,30 +1153,37 @@ def _resolve_teacher_model_with_cache(
             quiet=quiet,
         )
 
-    if cache_mode in {"readwrite", "readonly"} and state_path.exists() and meta_path.exists():
-        try:
-            state = torch.load(state_path, map_location="cpu")
-            meta_payload = _load_json_if_exists(meta_path)
-            model = _build_teacher_model_from_cached_state(
-                spec=spec,
-                seed=seed,
-                state_dict=state,
-                meta_payload=meta_payload,
-            )
-            model.load_state_dict(state)
-            return model, dataset, {
-                "teacher_cache_hit": True,
-                "teacher_cache_key": cache_key,
-                "teacher_cache_path": str(cache_root),
-                "teacher_cache_mode": cache_mode,
-                "teacher_cache_status": "hit",
-            }
-        except Exception as exc:
-            cache_load_error = f"{type(exc).__name__}: {exc}"
-        else:  # pragma: no cover
-            cache_load_error = ""
-    else:
-        cache_load_error = ""
+    cache_load_error = ""
+    if cache_mode in {"readwrite", "readonly"}:
+        for candidate_key, _candidate_payload in cache_aliases:
+            candidate_root = cache_dir / candidate_key
+            candidate_state_path = candidate_root / "teacher_state.pt"
+            candidate_meta_path = candidate_root / "teacher_meta.json"
+            if not candidate_state_path.exists() or not candidate_meta_path.exists():
+                continue
+            try:
+                state = torch.load(candidate_state_path, map_location="cpu")
+                meta_payload = _load_json_if_exists(candidate_meta_path)
+                model = _build_teacher_model_from_cached_state(
+                    spec=spec,
+                    seed=seed,
+                    state_dict=state,
+                    meta_payload=meta_payload,
+                )
+                model.load_state_dict(state)
+                return model, dataset, {
+                    "teacher_cache_hit": True,
+                    "teacher_cache_key": candidate_key,
+                    "teacher_cache_path": str(candidate_root),
+                    "teacher_cache_mode": cache_mode,
+                    "teacher_cache_status": "hit",
+                }
+            except Exception as exc:
+                cache_load_error = f"{type(exc).__name__}: {exc}"
+                cache_root = candidate_root
+                state_path = candidate_state_path
+                meta_path = candidate_meta_path
+                break
 
     if cache_mode == "off":
         if require_cache_hit:
