@@ -8,6 +8,7 @@ from kan import icbr as icbr_module
 from kan.MultKAN import MultKAN
 from kan.icbr import (
     _build_layer_shortlists_shared,
+    _clear_model_runtime_caches,
     _ensure_fully_symbolic_completion,
     _run_auto_symbolic_icbr_with_models,
 )
@@ -182,6 +183,26 @@ def test_auto_symbolic_shared_mode_only_builds_candidates_for_active_edges(
         )
 
     assert captured["edge_indices"] == [(0, 0)]
+
+
+def test_clear_model_runtime_caches_removes_forward_artifacts() -> None:
+    model = MultKAN(width=[1, 1], grid=5, k=3, auto_save=False)
+    x = torch.linspace(-1.0, 1.0, steps=8).unsqueeze(1)
+    model(x)
+    model.symbolic_formula(var=["x"])
+
+    assert model.acts is not None
+    assert model.spline_postacts is not None
+    assert model.cache_data is not None
+    assert hasattr(model, "symbolic_acts")
+
+    _clear_model_runtime_caches(model)
+
+    assert model.acts is None
+    assert model.spline_postacts is None
+    assert model.spline_postsplines is None
+    assert model.cache_data is None
+    assert model.symbolic_acts is None
 
 
 def test_fully_symbolic_completion_guard_rejects_partial_symbolic_state() -> None:

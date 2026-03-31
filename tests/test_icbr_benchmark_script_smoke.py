@@ -1112,6 +1112,9 @@ def test_symbolic_only_mode_requires_cache_hit() -> None:
     assert symbolic_result["rows"][0]["teacher_cache_hit"] is True
     assert symbolic_result["rows"][0]["run_mode"] == "symbolic-only"
     assert symbolic_result["rows"][0]["symbolic_execution_status"] == "completed"
+    assert symbolic_result["rows"][0]["teacher_test_mse"] != symbolic_result["rows"][0]["teacher_test_mse"]
+    assert symbolic_result["rows"][0]["teacher_test_r2"] != symbolic_result["rows"][0]["teacher_test_r2"]
+    assert symbolic_result["rows"][0]["teacher_quality_gate_reason"] == "skipped_in_symbolic_only_cached_teacher"
 
     with pytest.raises(RuntimeError, match="requires a cache hit"):
         run_benchmark(

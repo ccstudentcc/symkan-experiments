@@ -4,15 +4,32 @@
 2026-03-31
 
 ## Task
-推进 Stage 22：在 ICBR benchmark 符号拟合路径中，只对活跃 edge 生成候选，并将 per-edge shortlist 改为固定容量 top-k 聚合；同时将更完整的 benchmark 符号拟合内存生命周期整理明确推迟到 Stage 23。
+推进 Stage 23：按既定口径整理 benchmark 符号拟合的内存生命周期，明确 baseline / 各 ICBR 变体 / 公式导出阶段的对象作用域与运行期缓存清理边界，避免前一阶段的状态或大张量残留影响后一阶段。
 
 ## Current Stage
-Stage 22: Stream Active-Edge Candidate Generation and Fixed-Capacity Top-K Shortlists
+Stage 23: Enforce Benchmark Symbolic-Fitting Memory Lifecycle
 
 ## Status
 Complete
 
 ## Latest Completed Work
+- `kan/icbr.py`：
+  - 新增 `_clear_model_runtime_caches()`，统一清理 `acts / spline_postacts / spline_postsplines / acts_scale / symbolic_acts` 等运行期大对象
+  - `benchmark_symbolic_variants()` 重构为更清晰的生命周期：
+    - 只保留一份跨 baseline/variants 共享的 `teacher_output`
+    - baseline 通过 `_run_baseline_symbolic_benchmark()` 独立 clone、独立运行、独立公式导出，结束后立即清理运行期缓存
+    - 每个 ICBR 变体通过 `_run_variant_symbolic_benchmark()` 独立 clone 出 `teacher_model/work_model`，只在当前变体作用域内存活，结束后立即清理运行期缓存
+  - teacher numeric、baseline、variant 三段路径现在都通过统一 helper 明确释放运行期缓存，而不再依赖零散 `del`
+- `scripts/icbr_benchmark.py`：
+  - `symbolic-only` 下不再重算 `teacher_test_mse` / `teacher_test_r2`
+  - `symbolic-only` rows 中显式记录：
+    - `teacher_test_mse = NaN`
+    - `teacher_test_r2 = NaN`
+    - `teacher_quality_gate_reason = skipped_in_symbolic_only_cached_teacher`
+- `tests/test_icbr_integration.py`：
+  - 新增运行期缓存清理回归，验证 `_clear_model_runtime_caches()` 会清空前向与公式导出的缓存对象
+- `tests/test_icbr_benchmark_script_smoke.py`：
+  - 新增 `symbolic-only` 回归，验证该模式不再重算 teacher 指标，而是直接使用缓存教师进入符号拟合
 - 文档边界已更新：
   - `IMPLEMENTATION_PLAN.md` 新增 Stage 22 与 Stage 23
   - Stage 22 固定只做两项：
@@ -93,10 +110,18 @@ Complete
 - tests/test_icbr_integration.py
 
 ## Validation Run
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m py_compile kan\icbr.py tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py tests\test_icbr_benchmark_script_smoke.py scripts\icbr_benchmark.py`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py tests\test_icbr_benchmark_script_smoke.py`
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m py_compile kan\icbr.py tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py`
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py`
 
 ## Validation Result
+- `py_compile`（Stage 23 相关 Python 文件）通过。
+- `pytest tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py tests\test_icbr_benchmark_script_smoke.py` 通过：`33 passed`。
+- 已验证：
+  - benchmark baseline / variant 路径的运行期缓存清理逻辑不破坏既有 benchmark 结果结构
+  - `symbolic-only` 下 teacher 指标不再重算
+  - Feynman / run-mode / benchmark smoke 全部未回归
 - `py_compile` 通过。
 - `pytest tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py` 通过：`8 passed`。
 - 已验证：
@@ -114,11 +139,10 @@ Complete
 - `prune_iters` 不区分数据集类型；是否实际生效仍由 `teacher_post_train_prune` 控制
 - Stage 22 范围固定为候选生成层优化，不提前混入 replay 门控、两阶段搜索或完整 benchmark 生命周期重构。
 - Stage 23 预留给 benchmark 符号拟合阶段的内存生命周期整理，包含 baseline/variant 作用域隔离、teacher_output 共享边界与公式导出后立即释放。
+- Stage 23 实现按“作用域清晰 + 统一缓存清理 helper”推进，不继续堆叠零散 `del` 作为主要生命周期管理手段。
 
 ## Remaining Work
-- Stage 23：
-  - 按已写入 `IMPLEMENTATION_PLAN.md` 的生命周期口径整理 benchmark 符号拟合内存管理
-  - 进一步收敛 baseline / variant / formula export 的对象作用域
+- 无
 
 ## Blockers
 - 无

@@ -977,6 +977,152 @@ def _formula_export_details(
     return {"ok": True, "raw": raw, "display": display, "error": None}
 
 
+def _clear_model_runtime_caches(model, *, keep_cache_data: bool = False) -> None:
+    runtime_attrs = (
+        "acts",
+        "acts_premult",
+        "spline_preacts",
+        "spline_postsplines",
+        "spline_postacts",
+        "acts_scale",
+        "acts_scale_spline",
+        "subnode_actscale",
+        "edge_actscale",
+        "symbolic_acts",
+        "symbolic_acts_premult",
+    )
+    for attr_name in runtime_attrs:
+        if hasattr(model, attr_name):
+            setattr(model, attr_name, None)
+    if not keep_cache_data and hasattr(model, "cache_data"):
+        model.cache_data = None
+
+
+def _run_baseline_symbolic_benchmark(
+    model,
+    *,
+    calibration_input: torch.Tensor,
+    teacher_output: torch.Tensor,
+    target: torch.Tensor | None,
+    input_dim: int,
+    lib_names: list[str],
+    formula_significant_digits: int,
+) -> dict[str, object]:
+    baseline_model = _clone_model_memory(model)
+    baseline_model.auto_save = False
+    try:
+        with torch.no_grad():
+            baseline_model(calibration_input)
+        baseline_start = perf_counter()
+        baseline_model.auto_symbolic(lib=lib_names, verbose=0, weight_simple=0.0, r2_threshold=0.0)
+        baseline_symbolic_wall_time_s = perf_counter() - baseline_start
+        with torch.no_grad():
+            baseline_output = baseline_model(calibration_input).detach()
+        baseline_mse = torch.mean((baseline_output - teacher_output).pow(2)).item()
+        if target is not None:
+            baseline_target_mse = _mse_to_target(baseline_output, target)
+            baseline_target_r2 = _r2_to_target(baseline_output, target)
+        else:
+            baseline_target_mse = float("nan")
+            baseline_target_r2 = float("nan")
+        baseline_formula = _formula_export_details(
+            baseline_model,
+            input_dim=input_dim,
+            significant_digits=formula_significant_digits,
+        )
+        baseline_formula_ok = bool(baseline_formula["ok"]) and len(baseline_formula["raw"]) == int(baseline_output.shape[1])
+        return {
+            "symbolic_wall_time_s": float(baseline_symbolic_wall_time_s),
+            "mse": float(baseline_mse),
+            "target_mse": float(baseline_target_mse),
+            "target_r2": float(baseline_target_r2),
+            "formula_validation_result": bool(baseline_formula_ok),
+            "formula_raw": baseline_formula["raw"],
+            "formula_display": baseline_formula["display"],
+            "formula_error": baseline_formula["error"],
+        }
+    finally:
+        _clear_model_runtime_caches(baseline_model)
+
+
+def _run_variant_symbolic_benchmark(
+    model,
+    *,
+    variant: str,
+    calibration_input: torch.Tensor,
+    teacher_output: torch.Tensor,
+    target: torch.Tensor | None,
+    input_dim: int,
+    lib_names: list[str],
+    topk: int,
+    a_range: tuple[float, float],
+    b_range: tuple[float, float],
+    grid_number: int,
+    iteration: int,
+    formula_significant_digits: int,
+) -> dict[str, object]:
+    candidate_mode, rerank_mode, commit_mode = _resolve_icbr_variant_modes(variant)
+    teacher_model = _clone_model_memory(model)
+    work_model = _clone_model_memory(model)
+    teacher_model.auto_save = False
+    work_model.auto_save = False
+    try:
+        work_model, timing = _run_auto_symbolic_icbr_with_models(
+            teacher_model,
+            work_model,
+            calibration_input,
+            lib_names=lib_names,
+            topk=topk,
+            a_range=a_range,
+            b_range=b_range,
+            grid_number=grid_number,
+            iteration=iteration,
+            verbose=0,
+            candidate_mode=candidate_mode,
+            rerank_mode=rerank_mode,
+            commit_mode=commit_mode,
+            collect_metrics=True,
+        )
+        with torch.no_grad():
+            variant_output = work_model(calibration_input).detach()
+        variant_mse = torch.mean((variant_output - teacher_output).pow(2)).item()
+        if target is not None:
+            variant_target_mse = _mse_to_target(variant_output, target)
+            variant_target_r2 = _r2_to_target(variant_output, target)
+        else:
+            variant_target_mse = float("nan")
+            variant_target_r2 = float("nan")
+        variant_formula = _formula_export_details(
+            work_model,
+            input_dim=input_dim,
+            significant_digits=formula_significant_digits,
+        )
+        variant_formula_ok = bool(variant_formula["ok"]) and len(variant_formula["raw"]) == int(variant_output.shape[1])
+        return {
+            "candidate_mode": candidate_mode,
+            "rerank_mode": rerank_mode,
+            "commit_mode": commit_mode,
+            "candidate_generation_wall_time_s": float(timing["candidate_generation_wall_time_s"]),
+            "replay_rerank_wall_time_s": float(timing["replay_rerank_wall_time_s"]),
+            "symbolic_wall_time_s": float(timing["symbolic_wall_time_s"]),
+            "replay_rank_inversion_count": int(timing["replay_rank_inversion_count"]),
+            "replay_rank_inversion_total": int(timing["replay_rank_inversion_total"]),
+            "replay_rank_inversion_rate": float(timing["replay_rank_inversion_rate"]),
+            "commit_param_drift_l2_mean": float(timing["commit_param_drift_l2_mean"]),
+            "commit_param_drift_l2_max": float(timing["commit_param_drift_l2_max"]),
+            "mse": float(variant_mse),
+            "target_mse": float(variant_target_mse),
+            "target_r2": float(variant_target_r2),
+            "formula_validation_result": bool(variant_formula_ok),
+            "formula_raw": variant_formula["raw"],
+            "formula_display": variant_formula["display"],
+            "formula_error": variant_formula["error"],
+        }
+    finally:
+        _clear_model_runtime_caches(teacher_model)
+        _clear_model_runtime_caches(work_model)
+
+
 def _normalize_benchmark_variants(variants: Sequence[str] | None) -> list[str]:
     if variants is None:
         return ["baseline", "icbr_full"]
@@ -1032,9 +1178,12 @@ def benchmark_symbolic_variants(
     teacher_numeric = _clone_model_memory(model)
     _set_teacher_numeric_mode(teacher_numeric)
     teacher_numeric.auto_save = False
-    with torch.no_grad():
-        teacher_output = teacher_numeric(calibration_input).detach()
-    del teacher_numeric
+    try:
+        with torch.no_grad():
+            teacher_output = teacher_numeric(calibration_input).detach()
+    finally:
+        _clear_model_runtime_caches(teacher_numeric)
+        del teacher_numeric
 
     if calibration_target is not None:
         target = calibration_target.to(device=teacher_output.device, dtype=teacher_output.dtype)
@@ -1050,101 +1199,41 @@ def benchmark_symbolic_variants(
         teacher_target_mse = float("nan")
         teacher_target_r2 = float("nan")
 
-    baseline_model = _clone_model_memory(model)
-    baseline_model.auto_save = False
-    with torch.no_grad():
-        baseline_model(calibration_input)
-    baseline_start = perf_counter()
-    baseline_model.auto_symbolic(lib=lib_names, verbose=0, weight_simple=0.0, r2_threshold=0.0)
-    baseline_symbolic_wall_time_s = perf_counter() - baseline_start
-    with torch.no_grad():
-        baseline_output = baseline_model(calibration_input).detach()
-    baseline_mse = torch.mean((baseline_output - teacher_output).pow(2)).item()
-    if target is not None:
-        baseline_target_mse = _mse_to_target(baseline_output, target)
-        baseline_target_r2 = _r2_to_target(baseline_output, target)
-    else:
-        baseline_target_mse = float("nan")
-        baseline_target_r2 = float("nan")
-    baseline_formula = _formula_export_details(
-        baseline_model,
+    baseline_payload = _run_baseline_symbolic_benchmark(
+        model,
+        calibration_input=calibration_input,
+        teacher_output=teacher_output,
+        target=target,
         input_dim=input_dim,
-        significant_digits=formula_significant_digits,
+        lib_names=lib_names,
+        formula_significant_digits=formula_significant_digits,
     )
-    baseline_formula_ok = bool(baseline_formula["ok"]) and len(baseline_formula["raw"]) == int(baseline_output.shape[1])
-    baseline_payload = {
-        "symbolic_wall_time_s": float(baseline_symbolic_wall_time_s),
-        "mse": float(baseline_mse),
-        "target_mse": float(baseline_target_mse),
-        "target_r2": float(baseline_target_r2),
-        "formula_validation_result": bool(baseline_formula_ok),
-        "formula_raw": baseline_formula["raw"],
-        "formula_display": baseline_formula["display"],
-        "formula_error": baseline_formula["error"],
-    }
-    del baseline_model
-    del baseline_output
-    del baseline_formula
+    baseline_formula_ok = bool(baseline_payload["formula_validation_result"])
 
     variant_payloads: dict[str, dict[str, object]] = {}
     comparisons_vs_baseline: dict[str, dict[str, float | bool]] = {}
     for variant in variant_names:
         if variant == "baseline":
             continue
-        candidate_mode, rerank_mode, commit_mode = _resolve_icbr_variant_modes(variant)
-        teacher_model = _clone_model_memory(model)
-        work_model = _clone_model_memory(model)
-        work_model, timing = _run_auto_symbolic_icbr_with_models(
-            teacher_model,
-            work_model,
-            calibration_input,
+        variant_payloads[variant] = _run_variant_symbolic_benchmark(
+            model,
+            variant=variant,
+            calibration_input=calibration_input,
+            teacher_output=teacher_output,
+            target=target,
+            input_dim=input_dim,
             lib_names=lib_names,
             topk=topk,
             a_range=a_range,
             b_range=b_range,
             grid_number=grid_number,
             iteration=iteration,
-            verbose=0,
-            candidate_mode=candidate_mode,
-            rerank_mode=rerank_mode,
-            commit_mode=commit_mode,
-            collect_metrics=True,
+            formula_significant_digits=formula_significant_digits,
         )
-        with torch.no_grad():
-            variant_output = work_model(calibration_input).detach()
-        variant_mse = torch.mean((variant_output - teacher_output).pow(2)).item()
-        if target is not None:
-            variant_target_mse = _mse_to_target(variant_output, target)
-            variant_target_r2 = _r2_to_target(variant_output, target)
-        else:
-            variant_target_mse = float("nan")
-            variant_target_r2 = float("nan")
-        variant_formula = _formula_export_details(
-            work_model,
-            input_dim=input_dim,
-            significant_digits=formula_significant_digits,
-        )
-        variant_formula_ok = bool(variant_formula["ok"]) and len(variant_formula["raw"]) == int(variant_output.shape[1])
-        variant_payloads[variant] = {
-            "candidate_mode": candidate_mode,
-            "rerank_mode": rerank_mode,
-            "commit_mode": commit_mode,
-            "candidate_generation_wall_time_s": float(timing["candidate_generation_wall_time_s"]),
-            "replay_rerank_wall_time_s": float(timing["replay_rerank_wall_time_s"]),
-            "symbolic_wall_time_s": float(timing["symbolic_wall_time_s"]),
-            "replay_rank_inversion_count": int(timing["replay_rank_inversion_count"]),
-            "replay_rank_inversion_total": int(timing["replay_rank_inversion_total"]),
-            "replay_rank_inversion_rate": float(timing["replay_rank_inversion_rate"]),
-            "commit_param_drift_l2_mean": float(timing["commit_param_drift_l2_mean"]),
-            "commit_param_drift_l2_max": float(timing["commit_param_drift_l2_max"]),
-            "mse": float(variant_mse),
-            "target_mse": float(variant_target_mse),
-            "target_r2": float(variant_target_r2),
-            "formula_validation_result": bool(variant_formula_ok),
-            "formula_raw": variant_formula["raw"],
-            "formula_display": variant_formula["display"],
-            "formula_error": variant_formula["error"],
-        }
+        variant_formula_ok = bool(variant_payloads[variant]["formula_validation_result"])
+        variant_mse = float(variant_payloads[variant]["mse"])
+        variant_target_mse = float(variant_payloads[variant]["target_mse"])
+        variant_target_r2 = float(variant_payloads[variant]["target_r2"])
         comparisons_vs_baseline[variant] = {
             "symbolic_wall_time_delta_s": float(baseline_payload["symbolic_wall_time_s"] - variant_payloads[variant]["symbolic_wall_time_s"]),
             "symbolic_speedup_vs_baseline": float(
@@ -1156,10 +1245,6 @@ def benchmark_symbolic_variants(
             "symbolic_target_r2_shift": float(variant_target_r2 - baseline_payload["target_r2"]),
             "formula_validation_result": bool(variant_formula_ok and baseline_formula_ok),
         }
-        del teacher_model
-        del work_model
-        del variant_output
-        del variant_formula
 
     full = variant_payloads.get("icbr_full")
     no_shared = variant_payloads.get("icbr_no_shared")
