@@ -4,15 +4,54 @@
 2026-03-31
 
 ## Task
-推进 Stage 23：按既定口径整理 benchmark 符号拟合的内存生命周期，明确 baseline / 各 ICBR 变体 / 公式导出阶段的对象作用域与运行期缓存清理边界，避免前一阶段的状态或大张量残留影响后一阶段。
+实现 Stage 24：重定义 benchmark 的数据划分与指标语义，确保后续论文中 imitation / target / formula export 三类结论字段与其真实参照物一致，并避免 symbolic calibration 与最终 test 评估混用同一份数据。
 
 ## Current Stage
-Stage 23: Enforce Benchmark Symbolic-Fitting Memory Lifecycle
+Stage 24: Re-Spec Benchmark Splits and Metric Semantics for Valid Reporting
 
 ## Status
 Complete
 
 ## Latest Completed Work
+- `scripts/icbr_benchmark.py`：
+  - benchmark 数据集显式拆成 `train / calibration / test` 三段；普通 synthetic task 与 Feynman task 均按 `train_num / test_num / test_num` 生成 `2:1:1` 口径
+  - Feynman 本地文件 split 现支持三段 disjoint 切分；summary/config/rows 中同步记录 `train_sample_count` / `calibration_sample_count` / `test_sample_count`
+  - symbolic benchmark 调用改为：`calibration` 仅用于符号拟合，`test` 仅用于最终 imitation / target 指标
+  - row / variant row / summary / field guide / Markdown 主文案统一改名：
+    - `baseline_imitation_mse`
+    - `icbr_imitation_mse`
+    - `imitation_mse_shift`
+    - `formula_export_success`
+    - `baseline_formula_export_success`
+    - `icbr_formula_export_success`
+  - Q2/Q3 critique evidence 字段同步显式化为 imitation 语义：
+    - `contextual_replay_imitation_mse_gain_full_vs_no_replay`
+    - `explicit_commit_imitation_mse_gain_explicit_vs_refit`
+- `kan/icbr.py`：
+  - `benchmark_symbolic_variants()` / `benchmark_icbr_vs_baseline()` 新增 `evaluation_split` / `evaluation_target`
+  - baseline / ICBR 变体现在在 `calibration_input` 上做符号拟合，但在 `evaluation_input` 上评估 imitation / target 指标
+  - `teacher_target_mse` / `teacher_target_r2` 现明确 against dataset `test_label`
+  - `formula_validation_result` 全面切换为 `formula_export_success` 语义
+- `tests/test_icbr_benchmark_smoke.py`：
+  - 更新核心指标断言到 Stage 24 命名
+  - 新增 evaluation split 回归，验证 `teacher_target_mse` 来自 evaluation/test split，而不是 calibration split
+- `tests/test_icbr_benchmark_script_smoke.py`：
+  - 更新 rows/summary 所需字段断言到 Stage 24 命名
+  - 新增 split config / row sample count 断言，验证 `2:1:1` 数据流已落地到导出产物
+- `IMPLEMENTATION_PLAN.md`：
+  - Stage 24 状态已从 `In Progress` 更新为 `Complete`
+- `IMPLEMENTATION_PLAN.md`：
+  - 新增 Stage 24 规划，固定 benchmark 后续口径：
+    - 数据切分显式拆成 `train / calibration / test`
+    - 默认比例固定为 `2:1:1`
+    - Feynman 默认固定为 `2000/1000/1000`
+    - 普通 task 也统一采用 `2:1:1`
+  - 明确 Stage 24 不引入真实公式等价评估；`target_formula` / `equation_metadata` 仅保留为展示性元数据
+  - 明确 `*_target_mse` / `*_target_r2` 的含义是 against dataset `test_label`，而不是 against metadata formula
+  - 明确 imitation 指标需要显式按 teacher 参照物命名，例如 `baseline_imitation_mse` / `icbr_imitation_mse`
+  - 明确 `formula_validation_result` 将统一改名为 `formula_export_success`
+- `TASK_STATUS.md`：
+  - 当前任务已切换到 Stage 24 规划中，后续实现必须遵循新的 split / metric 语义约束
 - `scripts/icbr_benchmark.py`：
   - 修正 teacher cache key 的 `width` 序列化口径，统一改为稳定的规范化表示（例如 `[9,[5,2],1]` 统一归一成 `[[9,0],[5,2],[1,0]]`）后再参与 digest
   - 新增 cache key alias 兼容逻辑：读取缓存时除主 key 外，还会兼容尝试旧的 compact-width key，避免 stage22/stage23 期间同语义不同 `width` 表示导致的 cache miss
@@ -119,10 +158,13 @@ Complete
 - TASK_STATUS.md
 - kan/icbr.py
 - scripts/icbr_benchmark.py
+- tests/test_icbr_benchmark_smoke.py
 - tests/test_icbr_benchmark_script_smoke.py
-- tests/test_icbr_integration.py
 
 ## Validation Run
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m py_compile scripts\icbr_benchmark.py kan\icbr.py tests\test_icbr_benchmark_smoke.py tests\test_icbr_benchmark_script_smoke.py`
+- `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_benchmark_smoke.py tests\test_icbr_benchmark_script_smoke.py`
+- 文档更新：Stage 24 规划已写入 `IMPLEMENTATION_PLAN.md` 与 `TASK_STATUS.md`
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m py_compile scripts\icbr_benchmark.py tests\test_icbr_benchmark_script_smoke.py`
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_benchmark_script_smoke.py -k "teacher_cache_identity or feynman_symbolic_only or symbolic_only or infer_teacher_model_width"`
 - inline Python probe: `_resolve_teacher_model_with_cache(..., cache_mode='readonly', require_cache_hit=True)` for `feynman_I_9_18 seed=2`
@@ -134,6 +176,14 @@ Complete
 - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_icbr_integration.py tests\test_icbr_benchmark_smoke.py`
 
 ## Validation Result
+- Stage 24 代码实现已完成。
+- `py_compile`（Stage 24 相关 Python 文件）通过。
+- `pytest tests\test_icbr_benchmark_smoke.py tests\test_icbr_benchmark_script_smoke.py` 通过：`30 passed`。
+- 已验证：
+  - benchmark 导出产物已显式记录 `train / calibration / test` 三段 sample count
+  - symbolic calibration 与最终 `test` 评估在代码路径上分离
+  - imitation / target / formula export 字段命名已贯通 rows CSV、variant rows CSV、summary JSON 与 Markdown
+  - `teacher_target_mse` / `teacher_target_r2` 来自 evaluation/test split，而不是 calibration split
 - `py_compile`（cache key follow-up 修复）通过。
 - `pytest tests\test_icbr_benchmark_script_smoke.py -k "teacher_cache_identity or feynman_symbolic_only or symbolic_only or infer_teacher_model_width"` 通过：`5 passed`。
 - 只读现场探针已验证：
@@ -168,9 +218,17 @@ Complete
 - Stage 22 范围固定为候选生成层优化，不提前混入 replay 门控、两阶段搜索或完整 benchmark 生命周期重构。
 - Stage 23 预留给 benchmark 符号拟合阶段的内存生命周期整理，包含 baseline/variant 作用域隔离、teacher_output 共享边界与公式导出后立即释放。
 - Stage 23 实现按“作用域清晰 + 统一缓存清理 helper”推进，不继续堆叠零散 `del` 作为主要生命周期管理手段。
+- Stage 24 已冻结以下规划边界：
+  - 不做真实公式等价评估
+  - `*_target_mse` / `*_target_r2` 一律指向 dataset `test_label`
+  - benchmark 默认 split 改为 `train / calibration / test = 2:1:1`
+  - Feynman 默认 split 固定为 `2000/1000/1000`
+  - `formula_validation_result` 将改名为 `formula_export_success`
+  - imitation 指标命名必须显式体现 teacher 参照物
+  - 图表/markdown/field guide 文案需要与新字段语义同步
 
 ## Remaining Work
-- 无
+- 无；Stage 24 当前范围内目标已完成并通过验证。
 
 ## Blockers
 - 无

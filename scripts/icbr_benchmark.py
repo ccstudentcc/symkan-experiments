@@ -44,10 +44,9 @@ _NUMERIC_METRICS = [
     "baseline_symbolic_wall_time_s",
     "symbolic_wall_time_delta_s",
     "symbolic_speedup_vs_baseline",
-    "replay_imitation_gap",
-    "final_mse_loss_shift",
-    "baseline_mse",
-    "icbr_mse",
+    "baseline_imitation_mse",
+    "icbr_imitation_mse",
+    "imitation_mse_shift",
     "teacher_target_mse",
     "teacher_target_r2",
     "baseline_target_mse",
@@ -61,23 +60,23 @@ _NUMERIC_METRICS = [
 _BOOLEAN_METRICS = [
     "teacher_cache_hit",
     "teacher_quality_gate_pass",
-    "formula_validation_result",
-    "baseline_formula_validation_result",
-    "icbr_formula_validation_result",
+    "formula_export_success",
+    "baseline_formula_export_success",
+    "icbr_formula_export_success",
 ]
 
 _SIGNIFICANCE_DIRECTIONS = {
     "symbolic_wall_time_delta_s": "positive",
-    "final_mse_loss_shift": "negative",
+    "imitation_mse_shift": "negative",
 }
 
 _CHALLENGE_EVIDENCE_METRICS = [
     "shared_tensor_candidate_time_ratio_no_shared_vs_full",
     "shared_tensor_symbolic_time_ratio_no_shared_vs_full",
-    "contextual_replay_mse_gain_full_vs_no_replay",
+    "contextual_replay_imitation_mse_gain_full_vs_no_replay",
     "contextual_replay_target_mse_gain_full_vs_no_replay",
     "contextual_replay_rank_inversion_rate_full",
-    "explicit_commit_mse_gain_explicit_vs_refit",
+    "explicit_commit_imitation_mse_gain_explicit_vs_refit",
     "explicit_commit_target_mse_gain_explicit_vs_refit",
     "explicit_commit_refit_commit_param_drift_l2_mean",
 ]
@@ -86,16 +85,16 @@ _VARIANT_NUMERIC_METRICS = [
     "candidate_generation_wall_time_s",
     "replay_rerank_wall_time_s",
     "symbolic_wall_time_s",
-    "mse",
+    "imitation_mse",
     "target_mse",
     "target_r2",
     "baseline_symbolic_wall_time_s",
-    "baseline_mse",
+    "baseline_imitation_mse",
     "baseline_target_mse",
     "baseline_target_r2",
     "symbolic_wall_time_delta_s",
     "symbolic_speedup_vs_baseline",
-    "final_mse_loss_shift",
+    "imitation_mse_shift",
     "symbolic_target_mse_shift",
     "symbolic_target_r2_shift",
     "replay_rank_inversion_count",
@@ -106,7 +105,7 @@ _VARIANT_NUMERIC_METRICS = [
 ]
 
 _VARIANT_BOOLEAN_METRICS = [
-    "formula_validation_result",
+    "formula_export_success",
     "teacher_quality_gate_pass",
 ]
 
@@ -202,15 +201,15 @@ _REPLOT_ROW_METRICS = {
     "baseline_symbolic_wall_time_s",
     "symbolic_wall_time_s",
     "symbolic_speedup_vs_baseline",
-    "final_mse_loss_shift",
+    "imitation_mse_shift",
     "shared_tensor_symbolic_time_ratio_no_shared_vs_full",
-    "contextual_replay_mse_gain_full_vs_no_replay",
-    "explicit_commit_mse_gain_explicit_vs_refit",
+    "contextual_replay_imitation_mse_gain_full_vs_no_replay",
+    "explicit_commit_imitation_mse_gain_explicit_vs_refit",
 }
 
 _REPLOT_VARIANT_METRICS = {
     "symbolic_wall_time_s",
-    "mse",
+    "imitation_mse",
     "target_mse",
 }
 
@@ -321,11 +320,19 @@ def _serialize_width_tokens(width_tokens: list[_WidthToken]) -> _WidthToken | li
 def _normalize_width_tokens_for_cache(width_tokens: list[_WidthToken]) -> list[list[int]]:
     normalized: list[list[int]] = []
     for token in width_tokens:
-        parsed = _normalize_width_token(token)
-        if isinstance(parsed, int):
+        if isinstance(token, (int, np.integer)):
+            parsed = _normalize_width_token(token)
             normalized.append([int(parsed), 0])
-        else:
-            normalized.append([int(parsed[0]), int(parsed[1])])
+            continue
+        if isinstance(token, tuple):
+            token = list(token)
+        if not isinstance(token, list) or len(token) != 2:
+            raise ValueError("Multiplication-aware width entries must have exactly two integers: [num_sum, num_mult].")
+        num_sum = int(token[0])
+        num_mult = int(token[1])
+        if num_sum <= 0 or num_mult < 0:
+            raise ValueError("Cache width entries must satisfy num_sum > 0 and num_mult >= 0.")
+        normalized.append([num_sum, num_mult])
     return normalized
 
 
@@ -441,6 +448,7 @@ def _load_local_feynman_dataset_as_kan(
     dataset_path: Path,
     split_seed: int,
     train_num: int,
+    calibration_num: int,
     test_num: int,
     split_strategy: str,
 ) -> dict[str, torch.Tensor]:
@@ -456,22 +464,53 @@ def _load_local_feynman_dataset_as_kan(
     y_np = data[:, -1:].astype(np.float32)
     total = int(x_np.shape[0])
     n_tr = int(min(train_num, total))
-    n_te = int(min(test_num, max(0, total - n_tr)))
+    remaining_after_train = max(0, total - n_tr)
+    n_cal = int(min(calibration_num, remaining_after_train))
+    n_te = int(min(test_num, max(0, remaining_after_train - n_cal)))
+
+    def _evenly_spaced_indices(pool: np.ndarray, count: int) -> np.ndarray:
+        if count <= 0 or pool.size == 0:
+            return np.array([], dtype=int)
+        if count >= pool.size:
+            return np.asarray(pool, dtype=int)
+        positions = np.linspace(0, pool.size - 1, count)
+        picked = np.unique(np.round(positions).astype(int))
+        if picked.size < count:
+            picked_set = set(int(idx) for idx in picked.tolist())
+            for candidate in range(pool.size):
+                if candidate in picked_set:
+                    continue
+                picked = np.append(picked, candidate)
+                picked_set.add(candidate)
+                if picked.size == count:
+                    break
+        picked = np.sort(picked[:count])
+        return np.asarray(pool[picked], dtype=int)
 
     if split_strategy == "linspace":
-        tr_idx = np.unique(np.round(np.linspace(0, total - 1, n_tr)).astype(int))
-        te_all = np.unique(np.round(np.linspace(0, total - 1, n_tr + n_te)).astype(int))
-        te_idx = te_all[~np.isin(te_all, tr_idx)][:n_te]
+        all_idx = np.arange(total, dtype=int)
+        tr_idx = _evenly_spaced_indices(all_idx, n_tr)
+        heldout_pool = all_idx[~np.isin(all_idx, tr_idx)]
+        heldout_idx = _evenly_spaced_indices(heldout_pool, n_cal + n_te)
+        cal_idx = heldout_idx[:n_cal]
+        te_idx = heldout_idx[n_cal : n_cal + n_te]
     elif split_strategy == "random":
         rng = np.random.RandomState(split_seed)
         perm = rng.permutation(total)
         tr_idx = perm[:n_tr]
-        te_idx = perm[n_tr : n_tr + n_te] if n_te > 0 else np.array([], dtype=int)
+        cal_idx = perm[n_tr : n_tr + n_cal] if n_cal > 0 else np.array([], dtype=int)
+        te_idx = perm[n_tr + n_cal : n_tr + n_cal + n_te] if n_te > 0 else np.array([], dtype=int)
     else:  # pragma: no cover - argparse constrains this
         raise ValueError(f"Unknown feynman split strategy: {split_strategy}")
 
     train_input = torch.from_numpy(x_np[tr_idx]).to(device="cpu", dtype=torch.float32)
     train_label = torch.from_numpy(y_np[tr_idx]).to(device="cpu", dtype=torch.float32)
+    if n_cal > 0:
+        calibration_input = torch.from_numpy(x_np[cal_idx]).to(device="cpu", dtype=torch.float32)
+        calibration_label = torch.from_numpy(y_np[cal_idx]).to(device="cpu", dtype=torch.float32)
+    else:
+        calibration_input = torch.empty((0, x_np.shape[1]), dtype=torch.float32, device="cpu")
+        calibration_label = torch.empty((0, 1), dtype=torch.float32, device="cpu")
     if n_te > 0:
         test_input = torch.from_numpy(x_np[te_idx]).to(device="cpu", dtype=torch.float32)
         test_label = torch.from_numpy(y_np[te_idx]).to(device="cpu", dtype=torch.float32)
@@ -482,6 +521,8 @@ def _load_local_feynman_dataset_as_kan(
     return {
         "train_input": train_input,
         "train_label": train_label,
+        "calibration_input": calibration_input,
+        "calibration_label": calibration_label,
         "test_input": test_input,
         "test_label": test_label,
     }
@@ -735,6 +776,7 @@ def _build_teacher_dataset(
     *,
     seed: int,
     train_num: int,
+    calibration_num: int,
     test_num: int,
 ) -> dict[str, torch.Tensor]:
     _seed_everything(seed)
@@ -745,20 +787,33 @@ def _build_teacher_dataset(
             dataset_path=Path(spec.dataset_path),
             split_seed=int(_resolve_dataset_split_seed(spec, benchmark_seed=seed)),
             train_num=train_num,
+            calibration_num=calibration_num,
             test_num=test_num,
             split_strategy=spec.dataset_split_strategy,
         )
     if spec.target_fn is None:
         raise ValueError(f"Synthetic task '{spec.name}' is missing target_fn.")
-    return create_dataset(
+
+    base_dataset = create_dataset(
         spec.target_fn,
         n_var=spec.n_var,
         ranges=spec.ranges if spec.ranges is not None else [-1, 1],
         train_num=train_num,
-        test_num=test_num,
+        test_num=calibration_num + test_num,
         seed=seed,
         device="cpu",
     )
+    calibration_stop = int(calibration_num)
+    heldout_input = base_dataset["test_input"]
+    heldout_label = base_dataset["test_label"]
+    return {
+        "train_input": base_dataset["train_input"],
+        "train_label": base_dataset["train_label"],
+        "calibration_input": heldout_input[:calibration_stop],
+        "calibration_label": heldout_label[:calibration_stop],
+        "test_input": heldout_input[calibration_stop : calibration_stop + int(test_num)],
+        "test_label": heldout_label[calibration_stop : calibration_stop + int(test_num)],
+    }
 
 
 def _build_teacher_model(spec: _TaskSpec, *, seed: int) -> MultKAN:
@@ -1101,6 +1156,7 @@ def _resolve_teacher_model_with_cache(
     spec: _TaskSpec,
     seed: int,
     train_num: int,
+    calibration_num: int,
     test_num: int,
     train_steps: int,
     lr: float,
@@ -1122,6 +1178,7 @@ def _resolve_teacher_model_with_cache(
         spec,
         seed=seed,
         train_num=train_num,
+        calibration_num=calibration_num,
         test_num=test_num,
     )
     cache_aliases = _build_teacher_cache_identity_aliases(
@@ -1427,10 +1484,9 @@ def _build_skipped_symbolic_metrics(*, skip_kind: str, reason: str) -> dict[str,
         "baseline_symbolic_wall_time_s": float("nan"),
         "symbolic_wall_time_delta_s": float("nan"),
         "symbolic_speedup_vs_baseline": float("nan"),
-        "replay_imitation_gap": float("nan"),
-        "final_mse_loss_shift": float("nan"),
-        "baseline_mse": float("nan"),
-        "icbr_mse": float("nan"),
+        "baseline_imitation_mse": float("nan"),
+        "icbr_imitation_mse": float("nan"),
+        "imitation_mse_shift": float("nan"),
         "teacher_target_mse": float("nan"),
         "teacher_target_r2": float("nan"),
         "baseline_target_mse": float("nan"),
@@ -1442,9 +1498,9 @@ def _build_skipped_symbolic_metrics(*, skip_kind: str, reason: str) -> dict[str,
     }
     return {
         **nan_metrics,
-        "formula_validation_result": False,
-        "baseline_formula_validation_result": False,
-        "icbr_formula_validation_result": False,
+        "formula_export_success": False,
+        "baseline_formula_export_success": False,
+        "icbr_formula_export_success": False,
         "baseline_formula_raw": [],
         "baseline_formula_display": [],
         "icbr_formula_raw": [],
@@ -1467,27 +1523,26 @@ def _build_legacy_metrics_from_variant_bundle(bundle: dict[str, object]) -> dict
         "baseline_symbolic_wall_time_s": float(baseline["symbolic_wall_time_s"]),
         "symbolic_wall_time_delta_s": float(cmp["symbolic_wall_time_delta_s"]),
         "symbolic_speedup_vs_baseline": float(cmp["symbolic_speedup_vs_baseline"]),
-        "replay_imitation_gap": float(cmp["replay_imitation_gap"]),
-        "final_mse_loss_shift": float(cmp["final_mse_loss_shift"]),
-        "formula_validation_result": bool(cmp["formula_validation_result"]),
-        "baseline_formula_validation_result": bool(baseline["formula_validation_result"]),
-        "icbr_formula_validation_result": bool(icbr["formula_validation_result"]),
+        "baseline_imitation_mse": float(baseline["imitation_mse"]),
+        "icbr_imitation_mse": float(icbr["imitation_mse"]),
+        "imitation_mse_shift": float(cmp["imitation_mse_shift"]),
+        "formula_export_success": bool(cmp["formula_export_success"]),
+        "baseline_formula_export_success": bool(baseline["formula_export_success"]),
+        "icbr_formula_export_success": bool(icbr["formula_export_success"]),
         "baseline_formula_raw": list(baseline["formula_raw"]),
         "baseline_formula_display": list(baseline["formula_display"]),
         "icbr_formula_raw": list(icbr["formula_raw"]),
         "icbr_formula_display": list(icbr["formula_display"]),
         "baseline_formula_error": baseline["formula_error"],
         "icbr_formula_error": icbr["formula_error"],
-        "baseline_mse": float(baseline["mse"]),
-        "icbr_mse": float(icbr["mse"]),
         "teacher_target_mse": float(bundle["teacher_target_mse"]),
         "teacher_target_r2": float(bundle["teacher_target_r2"]),
         "baseline_target_mse": float(baseline["target_mse"]),
         "baseline_target_r2": float(baseline["target_r2"]),
         "icbr_target_mse": float(icbr["target_mse"]),
         "icbr_target_r2": float(icbr["target_r2"]),
-        "symbolic_target_mse_shift": float(cmp["symbolic_target_mse_shift"]),
-        "symbolic_target_r2_shift": float(cmp["symbolic_target_r2_shift"]),
+        "symbolic_target_mse_shift": float(cmp["target_mse_shift"]),
+        "symbolic_target_r2_shift": float(cmp["target_r2_shift"]),
     }
 
 
@@ -1521,10 +1576,10 @@ def _build_variant_rows_for_task_seed(
         "candidate_generation_wall_time_s": float("nan"),
         "replay_rerank_wall_time_s": float("nan"),
         "symbolic_wall_time_s": float(baseline["symbolic_wall_time_s"]),
-        "mse": float(baseline["mse"]),
+        "imitation_mse": float(baseline["imitation_mse"]),
         "target_mse": float(baseline["target_mse"]),
         "target_r2": float(baseline["target_r2"]),
-        "formula_validation_result": bool(baseline["formula_validation_result"]),
+        "formula_export_success": bool(baseline["formula_export_success"]),
         "formula_raw": list(baseline["formula_raw"]),
         "formula_display": list(baseline["formula_display"]),
         "formula_error": baseline["formula_error"],
@@ -1534,12 +1589,12 @@ def _build_variant_rows_for_task_seed(
         "commit_param_drift_l2_mean": float("nan"),
         "commit_param_drift_l2_max": float("nan"),
         "baseline_symbolic_wall_time_s": float(baseline["symbolic_wall_time_s"]),
-        "baseline_mse": float(baseline["mse"]),
+        "baseline_imitation_mse": float(baseline["imitation_mse"]),
         "baseline_target_mse": float(baseline["target_mse"]),
         "baseline_target_r2": float(baseline["target_r2"]),
         "symbolic_wall_time_delta_s": 0.0,
         "symbolic_speedup_vs_baseline": 1.0,
-        "final_mse_loss_shift": 0.0,
+        "imitation_mse_shift": 0.0,
         "symbolic_target_mse_shift": 0.0,
         "symbolic_target_r2_shift": 0.0,
     }
@@ -1563,10 +1618,10 @@ def _build_variant_rows_for_task_seed(
                 "candidate_generation_wall_time_s": float(variant["candidate_generation_wall_time_s"]),
                 "replay_rerank_wall_time_s": float(variant["replay_rerank_wall_time_s"]),
                 "symbolic_wall_time_s": float(variant["symbolic_wall_time_s"]),
-                "mse": float(variant["mse"]),
+                "imitation_mse": float(variant["imitation_mse"]),
                 "target_mse": float(variant["target_mse"]),
                 "target_r2": float(variant["target_r2"]),
-                "formula_validation_result": bool(variant["formula_validation_result"]),
+                "formula_export_success": bool(variant["formula_export_success"]),
                 "formula_raw": list(variant["formula_raw"]),
                 "formula_display": list(variant["formula_display"]),
                 "formula_error": variant["formula_error"],
@@ -1576,14 +1631,14 @@ def _build_variant_rows_for_task_seed(
                 "commit_param_drift_l2_mean": float(variant["commit_param_drift_l2_mean"]),
                 "commit_param_drift_l2_max": float(variant["commit_param_drift_l2_max"]),
                 "baseline_symbolic_wall_time_s": float(baseline["symbolic_wall_time_s"]),
-                "baseline_mse": float(baseline["mse"]),
+                "baseline_imitation_mse": float(baseline["imitation_mse"]),
                 "baseline_target_mse": float(baseline["target_mse"]),
                 "baseline_target_r2": float(baseline["target_r2"]),
                 "symbolic_wall_time_delta_s": float(cmp.get("symbolic_wall_time_delta_s", float("nan"))),
                 "symbolic_speedup_vs_baseline": float(cmp.get("symbolic_speedup_vs_baseline", float("nan"))),
-                "final_mse_loss_shift": float(cmp.get("final_mse_loss_shift", float("nan"))),
-                "symbolic_target_mse_shift": float(cmp.get("symbolic_target_mse_shift", float("nan"))),
-                "symbolic_target_r2_shift": float(cmp.get("symbolic_target_r2_shift", float("nan"))),
+                "imitation_mse_shift": float(cmp.get("imitation_mse_shift", float("nan"))),
+                "symbolic_target_mse_shift": float(cmp.get("target_mse_shift", float("nan"))),
+                "symbolic_target_r2_shift": float(cmp.get("target_r2_shift", float("nan"))),
             }
         )
     return rows
@@ -1619,10 +1674,10 @@ def _build_skipped_variant_rows_for_task_seed(
                 "candidate_generation_wall_time_s": float("nan"),
                 "replay_rerank_wall_time_s": float("nan"),
                 "symbolic_wall_time_s": float("nan"),
-                "mse": float("nan"),
+                "imitation_mse": float("nan"),
                 "target_mse": float("nan"),
                 "target_r2": float("nan"),
-                "formula_validation_result": False,
+                "formula_export_success": False,
                 "formula_raw": [],
                 "formula_display": [],
                 "formula_error": skip_reason,
@@ -1632,12 +1687,12 @@ def _build_skipped_variant_rows_for_task_seed(
                 "commit_param_drift_l2_mean": float("nan"),
                 "commit_param_drift_l2_max": float("nan"),
                 "baseline_symbolic_wall_time_s": float("nan"),
-                "baseline_mse": float("nan"),
+                "baseline_imitation_mse": float("nan"),
                 "baseline_target_mse": float("nan"),
                 "baseline_target_r2": float("nan"),
                 "symbolic_wall_time_delta_s": float("nan"),
                 "symbolic_speedup_vs_baseline": float("nan"),
-                "final_mse_loss_shift": float("nan"),
+                "imitation_mse_shift": float("nan"),
                 "symbolic_target_mse_shift": float("nan"),
                 "symbolic_target_r2_shift": float("nan"),
             }
@@ -2549,7 +2604,7 @@ def _generate_visualizations(
         plt.close(fig)
 
         fig, ax = plt.subplots(figsize=(10.8, 5.8))
-        mse_shift_data = [_finite_metric_values(task_name, "final_mse_loss_shift") for task_name in tasks]
+        mse_shift_data = [_finite_metric_values(task_name, "imitation_mse_shift") for task_name in tasks]
         if all(len(values) > 0 for values in mse_shift_data):
             mse_values = _plot_violin_scatter_box(
                 ax=ax,
@@ -2587,7 +2642,9 @@ def _generate_visualizations(
                 "design_reason": "Most tasks cluster near zero while long-tail tasks can dominate, so a zero-centered robust scale is needed.",
             }
         else:
-            warnings_list.append("Insufficient finite mse shift metrics for plot generation (likely skipped by teacher quality gate).")
+            warnings_list.append(
+                "Insufficient finite imitation-mse shift metrics for plot generation (likely skipped by teacher quality gate)."
+            )
         plt.close(fig)
 
         variant_metrics = [
@@ -2655,7 +2712,7 @@ def _generate_visualizations(
                 target_high: list[float] = []
                 for variant_name in variants:
                     center, low, high = _safe_log_metric_ci95(
-                        _finite_variant_metric_values("mse", variant_name, task_name)
+                        _finite_variant_metric_values("imitation_mse", variant_name, task_name)
                     )
                     mse_center.append(center)
                     mse_low.append(low)
@@ -2787,7 +2844,7 @@ def _generate_visualizations(
                         task_name=task_name,
                         numerator_variant="icbr_no_replay",
                         denominator_variant="icbr_full",
-                        metric="mse",
+                        metric="imitation_mse",
                     )
                     mean, low, high = _safe_log_metric_ci95(ratio_values)
                 elif metric_name == "explicit_commit_mse_ratio_refit_vs_full":
@@ -2795,7 +2852,7 @@ def _generate_visualizations(
                         task_name=task_name,
                         numerator_variant="icbr_refit_commit",
                         denominator_variant="icbr_full",
-                        metric="mse",
+                        metric="imitation_mse",
                     )
                     mean, low, high = _safe_log_metric_ci95(ratio_values)
                 elif metric_scale == "log":
@@ -3008,6 +3065,7 @@ def run_benchmark(
                 spec=spec,
                 seed=seed,
                 train_num=train_num,
+                calibration_num=test_num,
                 test_num=test_num,
                 train_steps=train_steps,
                 lr=lr,
@@ -3048,10 +3106,15 @@ def run_benchmark(
                     variant_bundle = benchmark_symbolic_variants(
                         model,
                         calibration_split={
+                            "test_input": dataset["calibration_input"],
+                            "test_label": dataset["calibration_label"],
+                        },
+                        calibration_target=dataset["calibration_label"],
+                        evaluation_split={
                             "test_input": dataset["test_input"],
                             "test_label": dataset["test_label"],
                         },
-                        calibration_target=dataset["test_label"],
+                        evaluation_target=dataset["test_label"],
                         lib=spec.lib,
                         topk=effective_topk,
                         a_range=(-5.0, 5.0),
@@ -3100,12 +3163,12 @@ def run_benchmark(
                         "symbolic_time_ratio_no_shared_vs_full": float("nan"),
                     },
                     "contextual_replay": {
-                        "mse_gain_full_vs_no_replay": float("nan"),
+                        "imitation_mse_gain_full_vs_no_replay": float("nan"),
                         "target_mse_gain_full_vs_no_replay": float("nan"),
                         "replay_rank_inversion_rate_full": float("nan"),
                     },
                     "explicit_commit": {
-                        "mse_gain_explicit_vs_refit": float("nan"),
+                        "imitation_mse_gain_explicit_vs_refit": float("nan"),
                         "target_mse_gain_explicit_vs_refit": float("nan"),
                         "refit_commit_param_drift_l2_mean": float("nan"),
                     },
@@ -3137,12 +3200,12 @@ def run_benchmark(
                         "symbolic_time_ratio_no_shared_vs_full": float("nan"),
                     },
                     "contextual_replay": {
-                        "mse_gain_full_vs_no_replay": float("nan"),
+                        "imitation_mse_gain_full_vs_no_replay": float("nan"),
                         "target_mse_gain_full_vs_no_replay": float("nan"),
                         "replay_rank_inversion_rate_full": float("nan"),
                     },
                     "explicit_commit": {
-                        "mse_gain_explicit_vs_refit": float("nan"),
+                        "imitation_mse_gain_explicit_vs_refit": float("nan"),
                         "target_mse_gain_explicit_vs_refit": float("nan"),
                         "refit_commit_param_drift_l2_mean": float("nan"),
                     },
@@ -3161,6 +3224,9 @@ def run_benchmark(
                 "feynman_dataset_columns": spec.dataset_total_columns,
                 "feynman_split_seed": _resolve_dataset_split_seed(spec, benchmark_seed=seed),
                 "feynman_equation_metadata": dict(spec.equation_metadata or {}),
+                "train_sample_count": int(dataset["train_input"].shape[0]),
+                "calibration_sample_count": int(dataset["calibration_input"].shape[0]),
+                "test_sample_count": int(dataset["test_input"].shape[0]),
                 "n_var": spec.n_var,
                 "width": list(spec.width),
                 "lib": list(spec.lib) if spec.lib is not None else ["__FULL_SYMBOLIC_LIB__"],
@@ -3182,8 +3248,8 @@ def run_benchmark(
                 "shared_tensor_symbolic_time_ratio_no_shared_vs_full": float(
                     challenge_evidence["shared_tensor"]["symbolic_time_ratio_no_shared_vs_full"]
                 ),
-                "contextual_replay_mse_gain_full_vs_no_replay": float(
-                    challenge_evidence["contextual_replay"]["mse_gain_full_vs_no_replay"]
+                "contextual_replay_imitation_mse_gain_full_vs_no_replay": float(
+                    challenge_evidence["contextual_replay"]["imitation_mse_gain_full_vs_no_replay"]
                 ),
                 "contextual_replay_target_mse_gain_full_vs_no_replay": float(
                     challenge_evidence["contextual_replay"]["target_mse_gain_full_vs_no_replay"]
@@ -3191,8 +3257,8 @@ def run_benchmark(
                 "contextual_replay_rank_inversion_rate_full": float(
                     challenge_evidence["contextual_replay"]["replay_rank_inversion_rate_full"]
                 ),
-                "explicit_commit_mse_gain_explicit_vs_refit": float(
-                    challenge_evidence["explicit_commit"]["mse_gain_explicit_vs_refit"]
+                "explicit_commit_imitation_mse_gain_explicit_vs_refit": float(
+                    challenge_evidence["explicit_commit"]["imitation_mse_gain_explicit_vs_refit"]
                 ),
                 "explicit_commit_target_mse_gain_explicit_vs_refit": float(
                     challenge_evidence["explicit_commit"]["target_mse_gain_explicit_vs_refit"]
@@ -3212,7 +3278,7 @@ def run_benchmark(
                         f"icbr_symbolic={metrics['symbolic_wall_time_s']:.4f}s "
                         f"baseline_symbolic={metrics['baseline_symbolic_wall_time_s']:.4f}s "
                         f"speedup={metrics['symbolic_speedup_vs_baseline']:.2f}x "
-                        f"mse_shift={metrics['final_mse_loss_shift']:.6e} "
+                        f"imitation_mse_shift={metrics['imitation_mse_shift']:.6e} "
                         f"target_mse_shift={metrics['symbolic_target_mse_shift']:.6e}"
                     )
                 else:
@@ -3239,6 +3305,9 @@ def run_benchmark(
         "feynman_dataset_columns",
         "feynman_split_seed",
         "feynman_equation_metadata",
+        "train_sample_count",
+        "calibration_sample_count",
+        "test_sample_count",
         "n_var",
         "width",
         "lib",
@@ -3256,10 +3325,10 @@ def run_benchmark(
         "teacher_cache_status",
         "shared_tensor_candidate_time_ratio_no_shared_vs_full",
         "shared_tensor_symbolic_time_ratio_no_shared_vs_full",
-        "contextual_replay_mse_gain_full_vs_no_replay",
+        "contextual_replay_imitation_mse_gain_full_vs_no_replay",
         "contextual_replay_target_mse_gain_full_vs_no_replay",
         "contextual_replay_rank_inversion_rate_full",
-        "explicit_commit_mse_gain_explicit_vs_refit",
+        "explicit_commit_imitation_mse_gain_explicit_vs_refit",
         "explicit_commit_target_mse_gain_explicit_vs_refit",
         "explicit_commit_refit_commit_param_drift_l2_mean",
         "candidate_generation_wall_time_s",
@@ -3268,10 +3337,9 @@ def run_benchmark(
         "baseline_symbolic_wall_time_s",
         "symbolic_wall_time_delta_s",
         "symbolic_speedup_vs_baseline",
-        "replay_imitation_gap",
-        "final_mse_loss_shift",
-        "baseline_mse",
-        "icbr_mse",
+        "baseline_imitation_mse",
+        "icbr_imitation_mse",
+        "imitation_mse_shift",
         "teacher_target_mse",
         "teacher_target_r2",
         "baseline_target_mse",
@@ -3280,9 +3348,9 @@ def run_benchmark(
         "icbr_target_r2",
         "symbolic_target_mse_shift",
         "symbolic_target_r2_shift",
-        "formula_validation_result",
-        "baseline_formula_validation_result",
-        "icbr_formula_validation_result",
+        "formula_export_success",
+        "baseline_formula_export_success",
+        "icbr_formula_export_success",
         "baseline_formula_error",
         "icbr_formula_error",
         "baseline_formula_raw",
@@ -3309,6 +3377,9 @@ def run_benchmark(
                     "feynman_dataset_columns": row["feynman_dataset_columns"],
                     "feynman_split_seed": row["feynman_split_seed"],
                     "feynman_equation_metadata": json.dumps(row["feynman_equation_metadata"], ensure_ascii=False),
+                    "train_sample_count": row["train_sample_count"],
+                    "calibration_sample_count": row["calibration_sample_count"],
+                    "test_sample_count": row["test_sample_count"],
                     "n_var": row["n_var"],
                     "width": json.dumps(row["width"], ensure_ascii=False),
                     "lib": json.dumps(row["lib"], ensure_ascii=False),
@@ -3330,8 +3401,8 @@ def run_benchmark(
                     "shared_tensor_symbolic_time_ratio_no_shared_vs_full": row[
                         "shared_tensor_symbolic_time_ratio_no_shared_vs_full"
                     ],
-                    "contextual_replay_mse_gain_full_vs_no_replay": row[
-                        "contextual_replay_mse_gain_full_vs_no_replay"
+                    "contextual_replay_imitation_mse_gain_full_vs_no_replay": row[
+                        "contextual_replay_imitation_mse_gain_full_vs_no_replay"
                     ],
                     "contextual_replay_target_mse_gain_full_vs_no_replay": row[
                         "contextual_replay_target_mse_gain_full_vs_no_replay"
@@ -3339,8 +3410,8 @@ def run_benchmark(
                     "contextual_replay_rank_inversion_rate_full": row[
                         "contextual_replay_rank_inversion_rate_full"
                     ],
-                    "explicit_commit_mse_gain_explicit_vs_refit": row[
-                        "explicit_commit_mse_gain_explicit_vs_refit"
+                    "explicit_commit_imitation_mse_gain_explicit_vs_refit": row[
+                        "explicit_commit_imitation_mse_gain_explicit_vs_refit"
                     ],
                     "explicit_commit_target_mse_gain_explicit_vs_refit": row[
                         "explicit_commit_target_mse_gain_explicit_vs_refit"
@@ -3354,10 +3425,9 @@ def run_benchmark(
                     "baseline_symbolic_wall_time_s": row["baseline_symbolic_wall_time_s"],
                     "symbolic_wall_time_delta_s": row["symbolic_wall_time_delta_s"],
                     "symbolic_speedup_vs_baseline": row["symbolic_speedup_vs_baseline"],
-                    "replay_imitation_gap": row["replay_imitation_gap"],
-                    "final_mse_loss_shift": row["final_mse_loss_shift"],
-                    "baseline_mse": row["baseline_mse"],
-                    "icbr_mse": row["icbr_mse"],
+                    "baseline_imitation_mse": row["baseline_imitation_mse"],
+                    "icbr_imitation_mse": row["icbr_imitation_mse"],
+                    "imitation_mse_shift": row["imitation_mse_shift"],
                     "teacher_target_mse": row["teacher_target_mse"],
                     "teacher_target_r2": row["teacher_target_r2"],
                     "baseline_target_mse": row["baseline_target_mse"],
@@ -3366,9 +3436,9 @@ def run_benchmark(
                     "icbr_target_r2": row["icbr_target_r2"],
                     "symbolic_target_mse_shift": row["symbolic_target_mse_shift"],
                     "symbolic_target_r2_shift": row["symbolic_target_r2_shift"],
-                    "formula_validation_result": row["formula_validation_result"],
-                    "baseline_formula_validation_result": row["baseline_formula_validation_result"],
-                    "icbr_formula_validation_result": row["icbr_formula_validation_result"],
+                    "formula_export_success": row["formula_export_success"],
+                    "baseline_formula_export_success": row["baseline_formula_export_success"],
+                    "icbr_formula_export_success": row["icbr_formula_export_success"],
                     "baseline_formula_error": row["baseline_formula_error"],
                     "icbr_formula_error": row["icbr_formula_error"],
                     "baseline_formula_raw": _serialize_formula_list(row["baseline_formula_raw"]),
@@ -3395,10 +3465,10 @@ def run_benchmark(
         "candidate_generation_wall_time_s",
         "replay_rerank_wall_time_s",
         "symbolic_wall_time_s",
-        "mse",
+        "imitation_mse",
         "target_mse",
         "target_r2",
-        "formula_validation_result",
+        "formula_export_success",
         "formula_error",
         "formula_raw",
         "formula_display",
@@ -3408,12 +3478,12 @@ def run_benchmark(
         "commit_param_drift_l2_mean",
         "commit_param_drift_l2_max",
         "baseline_symbolic_wall_time_s",
-        "baseline_mse",
+        "baseline_imitation_mse",
         "baseline_target_mse",
         "baseline_target_r2",
         "symbolic_wall_time_delta_s",
         "symbolic_speedup_vs_baseline",
-        "final_mse_loss_shift",
+        "imitation_mse_shift",
         "symbolic_target_mse_shift",
         "symbolic_target_r2_shift",
     ]
@@ -3496,7 +3566,7 @@ def run_benchmark(
         "metadata": {
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
             "benchmark_name": "icbr_phase1_cpu_extended_validation",
-            "report_version": "2.0",
+            "report_version": "2.1",
         },
         "config": {
             "tasks": resolved_tasks,
@@ -3508,7 +3578,15 @@ def run_benchmark(
             },
             "run_mode": run_mode,
             "train_num": train_num,
+            "calibration_num": test_num,
             "test_num": test_num,
+            "split": {
+                "train": int(train_num),
+                "calibration": int(test_num),
+                "test": int(test_num),
+                "ratio": "2:1:1",
+                "policy": "calibration is used only for symbolic fitting; test is used only for final reported metrics",
+            },
             "train_steps": train_steps,
             "lr": lr,
             "lamb": lamb,
@@ -3621,18 +3699,30 @@ def run_benchmark(
         "notes": {
             "field_guide": {
                 "symbolic_wall_time_delta_s": "baseline_symbolic_wall_time_s - icbr_symbolic_wall_time_s",
-                "final_mse_loss_shift": "icbr_mse - baseline_mse; negative means ICBR has lower MSE",
+                "baseline_imitation_mse": "Baseline symbolic model imitation MSE against teacher outputs on dataset test_input.",
+                "icbr_imitation_mse": "ICBR symbolic model imitation MSE against teacher outputs on dataset test_input.",
+                "imitation_mse_shift": "icbr_imitation_mse - baseline_imitation_mse; negative means ICBR is closer to the teacher on dataset test_input.",
                 "teacher_test_mse": "Teacher numeric model MSE against real test labels before symbolic fitting.",
                 "teacher_test_r2": "Teacher numeric model R2 against real test labels before symbolic fitting.",
+                "teacher_target_mse": "Teacher numeric model MSE against dataset test_label on dataset test_input.",
+                "teacher_target_r2": "Teacher numeric model R2 against dataset test_label on dataset test_input.",
+                "baseline_target_mse": "Baseline symbolic model MSE against dataset test_label on dataset test_input.",
+                "baseline_target_r2": "Baseline symbolic model R2 against dataset test_label on dataset test_input.",
+                "icbr_target_mse": "ICBR symbolic model MSE against dataset test_label on dataset test_input.",
+                "icbr_target_r2": "ICBR symbolic model R2 against dataset test_label on dataset test_input.",
                 "teacher_cache_hit": "Whether teacher model was loaded from persistent cache.",
                 "symbolic_target_mse_shift": "icbr_target_mse - baseline_target_mse; negative means ICBR is closer to real targets.",
                 "symbolic_target_r2_shift": "icbr_target_r2 - baseline_target_r2; positive means ICBR has higher target R2.",
+                "formula_export_success": "True only when both baseline and ICBR variants successfully export formulas; this is an export-status flag, not a formula-correctness claim.",
+                "baseline_formula_export_success": "Whether the baseline symbolic model successfully exported formulas.",
+                "icbr_formula_export_success": "Whether the ICBR symbolic model successfully exported formulas.",
                 "shared_tensor_candidate_time_ratio_no_shared_vs_full": "Q1 evidence: icbr_no_shared candidate time / icbr_full candidate time; >1 suggests shared tensor helps.",
                 "shared_tensor_symbolic_time_ratio_no_shared_vs_full": "Q1 evidence: icbr_no_shared total symbolic time / icbr_full total symbolic time.",
-                "contextual_replay_mse_gain_full_vs_no_replay": "Q2 evidence: icbr_no_replay mse - icbr_full mse; >0 suggests replay rerank improves imitation error.",
+                "contextual_replay_imitation_mse_gain_full_vs_no_replay": "Q2 evidence: icbr_no_replay imitation_mse - icbr_full imitation_mse; >0 suggests replay rerank improves teacher imitation on dataset test_input.",
                 "contextual_replay_rank_inversion_rate_full": "Q2 evidence: fraction of edges where replay-selected candidate differs from local top-1 in icbr_full.",
-                "explicit_commit_mse_gain_explicit_vs_refit": "Q3 evidence: icbr_refit_commit mse - icbr_full mse; >0 suggests explicit commit avoids refit drift.",
+                "explicit_commit_imitation_mse_gain_explicit_vs_refit": "Q3 evidence: icbr_refit_commit imitation_mse - icbr_full imitation_mse; >0 suggests explicit commit avoids teacher-imitation drift on dataset test_input.",
                 "explicit_commit_refit_commit_param_drift_l2_mean": "Q3 evidence: mean L2 drift between selected params and refit params under icbr_refit_commit.",
+                "split_policy": "Benchmark data is split into train / calibration / test. Calibration is used only for symbolic fitting and replay/commit evaluation; test is used only for final reported imitation/target metrics.",
                 "stats_schema": "Each metric includes count | mean | median | std | min | max",
             },
             "significance_guide": {
@@ -3659,12 +3749,12 @@ def run_benchmark(
                 "violin_box_points": {
                     "best_for": "Seed-level distribution comparison with density, median/IQR, and raw samples together.",
                     "recommended_when": "Need one chart to expose multimodality, spread, and small-sample dispersion.",
-                    "example_metrics": ["symbolic_speedup_vs_baseline", "final_mse_loss_shift"],
+                    "example_metrics": ["symbolic_speedup_vs_baseline", "imitation_mse_shift"],
                 },
                 "variant_grid": {
                     "best_for": "Task-by-task variant comparison without mixing units on one axis.",
                     "recommended_when": "Need each task on its own row, symbolic time on one panel, and merged MSE-family metrics on another.",
-                    "example_metrics": ["symbolic_wall_time_s", "mse + target_mse"],
+                    "example_metrics": ["symbolic_wall_time_s", "imitation_mse + target_mse"],
                 },
                 "combo_layout": {
                     "best_for": "Decision-ready report combining uncertainty views and distribution views under one visual language.",
@@ -3718,7 +3808,7 @@ def run_benchmark(
         f"- Run mode: {summary['config']['run_mode']}",
         f"- Tasks: {', '.join(resolved_tasks)}",
         f"- Seeds: {', '.join(str(seed) for seed in seeds)}",
-        f"- Train/Test samples per task: {train_num}/{test_num}",
+        f"- Train/Calibration/Test samples per task: {train_num}/{test_num}/{test_num}",
         f"- Train steps: {train_steps}, lr: {lr}, lamb: {lamb}",
         f"- Teacher cache: mode={teacher_cache_mode}, dir={teacher_cache_dir}, version={teacher_cache_version}",
         f"- ICBR shortlist topk: {topk}, grid_number: {grid_number}, iteration: {iteration}",
@@ -3743,7 +3833,7 @@ def run_benchmark(
         "",
         "## Task-Level Aggregate Stats",
         "",
-        "| task | n | teacher_cache_hit_mean | teacher_mse_mean | teacher_r2_mean | teacher_gate_pass_mean | baseline_symbolic_mean | icbr_symbolic_mean | delta_mean | delta_median | speedup_mean | speedup_median | mse_shift_mean | target_mse_shift_mean | formula_pass_mean |",
+        "| task | n | teacher_cache_hit_mean | teacher_mse_mean | teacher_r2_mean | teacher_gate_pass_mean | baseline_symbolic_mean | icbr_symbolic_mean | delta_mean | delta_median | speedup_mean | speedup_median | imitation_mse_shift_mean | target_mse_shift_mean | formula_export_success_mean |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
@@ -3764,9 +3854,9 @@ def run_benchmark(
             + f"{metrics['symbolic_wall_time_delta_s']['median']:.6f} | "
             + f"{metrics['symbolic_speedup_vs_baseline']['mean']:.4f} | "
             + f"{metrics['symbolic_speedup_vs_baseline']['median']:.4f} | "
-            + f"{metrics['final_mse_loss_shift']['mean']:.6e} | "
+            + f"{metrics['imitation_mse_shift']['mean']:.6e} | "
             + f"{metrics['symbolic_target_mse_shift']['mean']:.6e} | "
-            + f"{metrics['formula_validation_result']['mean']:.4f} |"
+            + f"{metrics['formula_export_success']['mean']:.4f} |"
         )
     md_lines.append("")
 
@@ -3780,7 +3870,7 @@ def run_benchmark(
     )
     for task_name in resolved_tasks:
         sig_item = summary["aggregates"]["by_task"][task_name]["significance"]
-        for metric_name in ["symbolic_wall_time_delta_s", "final_mse_loss_shift"]:
+        for metric_name in ["symbolic_wall_time_delta_s", "imitation_mse_shift"]:
             metric_sig = sig_item[metric_name]
             ci = metric_sig["mean_delta_ci95"]
             md_lines.append(
@@ -3803,7 +3893,7 @@ def run_benchmark(
         [
             "## Variant Ablation Aggregate Stats (Stage 15)",
             "",
-            "| task | variant | n | teacher_gate_pass_mean | formula_pass_mean | symbolic_mean_s | speedup_mean_x | mse_shift_mean | target_mse_shift_mean | replay_rank_inversion_mean | refit_drift_l2_mean |",
+            "| task | variant | n | teacher_gate_pass_mean | formula_export_success_mean | symbolic_mean_s | speedup_mean_x | imitation_mse_shift_mean | target_mse_shift_mean | replay_rank_inversion_mean | refit_drift_l2_mean |",
             "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
@@ -3818,10 +3908,10 @@ def run_benchmark(
                 + f"{variant_name} | "
                 + f"{variant_item['row_count']} | "
                 + f"{metrics['teacher_quality_gate_pass']['mean']:.4f} | "
-                + f"{metrics['formula_validation_result']['mean']:.4f} | "
+                + f"{metrics['formula_export_success']['mean']:.4f} | "
                 + f"{metrics['symbolic_wall_time_s']['mean']:.6f} | "
                 + f"{metrics['symbolic_speedup_vs_baseline']['mean']:.4f} | "
-                + f"{metrics['final_mse_loss_shift']['mean']:.6e} | "
+                + f"{metrics['imitation_mse_shift']['mean']:.6e} | "
                 + f"{metrics['symbolic_target_mse_shift']['mean']:.6e} | "
                 + f"{metrics['replay_rank_inversion_rate']['mean']:.6f} | "
                 + f"{metrics['commit_param_drift_l2_mean']['mean']:.6e} |"
@@ -3832,7 +3922,7 @@ def run_benchmark(
         [
             "## Critique Evidence Summary (Q1/Q2/Q3)",
             "",
-            "| task | n | q1_candidate_ratio_mean | q1_symbolic_ratio_mean | q2_mse_gain_mean | q2_target_mse_gain_mean | q2_rank_inversion_mean | q3_mse_gain_mean | q3_target_mse_gain_mean | q3_refit_drift_mean |",
+            "| task | n | q1_candidate_ratio_mean | q1_symbolic_ratio_mean | q2_imitation_mse_gain_mean | q2_target_mse_gain_mean | q2_rank_inversion_mean | q3_imitation_mse_gain_mean | q3_target_mse_gain_mean | q3_refit_drift_mean |",
             "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
@@ -3842,10 +3932,10 @@ def run_benchmark(
         + f"{int(overall_evidence['shared_tensor_candidate_time_ratio_no_shared_vs_full']['count'])} | "
         + f"{overall_evidence['shared_tensor_candidate_time_ratio_no_shared_vs_full']['mean']:.6f} | "
         + f"{overall_evidence['shared_tensor_symbolic_time_ratio_no_shared_vs_full']['mean']:.6f} | "
-        + f"{overall_evidence['contextual_replay_mse_gain_full_vs_no_replay']['mean']:.6e} | "
+        + f"{overall_evidence['contextual_replay_imitation_mse_gain_full_vs_no_replay']['mean']:.6e} | "
         + f"{overall_evidence['contextual_replay_target_mse_gain_full_vs_no_replay']['mean']:.6e} | "
         + f"{overall_evidence['contextual_replay_rank_inversion_rate_full']['mean']:.6f} | "
-        + f"{overall_evidence['explicit_commit_mse_gain_explicit_vs_refit']['mean']:.6e} | "
+        + f"{overall_evidence['explicit_commit_imitation_mse_gain_explicit_vs_refit']['mean']:.6e} | "
         + f"{overall_evidence['explicit_commit_target_mse_gain_explicit_vs_refit']['mean']:.6e} | "
         + f"{overall_evidence['explicit_commit_refit_commit_param_drift_l2_mean']['mean']:.6e} |"
     )
@@ -3857,10 +3947,10 @@ def run_benchmark(
             + f"{int(task_evidence['shared_tensor_candidate_time_ratio_no_shared_vs_full']['count'])} | "
             + f"{task_evidence['shared_tensor_candidate_time_ratio_no_shared_vs_full']['mean']:.6f} | "
             + f"{task_evidence['shared_tensor_symbolic_time_ratio_no_shared_vs_full']['mean']:.6f} | "
-            + f"{task_evidence['contextual_replay_mse_gain_full_vs_no_replay']['mean']:.6e} | "
+            + f"{task_evidence['contextual_replay_imitation_mse_gain_full_vs_no_replay']['mean']:.6e} | "
             + f"{task_evidence['contextual_replay_target_mse_gain_full_vs_no_replay']['mean']:.6e} | "
             + f"{task_evidence['contextual_replay_rank_inversion_rate_full']['mean']:.6f} | "
-            + f"{task_evidence['explicit_commit_mse_gain_explicit_vs_refit']['mean']:.6e} | "
+            + f"{task_evidence['explicit_commit_imitation_mse_gain_explicit_vs_refit']['mean']:.6e} | "
             + f"{task_evidence['explicit_commit_target_mse_gain_explicit_vs_refit']['mean']:.6e} | "
             + f"{task_evidence['explicit_commit_refit_commit_param_drift_l2_mean']['mean']:.6e} |"
         )
@@ -3870,7 +3960,7 @@ def run_benchmark(
         [
             "## Per-Run Performance Details",
             "",
-            "| task | seed | cache_hit | cache_status | teacher_mse | teacher_r2 | teacher_gate | candidate_s | replay_s | baseline_symbolic_s | icbr_symbolic_s | speedup_x | baseline_mse | icbr_mse | mse_shift | baseline_target_mse | icbr_target_mse | target_mse_shift | formula_ok |",
+            "| task | seed | cache_hit | cache_status | teacher_mse | teacher_r2 | teacher_gate | candidate_s | replay_s | baseline_symbolic_s | icbr_symbolic_s | speedup_x | baseline_imitation_mse | icbr_imitation_mse | imitation_mse_shift | baseline_target_mse | icbr_target_mse | target_mse_shift | formula_export_success |",
             "|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
@@ -3888,13 +3978,13 @@ def run_benchmark(
             + f"{float(row['baseline_symbolic_wall_time_s']):.6f} | "
             + f"{float(row['symbolic_wall_time_s']):.6f} | "
             + f"{float(row['symbolic_speedup_vs_baseline']):.4f} | "
-            + f"{float(row['baseline_mse']):.6e} | "
-            + f"{float(row['icbr_mse']):.6e} | "
-            + f"{float(row['final_mse_loss_shift']):.6e} | "
+            + f"{float(row['baseline_imitation_mse']):.6e} | "
+            + f"{float(row['icbr_imitation_mse']):.6e} | "
+            + f"{float(row['imitation_mse_shift']):.6e} | "
             + f"{float(row['baseline_target_mse']):.6e} | "
             + f"{float(row['icbr_target_mse']):.6e} | "
             + f"{float(row['symbolic_target_mse_shift']):.6e} | "
-            + f"{bool(row['formula_validation_result'])} |"
+            + f"{bool(row['formula_export_success'])} |"
         )
     md_lines.append("")
 
@@ -3912,7 +4002,8 @@ def run_benchmark(
                 f"- Raw data shape: rows={spec.dataset_total_rows}, columns={spec.dataset_total_columns}, n_var={spec.n_var}"
             )
             md_lines.append(
-                f"- Split setting: strategy={spec.dataset_split_strategy}, split_seed={row['feynman_split_seed']}, train_num={train_num}, test_num={test_num}"
+                f"- Split setting: strategy={spec.dataset_split_strategy}, split_seed={row['feynman_split_seed']}, "
+                f"train_num={train_num}, calibration_num={test_num}, test_num={test_num}"
             )
             md_lines.append(f"- Target formula: `{spec.target_formula}`")
             metadata = dict(spec.equation_metadata or {})
@@ -3952,7 +4043,7 @@ def run_benchmark(
             f"reason=`{row['teacher_quality_gate_reason']}`"
         )
         md_lines.append(
-            f"- Teacher target metrics: mse={float(row['teacher_target_mse']):.6e}, "
+            f"- Teacher target metrics (against dataset test_label): mse={float(row['teacher_target_mse']):.6e}, "
             f"r2={float(row['teacher_target_r2']):.6f}"
         )
         md_lines.append("- Variant formula overview:")
@@ -3963,9 +4054,9 @@ def run_benchmark(
                 continue
             md_lines.append(
                 f"  - {variant_name}: symbolic_s={_fmt_float(variant['symbolic_wall_time_s'])}, "
-                f"mse={_fmt_float(variant['mse'])}, "
+                f"imitation_mse={_fmt_float(variant['imitation_mse'])}, "
                 f"target_mse={_fmt_float(variant['target_mse'])}, "
-                f"formula_ok={bool(variant['formula_validation_result'])}"
+                f"formula_export_success={bool(variant['formula_export_success'])}"
             )
         for variant_name in summary["config"]["variants"]:
             variant = variant_map.get(str(variant_name))
@@ -3999,7 +4090,7 @@ def run_benchmark(
             "## Visualization Design Guide",
             "",
             "- `Point + 95% CI`: 适合论文里的主结论图；正值偏态指标优先用几何均值与 log 轴，不用柱面积暗示额外量感。",
-            "- `Violin + Box + Points`: 适合 speedup / mse shift 这类分布图；当前固定 KDE 带宽规则为 `Silverman`。",
+            "- `Violin + Box + Points`: 适合 speedup / imitation_mse_shift 这类分布图；当前固定 KDE 带宽规则为 `Silverman`。",
             "- `Task-Row Two-Panel Grid`: 适合 variant overview；每个 task 一行，左列 `SymbolicTime`，右列合并 `ImitationMSE + TargetMSE`，两列都显式标尺度。",
             "- `Q1/Q2/Q3`: 三个 panel 都用相对 `icbr_full` 的 ratio 值，并在 log 轴上展示 `几何均值 + 95% CI`，1 表示与 full 持平。",
             "- `Recommended Combo`: A=point+95%CI（正值偏态指标用几何均值），B=violin+box+points（分布），C=task-row two-panel grid（多指标 overview）。",

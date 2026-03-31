@@ -90,14 +90,18 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
         "feynman_dataset_columns",
         "feynman_split_seed",
         "feynman_equation_metadata",
+        "train_sample_count",
+        "calibration_sample_count",
+        "test_sample_count",
         "candidate_generation_wall_time_s",
         "replay_rerank_wall_time_s",
         "symbolic_wall_time_s",
         "baseline_symbolic_wall_time_s",
         "symbolic_wall_time_delta_s",
         "symbolic_speedup_vs_baseline",
-        "replay_imitation_gap",
-        "final_mse_loss_shift",
+        "baseline_imitation_mse",
+        "icbr_imitation_mse",
+        "imitation_mse_shift",
         "teacher_test_mse",
         "teacher_test_r2",
         "teacher_quality_gate_pass",
@@ -109,10 +113,10 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
         "teacher_cache_status",
         "shared_tensor_candidate_time_ratio_no_shared_vs_full",
         "shared_tensor_symbolic_time_ratio_no_shared_vs_full",
-        "contextual_replay_mse_gain_full_vs_no_replay",
+        "contextual_replay_imitation_mse_gain_full_vs_no_replay",
         "contextual_replay_target_mse_gain_full_vs_no_replay",
         "contextual_replay_rank_inversion_rate_full",
-        "explicit_commit_mse_gain_explicit_vs_refit",
+        "explicit_commit_imitation_mse_gain_explicit_vs_refit",
         "explicit_commit_target_mse_gain_explicit_vs_refit",
         "explicit_commit_refit_commit_param_drift_l2_mean",
         "teacher_target_mse",
@@ -123,9 +127,9 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
         "icbr_target_r2",
         "symbolic_target_mse_shift",
         "symbolic_target_r2_shift",
-        "formula_validation_result",
-        "baseline_formula_validation_result",
-        "icbr_formula_validation_result",
+        "formula_export_success",
+        "baseline_formula_export_success",
+        "icbr_formula_export_success",
         "baseline_formula_raw",
         "baseline_formula_display",
         "icbr_formula_raw",
@@ -146,6 +150,11 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
     assert summary["config"]["variants"] == ["baseline", "icbr_full"]
     assert summary["config"]["profile"]["overrides"]["train_num"] is True
     assert summary["config"]["profile"]["overrides"]["test_num"] is True
+    assert summary["config"]["calibration_num"] == 24
+    assert summary["config"]["split"]["ratio"] == "2:1:1"
+    assert summary["config"]["split"]["train"] == 24
+    assert summary["config"]["split"]["calibration"] == 24
+    assert summary["config"]["split"]["test"] == 24
     assert summary["config"]["profile"]["overrides"]["train_steps"] is True
     assert summary["config"]["profile"]["overrides"]["lr"] is True
     assert summary["config"]["profile"]["overrides"]["lamb"] is False
@@ -169,6 +178,9 @@ def test_icbr_benchmark_script_generates_outputs() -> None:
     assert {"count", "mean", "median", "std", "min", "max"}.issubset(set(speedup_stats.keys()))
     for row in summary["rows"]:
         assert row["teacher_quality_gate_pass"] is True
+        assert row["train_sample_count"] == 24
+        assert row["calibration_sample_count"] == 24
+        assert row["test_sample_count"] == 24
         assert isinstance(row["baseline_formula_raw"], list)
         assert isinstance(row["baseline_formula_display"], list)
         assert isinstance(row["icbr_formula_raw"], list)
@@ -700,7 +712,7 @@ def test_teacher_quality_gate_can_skip_symbolic_comparison() -> None:
     row = result["rows"][0]
     assert row["teacher_quality_gate_pass"] is False
     assert "teacher_test_mse" in row["teacher_quality_gate_reason"] or "teacher_test_r2" in row["teacher_quality_gate_reason"]
-    assert row["formula_validation_result"] is False
+    assert row["formula_export_success"] is False
     assert row["baseline_formula_raw"] == []
     assert row["icbr_formula_raw"] == []
 

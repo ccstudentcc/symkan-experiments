@@ -1411,6 +1411,75 @@ Status:
 
 Complete
 
+### Stage 24: Re-Spec Benchmark Splits and Metric Semantics for Valid Reporting
+
+Goal:
+
+在不改变 ICBR 核心算法路径的前提下，重新校准 benchmark 的数据划分与指标命名口径，确保后续论文与报告中的结论字段严格反映其真实参照物，并避免把符号拟合校准集与最终评估集混用。
+
+Target Files:
+
+- `scripts/icbr_benchmark.py`
+- `kan/icbr.py`
+- `tests/test_icbr_benchmark_script_smoke.py`
+- `tests/test_icbr_benchmark_smoke.py`
+- `IMPLEMENTATION_PLAN.md`
+- `TASK_STATUS.md`
+
+Required Behavior:
+
+- benchmark 数据划分必须显式拆成三段：
+  - `train`
+  - `calibration`
+  - `test`
+- 默认划分口径固定为 `2:1:1`：
+  - Feynman 默认使用 `2000 train / 1000 calibration / 1000 test`
+  - 普通 task 也应使用等比例 `2:1:1` 划分
+- `calibration` 只用于 baseline / ICBR 的符号拟合、候选 replay 与 commit 后 symbolic benchmark。
+- `test` 只用于最终报告指标，不再与 symbolic calibration 共用。
+- `*_target_mse` 与 `*_target_r2` 的语义必须明确为：
+  - against dataset `test_label`
+  - not against metadata formula
+  - not against symbolic equivalence target
+- imitation 指标命名必须显式反映 teacher 参照物，例如：
+  - `baseline_imitation_mse`
+  - `icbr_imitation_mse`
+  - `imitation_mse_shift`
+- `formula_validation_result` 必须重命名为 `formula_export_success`，并在所有 summary / CSV / Markdown / 图表文案中同步改名。
+- `target_formula` 与 `equation_metadata` 仍可保留为展示性元数据，但 Stage 24 不将其纳入正式评估指标。
+
+Implementation Constraints:
+
+- Stage 24 不引入“真实公式等价评估”或新的 symbolic correctness scorer。
+- 不改变 ICBR baseline / variant 的算法流程，只调整 benchmark 数据流、字段语义与导出文案。
+- 若为兼容历史产物需要保留旧字段，必须：
+  - 明确标记为 legacy
+  - 避免在新的 summary/markdown 主文案中继续使用误导性名称
+- 图表标题、坐标轴标签、field guide、Markdown 表头必须与新语义完全一致，不能继续使用泛化的 `mse` 命名掩盖参照物。
+
+Success Criteria:
+
+- benchmark 中任何 MSE/R2 字段从名字即可判断其参照物是 `teacher` 还是 dataset `test_label`。
+- `symbolic calibration` 与最终 `test` 评估在数据流上完全分离。
+- 默认 Feynman benchmark 采用 `2000/1000/1000` 三段划分。
+- `formula_export_success` 仅表示公式导出成功，不再被表述为公式恢复正确。
+- summary JSON、rows CSV、variant rows CSV、Markdown 报告与图表文案在字段语义上保持一致。
+
+Validation:
+
+- `python -m py_compile scripts/icbr_benchmark.py kan/icbr.py tests/test_icbr_benchmark_smoke.py tests/test_icbr_benchmark_script_smoke.py`
+- `pytest tests/test_icbr_benchmark_smoke.py tests/test_icbr_benchmark_script_smoke.py`
+- 新增或更新回归测试，至少覆盖：
+  - `2:1:1` split 行为
+  - Feynman 默认 `2000/1000/1000`
+  - `*_target_mse` 明确来自 `test_label`
+  - imitation / target 指标命名与 summary field guide 一致
+  - `formula_export_success` 命名贯通 CSV/JSON/Markdown
+
+Status:
+
+Complete
+
 
 ## 5. Acceptance Criteria
 
@@ -1459,3 +1528,4 @@ Phase I 仅在以下条件全部满足时视为完成:
 21. Stage 21: Support Multiplication-Aware Feynman Width Specs and Teacher Default Alignment
 22. Stage 22: Stream Active-Edge Candidate Generation and Fixed-Capacity Top-K Shortlists
 23. Stage 23: Enforce Benchmark Symbolic-Fitting Memory Lifecycle
+24. Stage 24: Re-Spec Benchmark Splits and Metric Semantics for Valid Reporting
