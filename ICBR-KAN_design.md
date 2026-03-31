@@ -1,12 +1,16 @@
 # ICBR-KAN Design
 
-状态: Draft  
-日期: 2026-03-29  
+状态: Revised after Stage 24 and Stage 26 benchmark evidence  
+日期: 2026-03-31  
 范围: 设计一种替代当前逐边贪心符号拟合的后处理算法, 在**完全复用已经训练好的数值 KAN**前提下, 以尽量小的算法增量改进符号恢复质量与候选评估效率。
 
 ## 1. 摘要
 
-本文将 ICBR-KAN 重新收缩为一个更稳健、更可实现的 Phase I 设计。
+本文将 ICBR-KAN 重新收缩为一个更稳健、更可实现的 Phase I 设计, 并以当前仓库中已经落地的 `kan/icbr.py`、`scripts/icbr_benchmark.py` 以及以下两轮 benchmark 结果作为校准依据:
+
+- `outputs/icbr_benchmark_stage24_quality_4tasks_20seeds_all_variants/`
+- `outputs/icbr_benchmark_feynman_reference_paper10_seeds1_20/`
+- `outputs/icbr_benchmark_feynman_reference_paper10_seeds1_20_icbr_ablation/`
 
 它严格满足以下边界:
 
@@ -36,6 +40,13 @@
 换言之，本文不是把原方案扩张成一个复杂的 planning 系统，而是把它收紧为:
 
 **更高效的候选生成 + 更正确的提交决策。**
+
+基于当前 synthetic 与 Feynman 两轮结果，本文进一步固定四条论文写作口径:
+
+1. 最稳健、最强的经验结论仍然是 **CPU 路线下的稳定大幅提速**，而不是“所有任务上都显著提高最终质量”。在已完成的 Feynman `10 tasks x 20 seeds` 主对比中，`199/199` 个有效配对样本的 `symbolic_wall_time_delta_s` 全部为正，baseline 与 `icbr_full` 的几何均值 symbolic wall time 分别约为 `16.07s` 与 `0.73s`，几何均值 speedup 约为 `21.93x`。
+2. shared-tensor symbolic candidate evaluation 是当前最稳定的速度来源，但它的收益仍然具有任务依赖性。Feynman 消融中 `icbr_no_shared / icbr_full` 的 symbolic time 比值总体均值约为 `1.30`；在 `feynman_I_10_7`、`feynman_I_12_1`、`feynman_I_34_1` 上约为 `1.46x`、`1.48x`、`1.48x`，而在 `feynman_I_6_2a` 上仅约为 `0.98x`。
+3. replay contextual reranking 的收益应表述为 **任务相关的质量稳定器**。Feynman 消融中平均 `replay_rank_inversion_rate` 约为 `0.39`，但显著收益主要集中在 `feynman_I_10_7`、`feynman_I_12_1`、`feynman_I_34_1` 等任务；在 `feynman_II_6_15a` 等任务上则仅观察到弱收益甚至轻微反向波动。
+4. `formula_export_success` 只能表述为 **导出状态成功率**，不能表述为“真实公式恢复正确率”。更严格地说，variant-level 的 `baseline_formula_export_success` / `icbr_formula_export_success` 表示 `symbolic_formula()` 返回成功且导出公式条数与输出维度一致；paired `formula_export_success` 则要求 baseline 与 ICBR 两侧同时满足该条件。Feynman 主对比中所有有效 symbolic run 的 variant-level 导出状态均为 `100%`；唯一 `formula_export_success=0` 的配对样本来自 `feynman_I_12_1, seed=4` 的 teacher quality gate 拒绝，而不是符号拟合或导出链路失效。
 
 ## 2. 设计前提
 
@@ -254,6 +265,17 @@ $$
 - **状态去耦**
 - **候选生成阶段的常数级提速空间**
 
+根据当前 Stage 24 synthetic 结果与 Stage 26 Feynman 结果，这一改进的收益具有明显任务尺度效应:
+
+- `minimal` 上 `icbr_no_shared / icbr_full` 的 symbolic wall time 比值约为 `0.97`，差异几乎可以忽略
+- `poly_cubic`、`combo`、`trig_interaction` 上该比值分别约为 `1.38`、`1.41`、`1.55`
+- 在 Feynman `10 tasks x 20 seeds` 消融中，该比值总体均值约为 `1.30`；其中 `feynman_I_10_7`、`feynman_I_12_1`、`feynman_I_34_1` 约为 `1.46x`、`1.48x`、`1.48x`
+- Feynman 的边界情形同样存在：`feynman_I_6_2a` 上该比值约为 `0.98x`，说明在候选集较小、结构较简单时，shared batching 的优势可能接近于零
+
+因此，对 shared-tensor candidate evaluation 更准确的表述应是:
+
+**它不是对所有任务都同幅度生效的统一加速器，而是在候选评估负担较重的任务上提供更明显的常数级收益。**
+
 #### 改进点 2: Teacher-Replay Contextual Reranking
 
 对每条边的 shortlist，不再按局部 `R^2` 直接提交，而是在冻结教师上下文中用 replay imitation loss 选择最终提交候选。
@@ -262,6 +284,18 @@ $$
 
 - **目标函数一致性**
 - **最终提交分数与真实 post-hoc 目标更贴近**
+
+但根据当前结果，replay 的经验收益需要用更克制的语言表述:
+
+- `minimal` 上 `replay_rank_inversion_rate = 0`，`icbr_full` 与 `icbr_no_replay` 的质量几乎无差别
+- `poly_cubic`、`combo`、`trig_interaction` 上 `replay_rank_inversion_rate` 均值约为 `0.55`、`0.34`、`0.53`
+- 对应地，`icbr_full` 相对 `icbr_no_replay` 的 imitation / target 指标改进主要集中在这些非平凡任务上
+- 在 Feynman 消融中，平均 `replay_rank_inversion_rate` 约为 `0.39`；其中 `feynman_I_10_7`、`feynman_I_12_1`、`feynman_I_34_1` 的 no-replay 相对 full 的 imitation MSE 退化分别约为 `6.87e-4`、`1.07e-1`、`2.74e-3`
+- 但 `feynman_II_6_15a` 上 no-replay 相对 full 的 imitation / target MSE 反而分别约为 `-2.35e-5`、`-1.28e-4`，提示 replay 的经验收益并非由“存在 rank inversion”自动保证
+
+因此，replay contextual reranking 在论文中应定位为:
+
+**对上下文耦合更强任务有效的提交决策修正机制，而不是任何任务上都必然显著增益的万能模块。**
 
 ### 5.3 第一版明确不包含的内容
 
@@ -758,9 +792,9 @@ $$
 
 第一版需要实验验证的断言只有三个:
 
-1. imitation gap 与最终 MSE loss shift 在当前任务族上显著相关
-2. contextual rerank 相比局部 `R^2` top-1 有更高的最终提交质量
-3. shared-tensor candidate evaluation 能带来稳定的常数级时间收益
+1. imitation gap 与最终 dataset-target loss shift 在当前任务族上保持可解释联系
+2. contextual rerank 的收益主要应体现在存在非平凡 rank inversion 的任务上，而不是被假设为对所有任务一律有效
+3. shared-tensor candidate evaluation 能在非平凡任务上带来稳定的常数级时间收益
 
 ## 10. 复杂度分析
 
@@ -1072,26 +1106,33 @@ ICBR-KAN 直接复用:
 
 ### 12.4 第一版真正需要新增的 helper
 
-第一版只需要新增三个 helper。
+截至 Stage 24，第一版已经在 `kan/icbr.py` 中落地为一组明确的 helper/entry 组合。设计稿中的抽象 helper 与实际实现对应关系如下。
 
-#### Helper 1: `batched_symbolic_candidates(...)`
+#### Helper 1: `generate_layer_candidates(...)` 与 `_build_layer_shortlists_shared(...)`
 
-最小语义:
+对应设计中的 batched candidate generation，最小语义是:
 
 1. 输入同层一批边的 `(x_e, y_e)`
 2. 对固定函数族共享 `(a,b)` 网格与中间张量
 3. 返回每条边的候选参数、局部分数与诊断量
 4. 不触碰模型 symbolic state
 
-#### Helper 2: `evaluate_edge_candidate_by_replay(...)`
+Stage 22 之后，实际实现还加入了两条重要约束:
 
-最小语义:
+- 只对当前仍为 numeric-active 的 edge 生成候选
+- per-edge shortlist 采用固定容量 `top-k` 聚合，而不是长期保留全量候选
+
+#### Helper 2: `replay_rerank_edge_candidates(...)`
+
+对应设计中的 replay evaluator，最小语义是:
 
 1. 保存目标边的 `funs` / `funs_sympy` / `funs_avoid_singularity` / `funs_name` / `affine` / numeric mask / symbolic mask
 2. 在当前 work model 上临时写入某个边候选
 3. 在校准集上执行完整 forward
 4. 与冻结教师输出比较 imitation gap
 5. 逐项恢复上述状态
+
+其底层依赖 `_snapshot_symbolic_edge_state(...)`、`_apply_symbolic_candidate_state(...)`、`_restore_symbolic_edge_state(...)` 三个内存态 primitive。
 
 这里必须是**内存态 snapshot/apply/restore**，不能直接反复调用当前磁盘式 `copy()`。
 并且 replay 内环必须完全绕开 `log_history/auto_save` 机制，不能借用会触发落盘的现有 API 作为实现路径。
@@ -1106,6 +1147,16 @@ ICBR-KAN 直接复用:
 
 之所以必须有这个 helper，是因为当前 `fix_symbolic()` 默认会重新拟合或用默认参数初始化，而不是“提交外部已选候选”。
 同时，这个 helper 必须维护 symbolic state 的内部一致性，保证后续 `symbolic_formula()` 不会读到历史残留。
+
+#### Helper 4: `auto_symbolic_icbr(...)`、`benchmark_symbolic_variants(...)` 与 `benchmark_icbr_vs_baseline(...)`
+
+这三个 entry 不是新的算法原语，但已经成为当前论文复现实验的实际承载接口:
+
+1. `auto_symbolic_icbr(...)` 负责 ICBR 主流程
+2. `benchmark_symbolic_variants(...)` 负责 baseline / `icbr_full` / `icbr_no_replay` / `icbr_no_shared` / `icbr_refit_commit` 的统一评估
+3. `benchmark_icbr_vs_baseline(...)` 负责主表与报告所需的对照聚合
+
+因此，后续论文文字若讨论“当前实现”，应优先引用这些真实 entry，而不是仅停留在抽象 helper 名称上。
 
 ### 12.5 第一版明确不需要的 helper
 
@@ -1125,92 +1176,315 @@ ICBR-KAN 直接复用:
 实验中始终使用**同一批已经训练好的数值 KAN**。  
 只替换 `kan/` 层的符号拟合器。
 
-正式对照只需要:
+正式主对照仍然是:
 
 1. baseline `MultKAN.auto_symbolic()`
-2. ICBR-KAN
+2. `icbr_full`
+
+但从论文证据链角度，当前仓库的标准实验矩阵已经扩展为五个变体:
+
+1. `baseline`
+2. `icbr_full`
+3. `icbr_no_replay`
+4. `icbr_no_shared`
+5. `icbr_refit_commit`
+
+其中后 3 个不是新的竞争方法，而是为了分别隔离:
+
+- shared candidate evaluation 的时间贡献
+- replay rerank 的质量贡献
+- explicit commit 相对 re-fit commit 的必要性
 
 ### 13.2 主要验证问题
 
-第一版只回答三个问题:
+第一版只回答四个问题:
 
-1. 在相同数值 KAN 上，ICBR-KAN 是否提升最终符号恢复质量?
-2. contextual rerank 是否优于局部 `R^2` 直接提交?
+1. 在相同数值 KAN 上，ICBR-KAN 是否在 CPU 路线上稳定加速?
+2. contextual rerank 是否在存在非平凡上下文耦合的任务上优于局部 `R^2` 直接提交?
 3. shared-tensor candidate evaluation 是否带来稳定的常数级时间收益?
+4. explicit commit 是否相对 re-fit commit 避免了额外参数漂移与质量退化?
 
-### 13.3 数据切分
+### 13.3 实验条件与数据切分
 
-冻结教师后，post-hoc 阶段至少拆成两个互不重叠子集:
+当前已完成的 Stage 24 复测使用如下实验条件:
 
-1. **calibration split**  
-   仅用于 replay contextual rerank
-2. **final-report split**  
-   仅用于最终报告
+- 操作系统：Windows 11 专业版 `23H2`（OS Build `22631.5472`）
+- Python：`Miniconda` 的 `kan` 环境，解释器路径  
+  `C:\Users\chenpeng\miniconda3\envs\kan\python.exe`
+- Python 版本：`3.9.25`
+- CPU：`12th Gen Intel(R) Core(TM) i5-12500H`
+- 内存：`16 GB`
+- 深度学习运行时：`PyTorch 2.1.2+cpu`
+- 硬件执行口径：本轮复测全部按 **CPU 路线** 执行
 
-若需要单独验证理论相关性，可再增加:
+上述环境信息的作用不是渲染“高算力”条件，而是固定本文当前结果的复现实验边界。  
+特别是，Phase I 的速度结论应被理解为 **在该 CPU-first 条件下** 相对 baseline 的比较结果。
 
-3. **theory-validation split**
+除非另有说明，实验默认沿用 `pykan` 的 `SYMBOLIC_LIB` 作为候选符号函数库；其对应候选函数名可概括为：`x, x^2, x^3, x^4, x^5, 1/x, 1/x^2, 1/x^3, 1/x^4, 1/x^5, sqrt, x^0.5, x^1.5, 1/sqrt(x), 1/x^0.5, exp, log, abs, sin, cos, tan, tanh, sgn, arcsin, arccos, arctan, arctanh, 0, gaussian`。
+
+在此条件下，benchmark 数据流固定拆成 `train / calibration / test` 三段，且三者互不重叠。
+
+1. **train split**  
+   仅用于训练数值教师 KAN
+2. **calibration split**  
+   仅用于 symbolic fitting、replay contextual rerank 与 commit 后的中间评估
+3. **test split**  
+   仅用于最终报告指标
+
+当前默认口径固定为:
+
+- synthetic quality tasks: `1000 / 500 / 500`
+- Feynman quality tasks: `2000 / 1000 / 1000`
+- 一般比例记作 `2:1:1`
+
+这里必须特别强调:
+
+- `imitation_*` 指标的参照物是冻结教师输出
+- `target_*` 指标的参照物是 dataset `test_label`
+- `target_formula` 与 `equation_metadata` 只作为展示性元数据，不纳入正式指标
 
 ### 13.4 任务层次
 
-#### A. 精确恢复小任务
+#### A. 当前已完成的 synthetic benchmark 任务
 
-- `x1 + x2`
-- `x1 * x2`
-- `sin(x1)`
-- `x1^2 + x2^2`
+- `minimal`
+- `poly_cubic`
+- `combo`
+- `trig_interaction`
+
+对应目标表达式按当前 `scripts/icbr_benchmark.py` 中的 task spec 固定为:
+
+- `minimal`:  
+  $$
+  y=\sin(\pi x_1)
+  $$
+- `poly_cubic`:  
+  $$
+  y=0.8x_1^3-0.4x_1+0.6x_2^2
+  $$
+- `combo`:  
+  $$
+  y=\sin(\pi x_1)+x_2^2
+  $$
+- `trig_interaction`:  
+  $$
+  y=\sin(\pi x_1)+0.5\cos(\pi x_2)+x_1x_3
+  $$
 
 作用:
 
-- 观察 exact family recovery 的经验表现
-- 验证 contextual rerank 是否减少明显错误提交
+- 覆盖当前 Stage 24 已实际运行并汇总的四个 synthetic quality tasks
+- 作为 shared-tensor、replay rerank 与 explicit commit 三类机制分析的当前主证据来源
+- 支撑本文目前所有“已实现 + 已有初步结果”的经验性结论
 
-#### B. 组合层级任务
+实验 A 的具体 benchmark 配置按当前 Stage 24 实跑结果固定为:
 
-- `exp(sin(x1)+x2^2)`
-- `sqrt(x1^2+x2^2+x3^2)`
+- benchmark profile：`quality`
+- run mode：`full`
+- task 列表：`minimal, poly_cubic, combo, trig_interaction`
+- seeds：`1..20`
+- 每个 task 的样本划分：`1000 train / 500 calibration / 500 test`
+- train steps：`200`
+- learning rate：`0.01`
+- `lamb`：`0.001`
+- variants：`baseline, icbr_full, icbr_no_replay, icbr_no_shared, icbr_refit_commit`
+- ICBR shortlist `topk`：默认 `3`
+- task-specific topk override：`trig_interaction = 5`
+- candidate grid number：`21`
+- candidate iteration：`2`
+- teacher cache：`mode=readwrite`，目录为 `outputs\teacher_cache_stage24_quality_4tasks_20seeds`，版本 `v1`
+- teacher prune policy：启用，`node_th=0.01`，`edge_th=0.01`，`prune_iters=1`
 
-作用:
+实验 A 中四个 synthetic tasks 的结构配置为:
 
-- 验证 replay contextual score 是否优于局部 `R^2`
+- `minimal`：
+  - `n_var = 1`
+  - `width = [1, 1]`
+  - `ranges = [-1, 1]`
+- `poly_cubic`：
+  - `n_var = 2`
+  - `width = [2, 3, 1]`
+  - `ranges = [-1, 1]`
+- `combo`：
+  - `n_var = 2`
+  - `width = [2, 2, 1]`
+  - `ranges = [-1, 1]`
+- `trig_interaction`：
+  - `n_var = 3`
+  - `width = [3, 4, 1]`
+  - `ranges = [-1, 1]`
+
+若无特别说明，当前实验默认沿用 `pykan` 定义的 `SYMBOLIC_LIB` 作为候选符号函数库。  
+该约定同时适用于任务 A 与后续任务 B，而不只属于实验 A 的局部设定。
+
+因此，后文若需提及候选函数库，直接引用 `SYMBOLIC_LIB` 名称即可，不再重复展开其具体函数列表。  
+只有当某个实验分支显式覆写 `lib` 配置时，才单独说明其与默认 `SYMBOLIC_LIB` 的差异。
+
+这四个 task 的定位并不完全相同:
+
+- `minimal`：最小难度 sanity check，用于识别“几乎不存在 rank inversion”时 replay 的边际作用
+- `poly_cubic`：用于观察多项式结构下的 replay 与 shared candidate evaluation 收益
+- `combo`：用于观察多机制混合时的上下文决策收益
+- `trig_interaction`：用于观察上下文耦合更强任务上的 replay / commit 敏感性
+
+##### 实验 A 的已完成结果摘要
+
+实验 A 已经完成，对应结果目录为 `outputs/icbr_benchmark_stage24_quality_4tasks_20seeds_all_variants/`。  
+该目录同时包含主报告 `icbr_benchmark_summary.md`、显著性检验表 `icbr_benchmark_significance.csv`、逐变体行表 `icbr_benchmark_variant_rows.csv` 以及时间/消融相关图像。因此，任务 A 不再只是“synthetic benchmark 设计”，而是当前设计稿中已经闭环完成的一组基础证据。
+
+首先，从主对比结果看，实验 A 已经充分证明 ICBR 在四个 synthetic tasks 上具有稳定时间优势。图 13-1 显示 baseline 与 `icbr_full` 的 task-level symbolic wall time 几何均值与 `95%` 置信区间；四个任务上两者都呈现清晰的数量级分离。更关键的是，四个任务共 `80/80` 个 seed 配对样本的 `symbolic_wall_time_delta_s` 全部为正，四个任务各自的 sign test 双侧 `p` 值均为 `0.000002`。
+
+![图 13-1 Synthetic benchmark 主对比的 symbolic wall time 几何均值与 95% CI](outputs/icbr_benchmark_stage24_quality_4tasks_20seeds_all_variants/icbr_benchmark_symbolic_time_errorbar.png)
+
+*图 13-1. Stage 24 synthetic benchmark 中 baseline 与 `icbr_full` 的 symbolic wall time 几何均值和 `95%` 置信区间。纵轴为 log 尺度。*
+
+表 13-1 汇总了四个 synthetic tasks 的主对比结果。表中 `imitation_mse_shift = icbr_full - baseline`，`symbolic_target_mse_shift = icbr_full - baseline`，因此负值表示 `icbr_full` 相对 baseline 更优；最后一列的 sign test `p` 值对应 `symbolic_wall_time_delta_s`，而不是 target 误差项。
+
+| Task | Baseline symbolic (s) | `icbr_full` symbolic (s) | Speedup (x) | `imitation_mse_shift` | `symbolic_target_mse_shift` | Sign test `p` (`symbolic_wall_time_delta_s`) |
+|---|---:|---:|---:|---:|---:|---:|
+| `minimal` | 1.2193 | 0.1050 | 11.6276 | 1.391148e-05 | 7.024868e-06 | 2.0e-06 |
+| `poly_cubic` | 5.7432 | 0.3885 | 14.5642 | -1.039194e-04 | -1.159023e-04 | 2.0e-06 |
+| `combo` | 6.8980 | 0.4561 | 15.1362 | -2.774328e-05 | -1.361565e-04 | 2.0e-06 |
+| `trig_interaction` | 16.6888 | 1.1326 | 14.7317 | -4.595893e-04 | -7.299085e-04 | 2.0e-06 |
+
+这一主表揭示出两个重要现象。其一，速度收益在四个任务上都非常稳健，且随着任务复杂度上升而更为明显：`minimal` 的平均 speedup 约为 `11.63x`，而 `poly_cubic`、`combo`、`trig_interaction` 已稳定上升到 `14x-15x` 区间。其二，质量收益不是任务无关的统一改进。`poly_cubic`、`combo` 与 `trig_interaction` 上，`icbr_full` 的 imitation / target MSE 整体优于 baseline；但 `minimal` 上两项 shift 都为正，且 `imitation_mse_shift` 的 sign test `p=0.000402`，说明在几乎不存在上下文误选的简单任务上，ICBR 的主要贡献应被理解为提速，而不是质量提升。
+
+其次，从消融结果看，任务 A 也已经完成了 shared、replay 与 explicit commit 三个模块的基础证据链。图 13-2 展示了 `Q1/Q2/Q3` 三组任务级证据：Q1 关注 shared-tensor 对 symbolic time 的影响，Q2 关注 replay 对 imitation / target MSE 的影响，Q3 关注 re-fit commit 相对 explicit commit 的漂移与退化。
+
+![图 13-2 Synthetic benchmark 的 Q1/Q2/Q3 消融证据图](outputs/icbr_benchmark_stage24_quality_4tasks_20seeds_all_variants/icbr_benchmark_q123_evidence_by_task.png)
+
+*图 13-2. Stage 24 synthetic benchmark 的 `Q1/Q2/Q3` 任务级证据图。Q1 为 `icbr_no_shared / icbr_full` 的时间比值，Q2 为 `icbr_no_replay - icbr_full` 的质量增量，Q3 为 `icbr_refit_commit - icbr_full` 的质量增量与 re-fit drift。*
+
+表 13-2 给出任务 A 的消融核心统计。这里 `q1_symbolic_ratio > 1` 表示去掉 shared-tensor 后更慢，`q2_*_gain > 0` 表示去掉 replay 后更差，`q3_*_gain > 0` 表示退回 re-fit commit 后更差。
+
+| Task | `q1_symbolic_ratio` | `q2_imitation_gain` | `q2_target_gain` | `q2_rank_inversion` | `q3_imitation_gain` | `q3_target_gain` | `q3_refit_drift` |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `minimal` | 0.9664 | 0.000000e+00 | 0.000000e+00 | 0.000000 | 1.901995e-02 | 1.947492e-02 | 1.950134e+00 |
+| `poly_cubic` | 1.3501 | 1.464267e-04 | 1.561636e-04 | 0.553333 | 1.229687e-02 | 1.273401e-02 | 4.739820e+00 |
+| `combo` | 1.4140 | 4.723887e-05 | 2.216670e-04 | 0.336667 | 1.401852e-02 | 1.514232e-02 | 3.544982e+00 |
+| `trig_interaction` | 1.5535 | 5.573995e-04 | 6.408993e-04 | 0.528368 | 8.102597e-02 | 8.281691e-02 | 4.752520e+00 |
+
+从 Q1 看，shared-tensor candidate evaluation 在任务 A 中已经表现出清晰的任务复杂度依赖性。`minimal` 上 `q1_symbolic_ratio` 仅为 `0.9664`，说明在极简单任务上 shared batching 的收益几乎可以忽略；但在 `poly_cubic`、`combo` 与 `trig_interaction` 上，该比值分别升至 `1.3501`、`1.4140`、`1.5535`，这意味着一旦候选评估负担增加，共享张量路径就会成为稳定的时间杠杆。
+
+从 Q2 看，replay contextual reranking 的作用在任务 A 中也已经呈现出清晰的条件性。`minimal` 上 `q2_rank_inversion = 0` 且 `q2` 增量为零，表明 replay 在这种场景下没有可发挥空间；而 `poly_cubic`、`combo` 与 `trig_interaction` 的 rank inversion 均值分别约为 `0.553`、`0.337`、`0.528`，对应的 imitation / target gain 也都转为正值，其中 `trig_interaction` 的 replay 收益最强。这一结果说明 replay 不是“默认改善一切任务”的模块，而是在上下文误选确实存在时才开始发挥作用。
+
+从 Q3 看，explicit commit 的必要性在任务 A 中已经非常明确。即使在 `minimal` 上，退回 `icbr_refit_commit` 也会带来约 `1.90e-02` 量级的 imitation / target 退化；在 `trig_interaction` 上，这一退化进一步放大到约 `8.10e-02` 与 `8.28e-02`，同时 `q3_refit_drift` 升至 `4.752520`。因此，任务 A 的 synthetic 结果已经足以支持这样一种更谨慎但更准确的论文口径：explicit commit 不应被视为可有可无的工程细节，而应被视为防止 re-fit drift 破坏最终 symbolic state 的稳定性条件。
+
+#### B. 当前已完成的 Feynman benchmark 任务
+
+任务 B 现已完成, 并构成本文当前最重要的外部验证层。
+
+当前完成口径为:
+
+- 使用 benchmark 中预选的 `10` 个 Feynman paper tasks:
+  - `feynman_I_9_18`
+  - `feynman_I_10_7`
+  - `feynman_I_12_1`
+  - `feynman_I_12_4`
+  - `feynman_I_6_2a`
+  - `feynman_I_34_1`
+  - `feynman_II_6_15a`
+  - `feynman_II_6_15b`
+  - `feynman_II_21_32`
+  - `feynman_II_34_29a`
+- 数据源为 `datasets/Feynman_with_units`
+- split 方式为 `random`, `split_seed=per-benchmark-seed`, `select_seed=1`
+- 每个 task 执行 `20` 个 benchmark seeds
+- 每个 task 的样本划分固定为 `2000 train / 1000 calibration / 1000 test`
+- 主对比实验使用变体 `baseline, icbr_full`
+- 消融实验使用变体 `icbr_full, icbr_no_replay, icbr_no_shared, icbr_refit_commit`
+- 两组结果分别落盘于:
+  - `outputs/icbr_benchmark_feynman_reference_paper10_seeds1_20/`
+  - `outputs/icbr_benchmark_feynman_reference_paper10_seeds1_20_icbr_ablation/`
+
+实验 B 的配置按当前实跑结果固定为:
+
+- benchmark profile：`feynman_reference`
+- run mode：`full`
+- train steps：`200`
+- learning rate：`0.01`
+- `lamb`：`0.01`
+- ICBR shortlist `topk`：`3`
+- candidate grid number：`21`
+- candidate iteration：`2`
+- teacher cache：`mode=readonly`，目录为 `outputs\teacher_cache_feynman_reference_paper10_seeds1_20`，版本 `stage24_feynman_reference_paper10_seeds1_20_v1`
+- teacher prune policy：关闭，即 `enabled=False`
+- Feynman 结构先验：`width_mid=[5, 2]`
+
+这一层的作用是:
+
+- 作为相对 synthetic tasks 更接近论文型符号回归分布的外部验证层
+- 检验 shared evaluation、replay rerank 与 explicit commit 三类机制在更复杂公式族上的稳定性
+- 为论文正文提供“速度优势是否跨任务族保持、质量收益是否仍然任务相关”的外部证据
+
+这一层的结果可靠性需要明确写成:
+
+- baseline 与 ICBR 变体在同一 benchmark seed 下共用相同 teacher cache 与相同数据切分, 因此主对比与消融均是严格配对比较
+- 结果同时提供 task-level descriptive stats、逐 seed rows、95% CI，以及针对 `symbolic_wall_time_delta_s` / `imitation_mse_shift` 的 sign test
+- `feynman_I_12_1, seed=4` 因 `teacher_test_mse=0.300906 > 0.1` 被 teacher quality gate 拒绝; 该样本应作为边界情况单独报告，而不应与符号拟合失败混淆
 
 ### 13.5 主要指标
 
-1. calibration 上的 replay imitation gap
-2. final-report 上的 MSE loss shift
-3. formula validation `R^2`
-4. valid formula rate
-5. symbolic wall time
-6. candidate generation wall time
-7. replay rerank wall time
+当前主报告应统一使用 Stage 24 之后已经固化到 `scripts/icbr_benchmark.py` 的字段口径, 并明确区分“teacher 质量门禁”“baseline-vs-ICBR 配对主指标”“单变体诊断指标”三类对象。
+
+1. **teacher 质量门禁指标**  
+   `teacher_test_mse`、`teacher_test_r2`、`teacher_quality_gate_pass`（以及 `teacher_quality_gate_reason`）用于判断冻结数值教师是否足够可靠, 它们是在符号拟合之前、相对于 dataset `test_label` 计算的数值教师质量指标。  
+   这些字段是比较有效性的前置条件, 不是 ICBR 自身的最终 symbolic 质量指标。
+2. **baseline-vs-ICBR 配对时间主指标**  
+   `baseline_symbolic_wall_time_s`、`symbolic_wall_time_s`、`symbolic_wall_time_delta_s`、`symbolic_speedup_vs_baseline` 构成时间主指标; 其中在主对比 `rows` 口径下, 未加前缀的 `symbolic_wall_time_s` 默认指 `icbr_full`。  
+   代码中 `symbolic_wall_time_delta_s = baseline_symbolic_wall_time_s - icbr_symbolic_wall_time_s`, 因此 `> 0` 表示 ICBR 更快; `symbolic_speedup_vs_baseline = baseline / icbr`, 因此 `> 1` 表示 ICBR 更快。
+3. **test split 上的 imitation / target 主指标**  
+   `baseline_imitation_mse`、`icbr_imitation_mse`、`imitation_mse_shift` 评价符号模型对冻结教师输出的逼近误差; 其中 `imitation_mse_shift = icbr - baseline`, 因此负值表示 ICBR 更接近教师。  
+   `baseline_target_mse`、`icbr_target_mse`、`symbolic_target_mse_shift` 以及 `baseline_target_r2`、`icbr_target_r2`、`symbolic_target_r2_shift` 则直接相对于 dataset `test_label` 计算; 对应地, `symbolic_target_mse_shift < 0` 与 `symbolic_target_r2_shift > 0` 才能解释为 ICBR 在真实目标上更优。  
+   这两组指标都只在 `test` split 上报告, calibration split 仅用于 symbolic fitting、replay rerank 与 commit 期内部评估。
+4. **导出状态指标**  
+   `baseline_formula_export_success` 与 `icbr_formula_export_success` 的含义并不只是“`symbolic_formula()` 没有报错”, 而是“导出成功且导出公式条数与输出维度一致”。  
+   配对字段 `formula_export_success` 更严格: 只有 baseline 与 ICBR 两侧同时满足上述条件时才为 `True`。因此, teacher gate 触发的 skipped sample 会令该 paired 字段为 `False`, 但它不应被误记为“符号导出链路失败”。  
+   无论哪一种字段, 它们都只审计 symbolic state 与导出接口的一致性, 不能外推为“恢复了真实闭式公式”。
+5. **单变体机制诊断指标**  
+   `candidate_generation_wall_time_s`、`replay_rerank_wall_time_s`、`replay_rank_inversion_rate`、`commit_param_drift_l2_mean` 主要服务于模块分析与消融解释。  
+   它们可以回答“时间主要耗在何处”“replay 是否实质改变了局部 top-1 决策”“re-fit commit 是否引入参数漂移”, 但不应替代主表中的 baseline-vs-ICBR headline metrics。
+
+其中还需额外固定三条解释规则:
+
+- replay imitation score 是决策期内部评分, 不应替代最终 `test` split 报告指标
+- 当前代码默认仅对 `symbolic_wall_time_delta_s` 与 `imitation_mse_shift` 输出 sign test；`symbolic_target_mse_shift` 尚未在默认 summary 中给出对应显著性列, 因而正文讨论应以描述统计或额外补做检验为准
+- 论文正文不应再使用含混的 `formula validation R^2` 或 `valid formula rate` 作为 headline metric
 
 ### 13.6 必做消融
 
 这部分必须严格围绕两个核心改进点展开。
 
-1. 去掉 shared-tensor batching，回退为状态型候选生成，但保留 contextual rerank
-2. 去掉 contextual rerank，回退为局部 top-1 提交，但保留 batched candidates
+1. 去掉 shared-tensor batching，回退为 `icbr_no_shared`
+2. 去掉 contextual rerank，回退为 `icbr_no_replay`
+3. 保留前两者，但把 explicit commit 回退为 re-fit commit，即 `icbr_refit_commit`
 
-这两个消融足以回答:
+前两个消融足以回答:
 
 - 增益是否来自候选评估重组
 - 增益是否来自最终提交分数改写
 
+而第三个消融用于回答:
+
+- `commit_symbolic_candidate(...)` 是否只是实现细节，还是对稳定质量本身必不可少
+
 ### 13.7 理论验证指标
 
-1. imitation gap 与 MSE loss shift 的相关系数
-2. contextual rerank 相对局部 `R^2` top-1 的胜率
-3. batched candidate evaluation 相对 baseline candidate generation 的时间比
-4. teacher cache 与 work state 混用时的退化程度
-5. 若不 fully symbolic completion 或 symbolic state 不一致，exporter correctness 被破坏的比例
+1. `teacher_test_mse`、`teacher_test_r2` 与 `teacher_quality_gate_pass` 是否保证配对比较建立在可靠教师之上
+2. `imitation_mse_shift` 与 `symbolic_target_mse_shift` 的方向是否一致, 以及二者何时出现分离
+3. `replay_rank_inversion_rate` 与 replay 带来的 imitation / target 改善是否同向
+4. `icbr_no_shared / icbr_full` 的 symbolic time 比值, 以及 shared gain 是否主要体现在总 symbolic 时间而非只体现在候选局部时间
+5. `icbr_refit_commit / icbr_full` 的 `commit_param_drift_l2_mean` 与质量回退是否共同出现
+6. `formula_export_success` / `baseline_formula_export_success` / `icbr_formula_export_success` 是否维持导出状态完整性, 但不把该结果误解为真实公式恢复正确率
 
 ### 13.8 失败判据
 
 若出现以下现象，则说明第一版建模需要回退修正:
 
-1. contextual rerank 对最终结果几乎无增益
-2. batched evaluation 没有带来稳定的时间收益
-3. imitation gap 与最终 MSE shift 基本无关
+1. 在 `poly_cubic`、`combo`、`trig_interaction` 这类非平凡任务上，`icbr_full` 相对 `icbr_no_shared` 没有稳定时间优势
+2. 存在大量 rank inversion，但 replay 对 `imitation_mse_shift` 与 `symbolic_target_mse_shift` 没有稳定改善
+3. `icbr_refit_commit` 与 `icbr_full` 几乎等价，导致 explicit commit 的必要性缺乏经验支撑
+4. 在 `teacher_quality_gate_pass=True` 的有效配对样本上, `formula_export_success` 若仍频繁为 `0`, 或该字段仍持续被误读为“真实公式恢复率”, 则说明 benchmark 报告口径仍不够稳固
 
 ### 13.9 创新定位与常见质疑回应
 
@@ -1271,7 +1545,160 @@ ICBR-KAN 直接复用:
 - 默认采用固定预算与固定阈值策略，保持流程可复现与可审计；
 - 若出现“边际不确定”样本（例如 top1-top2 间隔过小），后续阶段再引入轻量自适应扩展（如扩 shortlist 或局部再精修）。
 
-## 14. 风险与应对
+### 13.10 基于 Stage 24 的初步结果, 当前设计稿应如何收敛表述
+
+以下结论直接来自 `outputs/icbr_benchmark_stage24_quality_4tasks_20seeds_all_variants/` 的初步结果, 因此在论文写作中可以作为“当前证据支持下的表述边界”。
+
+1. **速度收益已经足够稳健。**  
+   在 `minimal`、`poly_cubic`、`combo`、`trig_interaction` 上，`icbr_full` 相对 baseline 的平均 symbolic speedup 分别约为 `11.63x`、`14.56x`、`15.14x`、`14.73x`；四个任务上 `20/20` seeds 的 `symbolic_wall_time_delta_s` 全部为正，sign test 双侧 `p=0.000002`。总体上，baseline symbolic wall time 均值约为 `7.64s`，而 `icbr_full` 约为 `0.52s`。
+
+2. **shared-tensor candidate evaluation 是当前最主要的速度杠杆，但它的收益不是任务无关的。**  
+   `candidate_generation_wall_time_s` 均值约为 `0.389s`，占 `icbr_full symbolic_wall_time_s` 的约 `74.8%`；`replay_rerank_wall_time_s` 均值约为 `0.104s`，占比约 `19.9%`。  
+   这说明当前 ICBR 的剩余主要成本仍在 candidate generation，而不是 replay。与此同时，`icbr_no_shared / icbr_full` 的 symbolic time 比值在 `minimal` 上约为 `0.97`，但在 `poly_cubic`、`combo`、`trig_interaction` 上升至 `1.38`、`1.41`、`1.55`。因此，论文中应把 shared-tensor 写成“**对非平凡任务显著有效的常数级加速机制**”，而不是“所有任务上等幅受益”的统一结论。
+
+3. **replay contextual reranking 的收益具有明显任务相关性。**  
+   `minimal` 上 `replay_rank_inversion_rate = 0`，`icbr_full` 与 `icbr_no_replay` 的质量几乎无差异。  
+   但在 `poly_cubic`、`combo`、`trig_interaction` 上，`replay_rank_inversion_rate` 均值约为 `0.553`、`0.337`、`0.528`；相应地，`icbr_full` 相对 `icbr_no_replay` 的 imitation gain 均值约为 `1.46e-4`、`4.72e-5`、`5.57e-4`，target gain 均值约为 `1.56e-4`、`2.22e-4`、`6.41e-4`。  
+   这意味着 replay 并非“处处显著改善”的统一模块，而更像是**在存在真实局部误选时才开始发挥作用的上下文修正器**。
+
+4. **explicit commit 不是可以轻描淡写的实现细节，而是当前质量稳定性的必要条件。**  
+   相对 `icbr_full`，`icbr_refit_commit` 在 `minimal`、`poly_cubic`、`combo`、`trig_interaction` 上分别额外带来约 `1.90e-2`、`1.23e-2`、`1.40e-2`、`8.10e-2` 的 imitation 退化，以及约 `1.95e-2`、`1.27e-2`、`1.51e-2`、`8.27e-2` 的 target 退化；对应 `commit_param_drift_l2_mean` 约为 `1.95`、`4.74`、`3.54`、`4.75`。  
+   因此，论文不应把 explicit commit 简写为“工程实现方便”，而应明确其作用是**避免 re-fit commit 引入附加参数漂移与指标回退**。
+
+5. **导出状态目前是稳定的, 但不能被过度解释。**  
+   当前 `baseline_formula_export_success` 与全部 ICBR 变体对应的 variant-level 导出状态在 `4 tasks x 20 seeds` 上均为 `1.0`。这只能支持“导出流程与 symbolic state 一致”这一工程性结论，不能直接支持“恢复了真实闭式公式”这一更强命题。  
+   若采用 paired `formula_export_success` 口径, 其含义是 baseline 与 ICBR 两侧同时导出成功, 因而它比单侧导出状态更严格。
+
+6. **当前证据仍然是初步的。**  
+   这些结果来自 synthetic `quality` profile 下的 `4 tasks x 20 seeds`，且当前输出目录为 fresh run，因此 `teacher_cache_hit_mean = 0`，它验证的是算法与报告口径，而不是 cache hit 条件下的吞吐表现。对更广泛任务族、Feynman 数据与更严格统计推断，仍需后续阶段补充。
+
+## 14. Stage 26: Feynman Reference Benchmark Results
+
+本节将 Stage 26 已完成的 Feynman benchmark 主对比与消融研究收束为可直接进入论文草稿的实验叙述。相较于前述 Stage 24 synthetic 结果，本节关注两个问题:
+
+1. shared evaluation 带来的速度优势是否能跨出 synthetic toy tasks，延续到更复杂的论文型符号回归任务。
+2. replay rerank 与 explicit commit 的价值，是否仍然表现为“有条件的质量修正与稳定性保障”，而不是无差别地改善全部任务。
+
+### 14.1 实验设计与准备
+
+Stage 26 的 Feynman benchmark 沿用第 13.3 节给出的同一 CPU-first 实验环境，并在该环境下执行两组互补实验:
+
+- 主对比实验：`baseline` 对 `icbr_full`
+- 消融实验：`icbr_full` 对 `icbr_no_replay`、`icbr_no_shared`、`icbr_refit_commit`
+
+表 14-1 汇总了本轮 Feynman benchmark 的核心实验设置。
+
+| 维度 | 设置 |
+|---|---|
+| 数据集 | `Feynman_with_units`，预选 `10` 个 reference paper tasks |
+| task 列表 | `feynman_I_9_18`、`feynman_I_10_7`、`feynman_I_12_1`、`feynman_I_12_4`、`feynman_I_6_2a`、`feynman_I_34_1`、`feynman_II_6_15a`、`feynman_II_6_15b`、`feynman_II_21_32`、`feynman_II_34_29a` |
+| 实验分组 | 主对比：`baseline, icbr_full`；消融：`icbr_full, icbr_no_replay, icbr_no_shared, icbr_refit_commit` |
+| 随机性控制 | 每个 task 执行 `20` 个 benchmark seeds（`1..20`），`split=random`，`split_seed=per-benchmark-seed`，`select_seed=1` |
+| 数据切分 | `2000 train / 1000 calibration / 1000 test` |
+| 教师模型控制 | `teacher_cache` 设为 `readonly`，目录 `outputs\\teacher_cache_feynman_reference_paper10_seeds1_20`，版本 `stage24_feynman_reference_paper10_seeds1_20_v1` |
+| ICBR 配置 | `topk=3`，`grid_number=21`，`iteration=2`，`train_steps=200`，`lr=0.01`，`lamb=0.01` |
+| 结构先验 | `width_mid=[5, 2]`，teacher prune policy 关闭（`enabled=False`） |
+| 统计输出 | task-level stats、逐 seed rows、95% CI、对 `symbolic_wall_time_delta_s` / `imitation_mse_shift` 的 sign test、variant overview 与 Q1/Q2/Q3 图 |
+
+这一实验设计服务于两个目标。其一，主对比实验回答 ICBR 在外部公式族上的速度与精度边界；其二，消融实验将 shared evaluation、replay rerank 与 explicit commit 的作用拆分为可以定量报告的三个证据面板。  
+由于两组实验均在相同 teacher cache 与相同 task split 上做配对比较，因此该设计能显著降低“方法差异被 teacher 训练差异污染”的风险。
+
+结果可靠性还体现在三个方面。第一，`10 tasks x 20 seeds` 提供了比单次 pilot 更强的跨 task 与跨 seed 覆盖。第二，符号时间指标同时报告均值、箱线/小提琴分布与 sign test，有助于区分“平均更快”与“几乎每个 seed 都更快”；而 `imitation_mse_shift` 的 sign test 需要通过显著性表单独读取，`symbolic_target_mse_shift` 则仍以描述统计为主。第三，teacher quality gate 会在教师本身不可靠时中止对照；本轮仅 `feynman_I_12_1, seed=4` 一例因 `teacher_test_mse=0.300906 > 0.1` 被拒绝，因此后续配对统计均应理解为基于 `199` 个有效样本。
+
+### 14.2 Baseline 与 `icbr_full` 的主要结果分析
+
+图 14-1 给出了 baseline 与 `icbr_full` 在 `10` 个 Feynman tasks 上的 symbolic wall time 几何均值及 `95%` 置信区间。可以直接看到, `icbr_full` 在所有任务上都与 baseline 形成数量级分离。图 14-2 则进一步展示了逐 seed 的 speedup 分布，说明这种优势并不是由少数极端样本支撑，而是在绝大多数 seed 上稳定出现。
+
+![图 14-1 Feynman 主对比的 symbolic wall time 几何均值与 95% CI](outputs/icbr_benchmark_feynman_reference_paper10_seeds1_20/icbr_benchmark_symbolic_time_errorbar.png)
+
+*图 14-1. baseline 与 `icbr_full` 在各 Feynman 任务上的 symbolic wall time 几何均值和 `95%` 置信区间。纵轴为 log 尺度。*
+
+![图 14-2 Feynman 主对比的 speedup 分布](outputs/icbr_benchmark_feynman_reference_paper10_seeds1_20/icbr_benchmark_speedup_boxplot.png)
+
+*图 14-2. `icbr_full` 相对 baseline 的逐 seed speedup 分布。小提琴图、箱线图与散点共同呈现分布形状、IQR 和具体 seed 行为。*
+
+从总体统计看，Stage 26 的外部验证清晰支持“ICBR 的首要优势是速度”这一结论。`199/199` 个有效配对样本的 `symbolic_wall_time_delta_s` 全部为正；baseline 与 `icbr_full` 的 arithmetic mean symbolic wall time 分别约为 `29.25s` 与 `1.45s`，几何均值分别约为 `16.07s` 与 `0.73s`，对应几何均值 speedup 约为 `21.93x`，中位数 speedup 约为 `20.15x`。也就是说，速度优势既不是某一个任务的偶然异常，也不是少量重尾样本的统计假象。
+
+表 14-2 汇总了 task-level 的主对比结果。表中 `imitation_mse_shift = icbr_full - baseline`，`symbolic_target_mse_shift = icbr_full - baseline`；因此负值表示 `icbr_full` 更优，正值表示 baseline 更优。最后一列的 sign test `p` 值对应 `symbolic_wall_time_delta_s`。
+
+| Task | Baseline symbolic (s) | `icbr_full` symbolic (s) | Speedup (x) | `imitation_mse_shift` | `symbolic_target_mse_shift` | Sign test `p` (`symbolic_wall_time_delta_s`) |
+|---|---:|---:|---:|---:|---:|---:|
+| `feynman_I_9_18` | 18.76 | 1.00 | 18.00 | 3.56e-07 | -2.75e-06 | 1.91e-06 |
+| `feynman_I_10_7` | 59.21 | 2.91 | 20.38 | -4.43e-04 | -3.55e-04 | 1.91e-06 |
+| `feynman_I_12_1` | 55.20 | 2.68 | 20.61 | -7.74e-02 | -8.47e-02 | 3.81e-06 |
+| `feynman_I_12_4` | 18.19 | 0.92 | 22.03 | -3.13e-09 | 2.37e-08 | 1.91e-06 |
+| `feynman_I_6_2a` | 4.26 | 0.24 | 29.75 | 1.50e-06 | -6.40e-06 | 1.91e-06 |
+| `feynman_I_34_1` | 67.82 | 3.35 | 20.29 | -2.53e-04 | -3.77e-03 | 1.91e-06 |
+| `feynman_II_6_15a` | 20.51 | 0.97 | 21.19 | 3.05e-04 | -2.12e-04 | 1.91e-06 |
+| `feynman_II_6_15b` | 6.55 | 0.33 | 53.06 | -2.34e-11 | 8.36e-08 | 1.91e-06 |
+| `feynman_II_21_32` | 23.51 | 1.20 | 23.24 | 1.23e-06 | 7.67e-06 | 1.91e-06 |
+| `feynman_II_34_29a` | 19.75 | 1.01 | 19.47 | 3.21e-05 | 1.61e-05 | 1.91e-06 |
+
+这一主表显示出三类值得写入论文正文的现象。
+
+第一，时间收益具有强一致性，但程度随任务而异。`feynman_II_6_15b` 的平均 speedup 达到 `53.06x`，是全部任务中最大的一个；`feynman_I_9_18` 的平均 speedup 约为 `18.00x`，虽然绝对值最低，但仍处在显著大于 `1x` 的数量级区间。图 14-2 中 `feynman_II_6_15b` 的 speedup 分布更分散，说明极低的 `icbr_full` symbolic time 会放大乘法意义上的波动；相对地，`feynman_I_10_7`、`feynman_I_12_1`、`feynman_I_34_1` 的分布更集中，表明这些任务上的提速既大又稳定。
+
+第二，质量收益远没有时间收益那样整齐一致。`feynman_I_10_7`、`feynman_I_12_1` 与 `feynman_I_34_1` 上，`icbr_full` 同时获得更低的 imitation / target MSE，说明 ICBR 不只是更快，而且在这些任务上还能带来更合理的 symbolic 提交。  
+但这种现象并不普遍。`feynman_II_6_15a` 上 `imitation_mse_shift` 为 `3.05e-4`，对应 sign test `p=0.0192`，意味着 ICBR 在 imitation 指标上出现了可检测的轻微退化；不过同一任务的 `symbolic_target_mse_shift` 又是 `-2.12e-4`。这说明 ICBR 的质量效应并不能被简单压缩成“整体更好”或“整体更差”，而必须拆开 imitation 与 target 两类指标来分别解释。
+
+第三，异常与边界情况主要集中在 teacher 质量而非 symbolic 导出链路。`feynman_I_12_1, seed=4` 因教师模型 `teacher_test_mse=0.300906 > 0.1` 被 quality gate 拒绝，因此 baseline 与 `icbr_full` 都未进入 symbolic 阶段。除这一边界样本外，所有有效 symbolic run 的 variant-level 导出状态都为 `1.0`；若采用 paired `formula_export_success` 口径，则该被 gate 的样本会记为 `0`。因此，Stage 26 可以支持“ICBR 在外部 Feynman benchmark 上保持稳定导出状态”这一工程性结论，但仍不能把它外推成“恢复真实闭式公式”的充分证据。
+
+### 14.3 消融研究: shared、replay 与 explicit commit 的必要性
+
+图 14-3 汇总了三个消融问题的任务级证据:  
+Q1 检验 shared-tensor candidate evaluation 的速度价值;  
+Q2 检验 replay contextual reranking 的质量价值;  
+Q3 检验 explicit commit 相对 re-fit commit 的稳定性价值。
+
+![图 14-3 Feynman 消融中的 Q1/Q2/Q3 证据图](outputs/icbr_benchmark_feynman_reference_paper10_seeds1_20_icbr_ablation/icbr_benchmark_q123_evidence_by_task.png)
+
+*图 14-3. Q1/Q2/Q3 任务级证据图。Q1 为 `icbr_no_shared / icbr_full` 的 symbolic time ratio；Q2 为 `icbr_no_replay - icbr_full` 的 imitation/target MSE 增量；Q3 为 `icbr_refit_commit - icbr_full` 的 imitation/target MSE 增量及 re-fit drift。虚线 `1` 或 `0` 表示与 `icbr_full` 持平。*
+
+表 14-3 将三个问题对应的关键数值并列展示。这里 `q1_symbolic_ratio > 1` 表示 shared-tensor 去掉后更慢；`q2_*_gain > 0` 表示去掉 replay 后更差；`q3_*_gain > 0` 表示用 re-fit commit 替代 explicit commit 后更差。
+
+| Task | `q1_symbolic_ratio` | `q2_imitation_gain` | `q2_target_gain` | `q2_rank_inversion` | `q3_imitation_gain` | `q3_target_gain` | `q3_drift_l2` |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `feynman_I_9_18` | 1.23 | 3.18e-08 | 7.08e-07 | 0.230 | 4.36e-07 | 2.51e-06 | 1.74 |
+| `feynman_I_10_7` | 1.46 | 6.87e-04 | 6.36e-04 | 0.533 | 4.32e-04 | 3.55e-04 | 14.84 |
+| `feynman_I_12_1` | 1.48 | 1.07e-01 | 1.10e-01 | 0.455 | 1.39e-01 | 1.43e-01 | 12.67 |
+| `feynman_I_12_4` | 1.24 | 2.99e-09 | -1.24e-07 | 0.385 | 4.80e-09 | 1.08e-07 | 2.93 |
+| `feynman_I_6_2a` | 0.98 | 5.41e-07 | 9.74e-07 | 0.297 | 7.94e-06 | 9.30e-06 | 3.02 |
+| `feynman_I_34_1` | 1.48 | 2.74e-03 | 5.28e-03 | 0.510 | 4.89e-03 | 2.99e-03 | 15.47 |
+| `feynman_II_6_15a` | 1.42 | -2.35e-05 | -1.28e-04 | 0.344 | 2.27e-03 | 1.02e-03 | 4.96 |
+| `feynman_II_6_15b` | 1.09 | 2.40e-10 | -7.59e-08 | 0.406 | 1.57e-09 | 5.08e-09 | 2.00 |
+| `feynman_II_21_32` | 1.26 | 1.20e-06 | 3.05e-06 | 0.342 | 1.13e-05 | -1.12e-05 | 4.69 |
+| `feynman_II_34_29a` | 1.33 | 1.06e-05 | 5.64e-05 | 0.384 | 2.77e-04 | 4.75e-05 | 2.08 |
+
+从 Q1 看，shared-tensor candidate evaluation 的作用已经可以被视为 Stage 26 中最稳健的模块证据。配对统计上，`icbr_no_shared / icbr_full` 的 symbolic time ratio 总体均值约为 `1.30`，意味着去掉 shared evaluation 后整体 symbolic 时间平均上升约 `29.6%`。  
+更重要的是，这一现象与任务复杂度呈现出明显对应关系: `feynman_I_10_7`、`feynman_I_12_1` 与 `feynman_I_34_1` 的 ratio 分别约为 `1.46x`、`1.48x`、`1.48x`，说明 candidate evaluation 负担越重，共享张量路径的收益越明显。边界情形则出现在 `feynman_I_6_2a`，其 ratio 仅约为 `0.98x`，说明对结构较简单或候选集较小的任务，shared batching 的常数级优势可能被调度开销抵消。
+
+从 Q2 看，replay contextual reranking 的贡献是存在的，但绝非“对所有任务同样有益”。其总体 `replay_rank_inversion_rate` 约为 `0.39`，说明局部 top-1 与 replay top-1 不一致的情形并不罕见；然而真正具有明显质量改善的任务主要是 `feynman_I_10_7`、`feynman_I_12_1` 与 `feynman_I_34_1`。  
+其中 `feynman_I_12_1` 最突出: 去掉 replay 后 imitation 与 target MSE 分别额外上升约 `1.07e-1` 与 `1.10e-1`。相对地，`feynman_I_12_4` 与 `feynman_II_6_15b` 虽然仍有不低的 rank inversion，但 `q2` 增量几乎为零，表明“发生 rank inversion”只是 replay 发挥作用的必要条件，而不是充分条件。  
+更值得注意的异常是 `feynman_II_6_15a`：其 `q2_imitation_gain` 与 `q2_target_gain` 都为负，说明在该任务上 `icbr_no_replay` 略优于 `icbr_full`。因此，论文中应把 replay 写成**任务相关的上下文修正器**，而不是普遍优势模块。
+
+从 Q3 看，explicit commit 的价值主要体现在抑制 re-fit drift。整体上，`icbr_refit_commit - icbr_full` 的 imitation 与 target MSE 增量均值分别约为 `1.08e-2` 与 `1.07e-2`，平均 `commit_param_drift_l2_mean` 约为 `6.81`。  
+`feynman_I_10_7`、`feynman_I_12_1` 与 `feynman_I_34_1` 再次表现出最明显的敏感性，其 drift 分别约为 `14.84`、`12.67`、`15.47`，并伴随清晰的质量退化。边界情况同样存在，例如 `feynman_II_21_32` 的 `q3_target_gain` 略为负值，说明 re-fit commit 并不会在所有指标、所有任务上单调变差。  
+但从总体统计与高复杂度任务的主导趋势看，把 explicit commit 降级为“无关紧要的实现细节”已经缺乏数据支撑。更准确的表述应是: 它是当前 Phase I 中维持 symbolic state 一致性和抑制参数漂移的必要条件。
+
+### 14.4 综合讨论与结论
+
+综合 Stage 24 synthetic 结果与 Stage 26 Feynman 结果，可以将当前 ICBR-KAN 的经验结论收敛为以下四点。
+
+第一，ICBR 在当前证据下最可靠的贡献仍然是**大幅缩短 symbolic fitting 的 CPU wall time**。这一结论不仅在 synthetic tasks 上成立，也在 `10` 个 Feynman reference tasks 上保持稳定，因此足以构成论文中的主 headline result。
+
+第二，shared-tensor candidate evaluation 与 replay contextual reranking 的价值类型并不相同。前者更接近稳定的速度杠杆，后者更接近条件性的质量修正器。把二者混写成“统一提高精度和速度”的单一句子，会掩盖 ICBR 真正的数据支持边界。
+
+第三，explicit commit 的价值已经超出“工程便利性”的层面。虽然它不必被单列为新的算法核心点，但现有消融已显示: 如果把提交过程退回到 re-fit commit，较难任务上的参数漂移与质量退化会明显放大。因此，它应在论文中被写成保证 symbolic state 一致性与结果稳定性的必要接口条件。
+
+第四，Stage 26 也明确暴露了方法的局限性。当前 Feynman 结果只覆盖 `10` 个预选 reference tasks，且仍然依赖固定 `width_mid=[5,2]`、CPU-only 路线与预缓存 teacher；质量指标的显著性远弱于时间指标，`formula_export_success` 也不能替代真实公式恢复判断。  
+因此，后续工作应至少沿四个方向展开:
+
+- 扩展到更多 Feynman tasks 与更广的结构先验，检查当前结论是否仍保持。
+- 对 target 误差与复杂度指标做更严格的统计检验，而不只停留在速度显著性。
+- 针对 `feynman_II_6_15a` 这类 replay 受益不明显甚至反向的任务做案例分析，厘清上下文 rerank 的失效条件。
+- 引入对真实公式恢复质量、表达式复杂度与预算敏感性的补充评估，避免把导出状态成功率误读为公式恢复成功率。
+
+## 15. 风险与应对
 
 ### 风险 1: replay rerank 仍然偏贵
 
@@ -1296,7 +1723,7 @@ ICBR-KAN 直接复用:
 - 候选生成永不刷新 teacher cache
 - replay 只读取当前 work model 输出与教师输出
 
-## 15. 结论
+## 16. 结论
 
 ICBR-KAN 第一版的最终立场是:
 
@@ -1304,6 +1731,7 @@ ICBR-KAN 第一版的最终立场是:
 2. **相对 baseline 的增量应控制在两个核心点内**
 3. **第一核心点是 shared-tensor symbolic candidate evaluation**
 4. **第二核心点是 teacher-replay contextual reranking**
+5. **explicit commit 应作为接口正确性与质量稳定性的必要条件写清楚, 但不把它单列成新的算法核心点**
 
 因此，第一版选择的路线不是:
 
@@ -1314,6 +1742,7 @@ ICBR-KAN 第一版的最终立场是:
 
 - 用更干净、更可批处理的方式生成候选
 - 用更贴近真实目标的方式决定最终提交
+- 用显式 commit 避免再次拟合带来的状态漂移
 
 这一路线同时满足:
 
@@ -1321,3 +1750,11 @@ ICBR-KAN 第一版的最终立场是:
 - 理论链条足够短
 - 相对 baseline 是适量而有效的提升
 - 更有机会产出稳健、可实现、可验证的结果
+
+基于当前实现、Stage 24 synthetic 结果与 Stage 26 Feynman 结果，更稳妥的论文式总结应为:
+
+1. **ICBR-KAN 最强、最稳定的经验优势是 CPU 路线下的显著提速与稳定导出。**
+2. **shared-tensor candidate evaluation 是这一速度优势的主要来源, 但其幅度随任务复杂度而变。**
+3. **replay contextual reranking 的收益是真实存在的, 但主要集中在确实存在局部误选的任务上。**
+4. **explicit commit 的作用不是锦上添花, 而是防止 re-fit drift 破坏最终质量与 symbolic state 一致性。**
+5. **因此, Phase I 最适合被描述为“以 shared candidate evaluation 为主速度支点、以 replay 为条件性质量修正、以 explicit commit 保证接口一致性”的后处理符号拟合方案。**
