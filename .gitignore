@@ -11,6 +11,8 @@ outputs/test_tmp/
 outputs/pytest_tmp_run_01/
 outputs/teacher_cache*/
 outputs/**/teacher_cache/
+outputs/**/_numeric_cache/
+outputs/**/_symbolic_prep_cache/
 
 In-Context-Symbolic-Regression-KAN-main/
 ICBR-KAN/
@@ -26,7 +28,5 @@ _safe_copy_temp*
 
 .claude/
 .vscode/
-
-AGENTS.md
 
 datasets/
