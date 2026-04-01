@@ -1,0 +1,3 @@
+﻿variant,rounds_mean,effective_rounds_mean,total_edges_removed_mean,mean_drop_ratio_mean,max_drop_ratio_mean
+baseline_fastlib,5.0,3.6666666666666665,15.333333333333334,0.033880565435130766,0.08058217672833713
+baseline_icbr_fastlib,5.0,3.6666666666666665,15.333333333333334,0.033880565435130766,0.08058217672833713

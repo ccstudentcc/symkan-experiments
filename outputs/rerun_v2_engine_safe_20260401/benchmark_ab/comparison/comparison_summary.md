@@ -17,9 +17,9 @@
 | baseline_icbr | final_acc | 0.788667 | 0.790700 | 0.009540 | 0.776100 | 0.799200 |
 | baseline_icbr | final_n_edge | 88.333333 | 88.000000 | 0.471405 | 88.000000 | 89.000000 |
 | baseline_icbr | macro_auc | 0.961440 | 0.961336 | 0.000695 | 0.960645 | 0.962338 |
-| baseline_icbr | run_total_wall_time_s | 71.447204 | 72.746447 | 2.354010 | 68.143149 | 73.452016 |
-| baseline_icbr | symbolic_core_seconds | 26.114427 | 26.208229 | 0.224485 | 25.804865 | 26.330188 |
-| baseline_icbr | symbolize_wall_time_s | 68.817573 | 70.056450 | 2.329805 | 65.554109 | 70.842161 |
+| baseline_icbr | run_total_wall_time_s | 73.080290 | 70.895760 | 6.755389 | 66.118129 | 82.226982 |
+| baseline_icbr | symbolic_core_seconds | 22.861778 | 21.150914 | 2.508906 | 21.025254 | 26.409164 |
+| baseline_icbr | symbolize_wall_time_s | 70.118805 | 68.017761 | 6.818590 | 63.018931 | 79.319723 |
 | baseline_icbr | validation_mean_r2 | -0.409281 | -0.366264 | 0.068989 | -0.506627 | -0.354950 |
 
 ## Baseline Pairwise Delta
@@ -29,9 +29,9 @@
 | baseline | baseline_icbr | final_acc | 0.010900 | 0.011400 | 0.004301 | 3 | 0 | 0 |
 | baseline | baseline_icbr | final_n_edge | 0.000000 | 0.000000 | 0.000000 | 0 | 0 | 3 |
 | baseline | baseline_icbr | macro_auc | 0.009853 | 0.009789 | 0.001286 | 3 | 0 | 0 |
-| baseline | baseline_icbr | run_total_wall_time_s | -78.366916 | -31.613950 | 76.867134 | 3 | 0 | 0 |
-| baseline | baseline_icbr | symbolic_core_seconds | -30.445479 | -10.784061 | 27.957359 | 3 | 0 | 0 |
-| baseline | baseline_icbr | symbolize_wall_time_s | -59.182853 | -27.965546 | 61.865334 | 3 | 0 | 0 |
+| baseline | baseline_icbr | run_total_wall_time_s | -76.733830 | -33.464638 | 71.827948 | 3 | 0 | 0 |
+| baseline | baseline_icbr | symbolic_core_seconds | -33.698129 | -15.967035 | 25.230104 | 3 | 0 | 0 |
+| baseline | baseline_icbr | symbolize_wall_time_s | -57.881621 | -30.004235 | 56.825858 | 3 | 0 | 0 |
 | baseline | baseline_icbr | validation_mean_r2 | 0.073474 | 0.097991 | 0.054549 | 2 | 1 | 0 |
 
 ## Shared Numeric Stage Check
@@ -46,7 +46,7 @@
 
 | metric | mean | median | std | min | max |
 |---|---:|---:|---:|---:|---:|
-| symbolic_core_speedup_vs_baseline | 2.174967 | 1.411476 | 1.086859 | 1.401418 | 3.712007 |
+| symbolic_core_speedup_vs_baseline | 2.377025 | 1.759422 | 0.883934 | 1.744587 | 3.627068 |
 | final_teacher_imitation_mse_shift | -0.006009 | -0.006910 | 0.001299 | -0.006946 | -0.004172 |
 | final_target_mse_shift | -0.008364 | -0.008328 | 0.000504 | -0.008998 | -0.007767 |
 | final_target_r2_shift | 0.092972 | 0.092567 | 0.005597 | 0.086328 | 0.100020 |
@@ -57,11 +57,11 @@
 
 | metric | mean | median | std | min | max |
 |---|---:|---:|---:|---:|---:|
-| icbr_candidate_generation_wall_time_s | 0.349936 | 0.338095 | 0.016835 | 0.337968 | 0.373744 |
-| icbr_replay_rerank_wall_time_s | 19.251307 | 19.356854 | 0.189021 | 18.985841 | 19.411226 |
-| icbr_candidate_share_of_core_time | 0.013407 | 0.012895 | 0.000762 | 0.012841 | 0.014483 |
-| icbr_replay_share_of_core_time | 0.737183 | 0.737223 | 0.001157 | 0.735747 | 0.738579 |
-| icbr_other_core_seconds | 6.513185 | 6.513407 | 0.055354 | 6.445280 | 6.580868 |
+| icbr_candidate_generation_wall_time_s | 0.381959 | 0.337081 | 0.078951 | 0.315857 | 0.492938 |
+| icbr_replay_rerank_wall_time_s | 22.344875 | 20.723840 | 2.403518 | 20.568012 | 25.742772 |
+| icbr_candidate_share_of_core_time | 0.016544 | 0.016032 | 0.001566 | 0.014934 | 0.018665 |
+| icbr_replay_share_of_core_time | 0.977609 | 0.978253 | 0.002108 | 0.974767 | 0.979808 |
+| icbr_other_core_seconds | 0.134944 | 0.120161 | 0.027474 | 0.111217 | 0.173454 |
 | icbr_replay_rank_inversion_rate | 0.113253 | 0.101124 | 0.051747 | 0.056818 | 0.181818 |
 
 ## Symbolize Trace Rhythm

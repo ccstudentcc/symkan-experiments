@@ -216,18 +216,31 @@ def test_baseline_icbr_compare_enabled_only_for_expected_pair() -> None:
             "enhanced_n_edge": [10],
             "selected_stage": ["final"],
             "pre_symbolic_n_edge": [9],
+            "symbolic_backend": ["baseline"],
         }
     )
-    frame_map = {"baseline": base_df, "baseline_icbr": base_df.copy()}
+    icbr_df = base_df.copy()
+    icbr_df["symbolic_backend"] = ["icbr"]
+    frame_map = {
+        "baseline": base_df,
+        "baseline_icbr": icbr_df,
+        "baseline_fastlib": base_df.copy(),
+        "baseline_icbr_fastlib": icbr_df.copy(),
+    }
 
     assert _baseline_icbr_compare_enabled(
         baseline_name="baseline",
         variant_names=["baseline_icbr"],
         frame_map=frame_map,
     )
+    assert _baseline_icbr_compare_enabled(
+        baseline_name="baseline_fastlib",
+        variant_names=["baseline_icbr_fastlib"],
+        frame_map=frame_map,
+    )
     assert not _baseline_icbr_compare_enabled(
-        baseline_name="adaptive",
-        variant_names=["baseline_icbr"],
+        baseline_name="baseline",
+        variant_names=["baseline_fastlib"],
         frame_map=frame_map,
     )
 
@@ -248,6 +261,7 @@ def test_baseline_icbr_special_summaries_capture_alignment_and_effects() -> None
             "final_target_mse": [0.30, 0.28],
             "final_target_r2": [0.70, 0.72],
             "formula_export_success": [True, True],
+            "symbolic_backend": ["baseline", "baseline"],
         }
     )
     icbr_df = pd.DataFrame(
@@ -265,6 +279,7 @@ def test_baseline_icbr_special_summaries_capture_alignment_and_effects() -> None
             "final_target_mse": [0.25, 0.22],
             "final_target_r2": [0.75, 0.78],
             "formula_export_success": [True, True],
+            "symbolic_backend": ["icbr", "icbr"],
             "icbr_candidate_generation_wall_time_s": [0.8, 1.0],
             "icbr_replay_rerank_wall_time_s": [0.4, 0.5],
             "icbr_replay_rank_inversion_rate": [0.25, 0.5],
@@ -272,7 +287,12 @@ def test_baseline_icbr_special_summaries_capture_alignment_and_effects() -> None
     )
     trace_seedwise = pd.DataFrame(
         {
-            "variant": ["baseline", "baseline", "baseline_icbr", "baseline_icbr"],
+            "variant": [
+                "baseline_fastlib",
+                "baseline_fastlib",
+                "baseline_icbr_fastlib",
+                "baseline_icbr_fastlib",
+            ],
             "stage_seed": [42, 52, 42, 52],
             "rounds": [2, 3, 2, 3],
             "effective_rounds": [1, 2, 1, 2],
@@ -282,7 +302,13 @@ def test_baseline_icbr_special_summaries_capture_alignment_and_effects() -> None
         }
     )
 
-    shared = _baseline_icbr_shared_check(base_df, icbr_df, trace_seedwise)
+    shared = _baseline_icbr_shared_check(
+        base_df,
+        icbr_df,
+        trace_seedwise,
+        baseline_name="baseline_fastlib",
+        icbr_name="baseline_icbr_fastlib",
+    )
     primary = _baseline_icbr_primary_effect(base_df, icbr_df)
     mechanism = _baseline_icbr_mechanism_summary(icbr_df)
 

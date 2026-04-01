@@ -1,0 +1,127 @@
+{
+  "metrics": {
+    "run_index": 1,
+    "total_runs": 3,
+    "stage_seed": 42,
+    "device": "cpu",
+    "batch_size": 64,
+    "lib_preset": "layered",
+    "numeric_basis": "bspline",
+    "kan_width": [
+      784,
+      16,
+      10
+    ],
+    "enhanced_kan_width": [
+      120,
+      16,
+      10
+    ],
+    "base_acc": 0.833,
+    "base_n_edge": 12704,
+    "selected_input_dim": 120,
+    "enhanced_acc": 0.8072999715805054,
+    "enhanced_n_edge": 105,
+    "selected_stage": "final",
+    "selected_score": 0.6417452238854908,
+    "numeric_cache_hit": true,
+    "cached_stage_total_seconds_ref": 69.1404935,
+    "symbolic_backend": "baseline",
+    "symbolic_prep_cache_hit": true,
+    "cached_symbolic_prep_seconds_ref": 40.8956493,
+    "final_acc": 0.7788000106811523,
+    "final_n_edge": 88,
+    "final_teacher_imitation_mse": 0.005499446336786033,
+    "final_target_mse": 0.03739734296581686,
+    "final_target_r2": 0.5843121166597236,
+    "formula_export_success": true,
+    "effective_target_edges": 90,
+    "effective_input_dim": 58,
+    "valid_expression_count": 10,
+    "expr_complexity_mean": 109.9,
+    "macro_auc": 0.9615420575567312,
+    "validation_mean_r2": -0.5383305731154978,
+    "validation_negative_r2_count": 10,
+    "stage_total_seconds": 0.0,
+    "stage_train_total_seconds": 0.0,
+    "stage_prune_total_seconds": 0.0,
+    "stage_final_finetune_seconds": 0.0,
+    "symbolic_total_seconds": 129.2453653,
+    "symbolic_core_seconds": 129.2453653,
+    "symbolize_wall_time_s": 171.1827399,
+    "post_symbolic_eval_wall_time_s": 4.987521299999997,
+    "run_total_wall_time_s": 176.54786000000001,
+    "run_overhead_wall_time_s": 5.365120100000013,
+    "symbolic_non_core_seconds": 41.9373746,
+    "symbolic_non_core_valid": true,
+    "symbolic_abort_stage": null,
+    "symbolic_abort_reason": null,
+    "symbolic_abort_error_type": null,
+    "symbolic_warning_count": 0,
+    "icbr_candidate_generation_wall_time_s": NaN,
+    "icbr_replay_rerank_wall_time_s": NaN,
+    "icbr_replay_rank_inversion_rate": NaN,
+    "export_wall_time_s": 171.1827399,
+    "pre_symbolic_n_edge": 105,
+    "pre_symbolic_too_dense": false,
+    "stagewise_enabled": true,
+    "stage_guard_mode": "light",
+    "input_compaction_enabled": true,
+    "input_compaction_fallback": false,
+    "input_compaction_reason": null,
+    "input_compaction_error_type": null,
+    "layerwise_finetune_steps": 60,
+    "layerwise_finetune_lr": 0.005,
+    "layerwise_finetune_lamb": 1e-05,
+    "layerwise_use_validation": true,
+    "layerwise_validation_ratio": 0.15,
+    "layerwise_validation_seed": 123,
+    "layerwise_early_stop_patience": 2,
+    "layerwise_early_stop_min_delta": 0.001,
+    "layerwise_eval_interval": 20,
+    "layerwise_validation_n_sample": 300,
+    "output_dir": "D:\\chenpeng\\Documents\\学习\\数学\\毕业论文\\symkan-experiments\\outputs\\rerun_v2_engine_safe_20260401\\benchmark_ab\\baseline_fastlib\\run_01_seed42"
+  },
+  "roc": [
+    {
+      "class": 0,
+      "auc": 0.9937894248608534
+    },
+    {
+      "class": 1,
+      "auc": 0.9914103127927232
+    },
+    {
+      "class": 2,
+      "auc": 0.9424010391815172
+    },
+    {
+      "class": 3,
+      "auc": 0.9473099373341114
+    },
+    {
+      "class": 4,
+      "auc": 0.9606710995298382
+    },
+    {
+      "class": 5,
+      "auc": 0.9442179643973367
+    },
+    {
+      "class": 6,
+      "auc": 0.9742409465639126
+    },
+    {
+      "class": 7,
+      "auc": 0.9610314341548545
+    },
+    {
+      "class": 8,
+      "auc": 0.9453034036738949
+    },
+    {
+      "class": 9,
+      "auc": 0.9550450130782693
+    }
+  ]
+}

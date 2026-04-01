@@ -320,6 +320,8 @@ outputs/benchmark_runs/
 2. `adaptive`：启用验证反馈 + 自适应阈值 + 自适应 lamb/ft。
 3. `adaptive_auto`：在 `adaptive` 上增加阶段早停与 symbolize 自适应剪枝节奏。
 4. `baseline_icbr`：与 `baseline` 共享 numeric stage 和 shared symbolic-prep，只把 `symbolize.symbolic_backend` 切到 `icbr`。
+5. `baseline_fastlib`：与 `baseline` 共享非 `symbolize` 配置，但把函数库扩大到 `FAST_LIB`。
+6. `baseline_icbr_fastlib`：与 `baseline_fastlib` 共享 numeric stage 和 shared symbolic-prep，只把 `symbolize.symbolic_backend` 切到 `icbr`。
 
 ### 6.2 命令模板
 
@@ -341,16 +343,20 @@ python -m scripts.symkanbenchmark `
 # 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/baseline.yaml --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline --quiet
 python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/baseline_icbr.yaml --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr --quiet
+python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/baseline_fastlib.yaml --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_fastlib --quiet
+python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/baseline_icbr_fastlib.yaml --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr_fastlib --quiet
 ```
 
 当前 `baseline_icbr.yaml` 的设计意图是：保持 baseline 数值训练与 shared symbolic-prep 语义不变，只切换 symbolic backend。
+
+`baseline_fastlib.yaml` / `baseline_icbr_fastlib.yaml` 的设计意图是：在不改变 numeric cache key 的前提下扩大符号函数库。因此库覆盖写在 `symbolize.lib`，而不是改 `library` section；这样同一 `benchmark_ab/` 父根下的 rerun 仍可命中既有 `_numeric_cache/` 与 `_symbolic_prep_cache/`。
 
 ### 6.3 配置建议
 
 这一组实验不再推荐通过长 CLI 逐项传参。
 
 1. 变体差异应直接体现在各自的 `AppConfig` YAML 中。
-2. 当前仓库已内置 `configs/benchmark_ab/baseline.yaml`、`adaptive.yaml`、`adaptive_auto.yaml` 与 `baseline_icbr.yaml`。
+2. 当前仓库已内置 `configs/benchmark_ab/baseline.yaml`、`adaptive.yaml`、`adaptive_auto.yaml`、`baseline_icbr.yaml`、`baseline_fastlib.yaml` 与 `baseline_icbr_fastlib.yaml`。
 3. benchmark CLI 主要保留 `--config`、`--output-dir`、`--stagewise-seeds` 和一小组显式白名单覆盖项。
 4. 若对比目标是 ICBR，优先保留独立的 `baseline_icbr.yaml`，不要只在命令行临时覆盖 `--symbolic-backend icbr` 后丢失可追踪配置。
 
@@ -376,6 +382,17 @@ python -m scripts.benchmark_ab_compare `
   --output outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison
 ```
 
+FAST_LIB 对照示例：
+
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
+python -m scripts.benchmark_ab_compare `
+  --root outputs/rerun_v2_engine_safe_20260401/benchmark_ab `
+  --baseline baseline_fastlib `
+  --variants baseline_icbr_fastlib `
+  --output outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib
+```
+
 通用输出：
 
 - `variant_summary.csv`
@@ -385,20 +402,20 @@ python -m scripts.benchmark_ab_compare `
 - `trace_summary.csv`
 - `comparison_summary.md`
 
-当 compare 对精确为 `baseline` vs `baseline_icbr` 时，还会额外生成：
+当 compare 对为单个 baseline-backend vs 单个 icbr-backend pair 时，还会额外生成：
 
 - `baseline_icbr_shared_check.csv`
 - `baseline_icbr_primary_effect.csv`
 - `baseline_icbr_mechanism_summary.csv`
 
-### 6.5 当前主引用结果：baseline vs baseline_icbr（2026-04-01）
+### 6.5 当前主引用结果：baseline_fastlib vs baseline_icbr_fastlib（2026-04-01）
 
-当前 ICBR 接入后的主引用结果位于：
+当前更能体现 ICBR 速度潜力的主引用结果位于：
 
-- [outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/comparison_summary.md](../outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/comparison_summary.md)
-- [outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/baseline_icbr_shared_check.csv](../outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/baseline_icbr_shared_check.csv)
-- [outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/baseline_icbr_primary_effect.csv](../outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/baseline_icbr_primary_effect.csv)
-- [outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/baseline_icbr_mechanism_summary.csv](../outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/baseline_icbr_mechanism_summary.csv)
+- [outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib/comparison_summary.md](../outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib/comparison_summary.md)
+- [outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib/baseline_icbr_shared_check.csv](../outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib/baseline_icbr_shared_check.csv)
+- [outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib/baseline_icbr_primary_effect.csv](../outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib/baseline_icbr_primary_effect.csv)
+- [outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib/baseline_icbr_mechanism_summary.csv](../outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib/baseline_icbr_mechanism_summary.csv)
 
 优先关注以下事实：
 
@@ -406,19 +423,22 @@ python -m scripts.benchmark_ab_compare `
    - `shared_numeric_aligned=True`
    - `trace_aligned=True`
    - `shared_symbolic_prep_aligned=True`
-2. `trace_summary.csv` 中 `baseline` 与 `baseline_icbr` 的 `Symbolize Trace Rhythm` 完全一致。
+2. `trace_summary.csv` 中 `baseline_fastlib` 与 `baseline_icbr_fastlib` 的 `Symbolize Trace Rhythm` 完全一致。
 3. `baseline_icbr_primary_effect.csv` 报告：
-   - mean `symbolic_core_speedup_vs_baseline = 2.174967`
-   - mean `final_teacher_imitation_mse_shift = -0.006009`
-   - mean `final_target_mse_shift = -0.008364`
-   - mean `final_target_r2_shift = 0.092972`
+   - mean `symbolic_core_speedup_vs_baseline = 6.092446`
+   - mean `final_teacher_imitation_mse_shift = 0.000062`
+   - mean `final_target_mse_shift = -0.000023`
+   - mean `final_target_r2_shift = 0.000258`
 4. `variant_summary.csv` 中两边 `final_n_edge` 均值完全一致，说明 ICBR 不再恢复被剪掉的边。
+5. 两侧 `numeric_cache_hit=True` 且 `symbolic_prep_cache_hit=True`，说明本轮 FAST_LIB 扩库并未破坏既有 cache reuse 边界。
 
 当前报告建议：
 
 1. backend compare 优先使用 `symbolic_core_seconds`，而不是单独使用 `symbolize_wall_time_s`。
 2. 若要证明“比较只发生在后端”，必须先引用 `baseline_icbr_shared_check.csv`。
 3. 若要解释 ICBR 为什么更快，应进一步引用 mechanism summary，而不是只引用最终 wall-time。
+4. 若要强调“最保守、最小库”的 backend-only 对照，可继续引用 `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/`；该切片当前 `symbolic_core_speedup_vs_baseline` 约为 `2.377025`，机制表显示 replay rerank 占核心时间约 `97.76%`。
+5. 若要强调更大的候选库下 ICBR 的速度潜力，应优先引用 `comparison_fastlib/`；该切片当前 `symbolic_core_speedup_vs_baseline` 约为 `6.092446`，机制表显示 replay rerank 占核心时间约 `96.26%`。
 
 ### 6.6 历史参考结果
 
@@ -437,12 +457,12 @@ python -m scripts.benchmark_ab_compare `
 2. 中位数差值。
 3. 相对 baseline 的胜负计数（win/lose/tie）。
 4. 运行代价指标（`symbolic_core_seconds`、`symbolize_wall_time_s`、`run_total_wall_time_s`）与结构指标（`final_n_edge`）。
-5. 若 compare 为 `baseline` vs `baseline_icbr`，还应给出 shared-state 检查和机制拆解。
+5. 若 compare 为单个 baseline-backend vs 单个 icbr-backend pair，还应给出 shared-state 检查和机制拆解。
 
 正文可采用以下较为保守的表述方式：
 
-1. “在当前 `n=3` seeds 下，baseline 与 baseline_icbr 共享 numeric stage 与 shared symbolic-prep，因此该对照可解释为 backend-only 差异。”
-2. “ICBR 在不改变 `final_n_edge` 的前提下显著降低了 `symbolic_core_seconds`，当前样本下未观察到精度退化。”
+1. “在当前 `n=3` seeds 下，baseline-backend 与 icbr-backend 变体共享 numeric stage 与 shared symbolic-prep，因此该对照可解释为 backend-only 差异。”
+2. “ICBR 在不改变 `final_n_edge` 的前提下显著降低了 `symbolic_core_seconds`，FAST_LIB 切片下速度优势更强，而质量差异接近于零。”
 3. “后续若需强化统计结论，应扩展 seed 样本并补充非参数检验。”
 
 ## 8. 与总文档统一口径（2026-04）
@@ -452,4 +472,4 @@ python -m scripts.benchmark_ab_compare `
 1. **CLI 默认值**：指脚本当前保留的调度参数与少量显式覆盖项默认值。
 2. **项目配置**：指基于实验结论所采用的 `AppConfig` 组合（见 [symkan_usage.md](symkan_usage.md) 与 [design.md](design.md)）。
 3. **默认 symbolic backend**：仍指 `baseline`，`icbr` 仅作为显式 opt-in backend。
-4. **backend compare 主引用**：当前指 `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/` 及其专用 compare 产物。
+4. **backend compare 主引用**：当前优先指 `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib/` 及其专用 compare 产物；`comparison/` 保留为较保守的 layered 库参考切片。

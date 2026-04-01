@@ -238,7 +238,7 @@ python -m scripts.symkanbenchmark `
   --quiet
 ```
 
-### 5.2 baseline vs baseline_icbr 后端对照
+### 5.2 baseline-family vs baseline_icbr-family 后端对照
 
 若本轮目标是验证 ICBR 仅改变符号拟合后端，建议额外运行：
 
@@ -259,6 +259,28 @@ python -m scripts.symkanbenchmark `
   --stagewise-seeds 42,52,62 `
   --config configs/benchmark_ab/baseline_icbr.yaml `
   --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr `
+  --quiet
+```
+
+若本轮希望验证更大函数库下的速度表现，继续运行：
+
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
+python -m scripts.symkanbenchmark `
+  --tasks full `
+  --stagewise-seeds 42,52,62 `
+  --config configs/benchmark_ab/baseline_fastlib.yaml `
+  --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_fastlib `
+  --quiet
+```
+
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
+python -m scripts.symkanbenchmark `
+  --tasks full `
+  --stagewise-seeds 42,52,62 `
+  --config configs/benchmark_ab/baseline_icbr_fastlib.yaml `
+  --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr_fastlib `
   --quiet
 ```
 
@@ -284,6 +306,17 @@ python -m scripts.benchmark_ab_compare `
   --output outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison
 ```
 
+若本轮是 FAST_LIB 对照，则改为：
+
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
+python -m scripts.benchmark_ab_compare `
+  --root outputs/rerun_v2_engine_safe_20260401/benchmark_ab `
+  --baseline baseline_fastlib `
+  --variants baseline_icbr_fastlib `
+  --output outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib
+```
+
 ### 5.4 预期生成的文件
 
 三组实验各自会生成与 Step 1 相同结构的 benchmark 结果：
@@ -301,7 +334,7 @@ python -m scripts.benchmark_ab_compare `
 - `trace_summary.csv`
 - `comparison_summary.md`
 
-若 compare 对是 `baseline` vs `baseline_icbr`，则还应额外生成：
+若 compare 对是单个 baseline-backend vs 单个 icbr-backend pair，则还应额外生成：
 
 - `baseline_icbr_shared_check.csv`
 - `baseline_icbr_primary_effect.csv`
@@ -449,7 +482,19 @@ outputs/rerun/
     benchmark_ab/
       baseline/
       baseline_icbr/
+      baseline_fastlib/
+      baseline_icbr_fastlib/
       comparison/
+        variant_summary.csv
+        pairwise_delta_summary.csv
+        seedwise_delta.csv
+        trace_seedwise.csv
+        trace_summary.csv
+        comparison_summary.md
+        baseline_icbr_shared_check.csv
+        baseline_icbr_primary_effect.csv
+        baseline_icbr_mechanism_summary.csv
+      comparison_fastlib/
         variant_summary.csv
         pairwise_delta_summary.csv
         seedwise_delta.csv
@@ -489,9 +534,9 @@ outputs/rerun/
    - `symbolic_abort_reason`
    - `input_compaction_fallback`
 4. `outputs/rerun/benchmark_ab/comparison/comparison_summary.md` 已生成，表明通用 A/B 汇总链路执行成功。
-5. 若本轮做了 ICBR 后端对照，还应确认 `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/` 中：
+5. 若本轮做了 ICBR 后端对照，还应确认对应 compare 目录（如 `comparison/` 或 `comparison_fastlib/`）中：
    - `baseline_icbr_shared_check.csv` 已生成，且三条 seed 都为 `shared_symbolic_prep_aligned=True`
-   - `trace_summary.csv` 中 `baseline` 与 `baseline_icbr` 的节奏一致
+   - `trace_summary.csv` 中 baseline-backend 与 icbr-backend 变体的节奏一致
    - `baseline_icbr_primary_effect.csv` 与 `baseline_icbr_mechanism_summary.csv` 已生成
 6. `outputs/rerun/benchmark_ablation/layerwiseft_analysis/` 与 `layerwiseft_improved_analysis/` 均有 CSV 输出，表明专项分析链路执行成功。
 

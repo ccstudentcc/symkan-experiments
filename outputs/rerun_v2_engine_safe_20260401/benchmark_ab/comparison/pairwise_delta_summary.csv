@@ -1,8 +1,8 @@
 ﻿baseline,variant,metric,mean_delta,median_delta,std_delta,win_count,lose_count,tie_count
 baseline,baseline_icbr,final_acc,0.010900020599365234,0.011400043964385986,0.004301169617881486,3,0,0
 baseline,baseline_icbr,macro_auc,0.009853128927134192,0.009788883352249589,0.001286116916649298,3,0,0
-baseline,baseline_icbr,symbolic_core_seconds,-30.445479166666686,-10.784060500000024,27.957359128043958,3,0,0
-baseline,baseline_icbr,symbolize_wall_time_s,-59.18285276666669,-27.965546000000046,61.865334499296594,3,0,0
+baseline,baseline_icbr,symbolic_core_seconds,-33.69812880000003,-15.967034900000016,25.230104307218078,3,0,0
+baseline,baseline_icbr,symbolize_wall_time_s,-57.88162136666668,-30.004235300000033,56.8258581653582,3,0,0
 baseline,baseline_icbr,validation_mean_r2,0.07347423377398439,0.09799069900361784,0.054549296779122534,2,1,0
-baseline,baseline_icbr,run_total_wall_time_s,-78.36691626666668,-31.613950200000005,76.86713424114558,3,0,0
+baseline,baseline_icbr,run_total_wall_time_s,-76.73383016666668,-33.46463779999999,71.82794830889799,3,0,0
 baseline,baseline_icbr,final_n_edge,0.0,0.0,0.0,0,0,3

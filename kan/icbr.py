@@ -517,6 +517,7 @@ def replay_rerank_edge_candidates(
     input_idx: int,
     output_idx: int,
     shortlist: list[Mapping[str, object]],
+    teacher_output: torch.Tensor | None = None,
     singularity_avoiding: bool = False,
     y_th: float = 10.0,
 ) -> dict[str, object]:
@@ -531,6 +532,9 @@ def replay_rerank_edge_candidates(
         input_idx: Input index of the edge being replayed.
         output_idx: Output index of the edge being replayed.
         shortlist: Candidate payloads, usually ranked by local edge score.
+        teacher_output: Optional precomputed teacher output on
+            ``calibration_input``. When provided, replay reuses it instead of
+            re-running the teacher forward pass for every edge.
         singularity_avoiding: Forward-pass flag forwarded to both models.
         y_th: Singularity guard threshold forwarded to both models.
 
@@ -556,10 +560,13 @@ def replay_rerank_edge_candidates(
     teacher_state_id_before = getattr(teacher_model, "state_id", None)
     edge_snapshot = _snapshot_symbolic_edge_state(work_model, layer_idx, input_idx, output_idx)
 
-    with torch.no_grad():
-        teacher_output = teacher_model(calibration_input, singularity_avoiding=singularity_avoiding, y_th=y_th)
-        if isinstance(teacher_output, tuple):
-            teacher_output = teacher_output[0]
+    if teacher_output is None:
+        with torch.no_grad():
+            teacher_output = teacher_model(calibration_input, singularity_avoiding=singularity_avoiding, y_th=y_th)
+            if isinstance(teacher_output, tuple):
+                teacher_output = teacher_output[0]
+            teacher_output = teacher_output.detach()
+    else:
         teacher_output = teacher_output.detach()
 
     ranking: list[dict[str, object]] = []
@@ -870,7 +877,7 @@ def _run_auto_symbolic_icbr_with_models(
     Raises:
         ValueError: If invalid mode names are supplied or both model arguments
             refer to the same object.
-        RuntimeError: If the final model is not fully symbolic.
+        RuntimeError: If active numeric edges remain after conversion.
     """
     if teacher_model is work_model:
         raise ValueError("teacher_model and work_model must be different objects")
@@ -894,7 +901,10 @@ def _run_auto_symbolic_icbr_with_models(
     symbolic_start = perf_counter()
 
     with torch.no_grad():
-        teacher_model(calibration_input)
+        teacher_output = teacher_model(calibration_input)
+        if isinstance(teacher_output, tuple):
+            teacher_output = teacher_output[0]
+        teacher_output = teacher_output.detach()
 
     depth = len(work_model.width_in) - 1
     for layer_idx in range(depth):
@@ -970,6 +980,7 @@ def _run_auto_symbolic_icbr_with_models(
                         input_idx=input_idx,
                         output_idx=output_idx,
                         shortlist=shortlist,
+                        teacher_output=teacher_output,
                     )
                     replay_rerank_wall_time_s += float(rerank["replay_rerank_wall_time_s"])
                     best = rerank["best_candidate"]
@@ -1058,7 +1069,9 @@ def auto_symbolic_icbr(
         verbose: Verbosity level for progress prints.
 
     Returns:
-        A new fully symbolic work model. The input ``model`` is left unchanged.
+        A new export-complete work model. All active numeric edges are
+        converted to symbolic form, while already pruned/inactive edges remain
+        inactive. The input ``model`` is left unchanged.
 
     Raises:
         ValueError: If no calibration input is available or the library is empty.

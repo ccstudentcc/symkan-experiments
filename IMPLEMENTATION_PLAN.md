@@ -99,11 +99,11 @@ Integrate ICBR into `symkan` as an opt-in symbolic backend, keep baseline symbol
 1. `baseline_icbr_shared_check.csv` reports `shared_numeric_aligned=True`、`trace_aligned=True` 与 `shared_symbolic_prep_aligned=True` for seeds `42/52/62`。
 2. `trace_summary.csv` shows identical `Symbolize Trace Rhythm` for `baseline` and `baseline_icbr`。
 3. `baseline_icbr_primary_effect.csv` reports:
-   - `symbolic_core_speedup_vs_baseline = 2.174967`
+   - `symbolic_core_speedup_vs_baseline = 2.377025`
    - `final_teacher_imitation_mse_shift = -0.006009`
    - `final_target_mse_shift = -0.008364`
    - `final_target_r2_shift = 0.092972`
-4. `baseline_icbr_mechanism_summary.csv` shows candidate generation is a small share of core time, while replay rerank dominates the remaining ICBR-specific cost.
+4. `baseline_icbr_mechanism_summary.csv` shows candidate generation is about `1.65%` of core time, while replay rerank rises to about `97.76%` after teacher-output reuse.
 
 ## Generated Artifacts
 
@@ -126,3 +126,29 @@ The final comparison set under `outputs/rerun_v2_engine_safe_20260401/benchmark_
 - Cache-hit runs keep reference timings in `cached_stage_total_seconds_ref` and `cached_symbolic_prep_seconds_ref` so symbolization-only runtime metrics are not polluted by shared training/prep cost.
 - On the regenerated `2026-04-01` benchmark slice, baseline and baseline_icbr now share identical pre-symbolic metrics and identical `Symbolize Trace Rhythm` for all requested seeds.
 - Current conclusion phrasing should prefer the specialized compare tables over the generic markdown auto-conclusion, because the specialized tables encode the fairness boundary explicitly.
+
+## Stage 7: FAST_LIB Backend Compare Follow-Up
+
+- Goal: Re-run the backend-only compare under a wider symbolic library while still reusing the existing numeric/shared-prep cache boundary.
+- Success criteria:
+  - `configs/benchmark_ab/baseline_fastlib.yaml` and `configs/benchmark_ab/baseline_icbr_fastlib.yaml` keep non-`symbolize` sections identical to `baseline.yaml`.
+  - FAST_LIB overrides are encoded inside `symbolize.lib`, so the rerun continues to hit the existing `_numeric_cache/` and `_symbolic_prep_cache/`.
+  - `scripts.benchmark_ab_compare` emits the specialized `baseline_icbr_*` summaries for the new single baseline-backend vs icbr-backend pair.
+  - `comparison_fastlib/baseline_icbr_shared_check.csv` reports `shared_symbolic_prep_aligned=True` for all requested seeds.
+- Validation:
+  - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m pytest tests\test_app_config.py tests\test_benchmark_ab_compare.py`
+  - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/baseline_fastlib.yaml --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_fastlib --quiet`
+  - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/baseline_icbr_fastlib.yaml --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr_fastlib --quiet`
+  - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.benchmark_ab_compare --root outputs/rerun_v2_engine_safe_20260401/benchmark_ab --baseline baseline_fastlib --variants baseline_icbr_fastlib --output outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib`
+- Status: Complete
+
+## Observed Evidence (FAST_LIB, 2026-04-01)
+
+1. `comparison_fastlib/baseline_icbr_shared_check.csv` reports `shared_numeric_aligned=True`、`trace_aligned=True` 与 `shared_symbolic_prep_aligned=True` for seeds `42/52/62`.
+2. Both `baseline_fastlib` and `baseline_icbr_fastlib` report `numeric_cache_hit=True` and `symbolic_prep_cache_hit=True` for all requested seeds.
+3. `comparison_fastlib/baseline_icbr_primary_effect.csv` reports:
+   - `symbolic_core_speedup_vs_baseline = 6.092446`
+   - `final_teacher_imitation_mse_shift = 0.000062`
+   - `final_target_mse_shift = -0.000023`
+   - `final_target_r2_shift = 0.000258`
+4. `comparison_fastlib/baseline_icbr_mechanism_summary.csv` shows replay rerank still dominates the remaining ICBR core time even after widening the candidate library, now at about `96.26%` of core time.

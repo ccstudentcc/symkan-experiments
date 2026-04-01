@@ -2,7 +2,7 @@
 
 ## 1. 目标
 
-本规格定义 `symkan` 当前工程版中 ICBR 接入后的正式行为边界。目标不是引入新的训练器，而是在保持 baseline 默认行为不变的前提下，为符号拟合阶段增加一个可显式选择的 `icbr` 后端，并保证 `baseline` 与 `baseline_icbr` 的比较只反映符号拟合差异。
+本规格定义 `symkan` 当前工程版中 ICBR 接入后的正式行为边界。目标不是引入新的训练器，而是在保持 baseline 默认行为不变的前提下，为符号拟合阶段增加一个可显式选择的 `icbr` 后端，并保证任一单个 baseline-backend vs icbr-backend compare 只反映符号拟合差异。
 
 ## 2. 范围
 
@@ -11,7 +11,7 @@
 - `SymbolizeConfig` 支持 `symbolic_backend`，默认值为 `baseline`。
 - `scripts.symkanbenchmark` 支持通过 YAML 或 CLI 显式切换 `symbolic_backend`。
 - `symkan.symbolic.pipeline` 显式拆分为共享 symbolic-prep 与 backend-specific completion 两段。
-- `scripts.benchmark_ab_compare` 在精确比较 `baseline` vs `baseline_icbr` 时，生成专用 compare 产物。
+- `scripts.benchmark_ab_compare` 在单个 baseline-backend vs icbr-backend compare 时，生成专用 compare 产物。
 
 ### 2.2 Out of Scope
 
@@ -26,7 +26,7 @@
 
 1. 若未显式指定 `symbolic_backend`，系统必须使用 baseline 符号拟合后端。
 2. 现有 notebook、CLI 和库层入口 `symbolize_pipeline(...)` 的调用方式必须保持兼容。
-3. `baseline.yaml` 仍是当前默认 A/B 基准口径；`baseline_icbr.yaml` 仅在符号拟合后端上切到 `icbr`。
+3. `baseline.yaml` 仍是当前默认 A/B 基准口径；`baseline_icbr.yaml` 与 `baseline_icbr_fastlib.yaml` 仅在符号后端或符号函数库相关设置上偏离对应 baseline 变体。
 
 ### 3.2 Shared-State Fairness
 
@@ -42,6 +42,7 @@
 - numeric cache key 必须排除 `symbolize` 配置，使 backend-only 变体共享同一数值模型。
 - symbolic-prep cache key 必须绑定 numeric cache identity 与剪枝/输入压缩/pre-symbolic fit 相关设置，但不得被 backend-only 设置污染。
 - symbolization-only 指标不得把共享训练和共享 symbolic-prep 的参考时间记成当前 run 的实时成本。
+- 若只想扩大函数库但继续复用 numeric cache，应把库覆盖编码在 `symbolize.lib` / `symbolize.lib_hidden` / `symbolize.lib_output`，而不是修改非 `symbolize` section。
 
 ### 3.3 Metric Hygiene
 
@@ -84,7 +85,7 @@
    - `trace_seedwise.csv`
    - `trace_summary.csv`
    - `comparison_summary.md`
-2. 当且仅当比较对为 `baseline` vs `baseline_icbr` 且关键字段齐全时，额外生成：
+2. 当且仅当比较对为单个 baseline-backend vs 单个 icbr-backend pair 且关键字段齐全时，额外生成：
    - `baseline_icbr_shared_check.csv`
    - `baseline_icbr_primary_effect.csv`
    - `baseline_icbr_mechanism_summary.csv`
@@ -104,15 +105,20 @@
 3. `formula_export_success_rate=1.0` 仅表示导出链路成功，不等价于恢复了真实闭式公式。
 4. 当前 `n=3` seeds 的结果具备工程判断意义，但不应表述为充分统计显著性结论。
 
-## 5. 2026-04-01 验收基线
+## 5. 2026-04-01 验收切片
 
-本规格当前对应的验收产物目录为：
+本规格当前对应两组可引用验收产物目录：
 
 - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline/`
 - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr/`
 - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/`
+- `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_fastlib/`
+- `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr_fastlib/`
+- `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib/`
 
-当前已完成的验收事实如下：
+### 5.1 Layered 库对照
+
+当前已完成的 layered 库验收事实如下：
 
 1. `baseline_icbr_shared_check.csv` 对 `42/52/62` 三个 seed 均报告：
    - `shared_numeric_aligned=True`
@@ -120,12 +126,28 @@
    - `shared_symbolic_prep_aligned=True`
 2. `baseline` 与 `baseline_icbr` 的 `final_n_edge` 均值一致，说明 ICBR 不再恢复已剪掉的边。
 3. `baseline_icbr_primary_effect.csv` 报告：
-   - `symbolic_core_speedup_vs_baseline` 均值约 `2.174967`
+   - `symbolic_core_speedup_vs_baseline` 均值约 `2.377025`
    - `final_teacher_imitation_mse_shift < 0`
    - `final_target_mse_shift < 0`
    - `final_target_r2_shift > 0`
-4. `baseline_icbr_mechanism_summary.csv` 与 markdown summary 已生成，说明 compare-only 机制完整落地。
+4. `baseline_icbr_mechanism_summary.csv` 与 markdown summary 已生成；其中 candidate generation 占核心时间约 `1.65%`，replay rerank 占比约 `97.76%`。
 5. baseline 与 icbr 两侧公式导出成功率当前均为 `1.0`。
+
+### 5.2 FAST_LIB 对照
+
+当前已完成的 FAST_LIB 验收事实如下：
+
+1. `comparison_fastlib/baseline_icbr_shared_check.csv` 对 `42/52/62` 三个 seed 均报告：
+   - `shared_numeric_aligned=True`
+   - `trace_aligned=True`
+   - `shared_symbolic_prep_aligned=True`
+2. `baseline_fastlib` 与 `baseline_icbr_fastlib` 的 `numeric_cache_hit=True`、`symbolic_prep_cache_hit=True`，说明本轮库扩展仍复用了既有 numeric/shared-prep 缓存。
+3. `comparison_fastlib/variant_summary.csv` 报告两侧 `final_n_edge` 均值同为 `88.333333`。
+4. `comparison_fastlib/baseline_icbr_primary_effect.csv` 报告：
+   - `symbolic_core_speedup_vs_baseline` 均值约 `6.092446`
+   - `final_target_mse_shift < 0`
+   - `final_target_r2_shift > 0`
+5. `comparison_fastlib/baseline_icbr_mechanism_summary.csv` 报告 candidate generation 占核心时间约 `3.42%`，replay rerank 占比约 `96.26%`。
 
 ## 6. 失效条件
 

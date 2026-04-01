@@ -19,7 +19,7 @@
 - [ ] 主要 CLI 入口可用（`python -m scripts.symkanbenchmark --help`、`python -m scripts.ablation_runner --help`）。
 - [ ] 工程版主结论有归档支撑（`engineering_rerun_report.md` 与引用目录一致）。
 - [ ] 历史版与工程版口径已拆分（`engineering_version_rerun_note.md` 可追踪）。
-- [ ] 若本轮主引用结果来自 `baseline` vs `baseline_icbr`，则专用 compare 产物完整，且 `shared_symbolic_prep_aligned=True`、trace 节奏一致。
+- [ ] 若本轮主引用结果来自单个 baseline-backend vs icbr-backend compare，则专用 compare 产物完整，且 `shared_symbolic_prep_aligned=True`、trace 节奏一致。
 
 ## 3. 文档与口径收口（按矩阵执行）
 

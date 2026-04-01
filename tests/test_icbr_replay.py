@@ -174,6 +174,16 @@ class _ToyTeacherModel:
         return (x[:, 0] ** 2).unsqueeze(1)
 
 
+class _CountingToyTeacherModel(_ToyTeacherModel):
+    def __init__(self) -> None:
+        super().__init__()
+        self.call_count = 0
+
+    def __call__(self, x: torch.Tensor, singularity_avoiding: bool = False, y_th: float = 10.0) -> torch.Tensor:
+        self.call_count += 1
+        return super().__call__(x, singularity_avoiding=singularity_avoiding, y_th=y_th)
+
+
 def test_replay_rerank_can_disagree_with_local_r2_top1() -> None:
     work_model = _ToyWorkModel()
     teacher_model = _ToyTeacherModel()
@@ -199,3 +209,29 @@ def test_replay_rerank_can_disagree_with_local_r2_top1() -> None:
     assert work_model.symbolic_fun[0].funs_name[0][0] == "0"
     assert work_model.act_fun[0].mask[0, 0].item() == 1.0
     assert work_model.symbolic_fun[0].mask[0, 0].item() == 0.0
+
+
+def test_replay_rerank_reuses_precomputed_teacher_output_when_provided() -> None:
+    work_model = _ToyWorkModel()
+    teacher_model = _CountingToyTeacherModel()
+    calibration_input = torch.linspace(-1.0, 1.0, steps=21).unsqueeze(1)
+    cached_teacher_output = (calibration_input[:, 0] ** 2).unsqueeze(1)
+
+    shortlist = [
+        {"fun_name": "x", "params": torch.tensor([1.0, 0.0, 1.0, 0.0]), "r2": 0.99, "complexity": 1.0},
+        {"fun_name": "x^2", "params": torch.tensor([1.0, 0.0, 1.0, 0.0]), "r2": 0.92, "complexity": 2.0},
+    ]
+
+    result = replay_rerank_edge_candidates(
+        work_model,
+        teacher_model,
+        calibration_input,
+        layer_idx=0,
+        input_idx=0,
+        output_idx=0,
+        shortlist=shortlist,
+        teacher_output=cached_teacher_output,
+    )
+
+    assert teacher_model.call_count == 0
+    assert result["best_candidate"]["fun_name"] == "x^2"

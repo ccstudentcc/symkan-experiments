@@ -303,8 +303,12 @@ def _baseline_icbr_compare_enabled(
     variant_names: List[str],
     frame_map: Dict[str, pd.DataFrame],
 ) -> bool:
-    required_variant = "baseline_icbr"
-    if baseline_name != "baseline" or variant_names != [required_variant]:
+    if len(variant_names) != 1:
+        return False
+    variant_name = variant_names[0]
+    baseline_df = frame_map.get(baseline_name)
+    variant_df = frame_map.get(variant_name)
+    if baseline_df is None or variant_df is None:
         return False
     required_columns = {
         "symbolic_core_seconds",
@@ -317,8 +321,25 @@ def _baseline_icbr_compare_enabled(
         "enhanced_n_edge",
         "selected_stage",
         "pre_symbolic_n_edge",
+        "symbolic_backend",
     }
-    return all(required_columns.issubset(set(frame.columns)) for frame in frame_map.values())
+    if not required_columns.issubset(set(baseline_df.columns)) or not required_columns.issubset(set(variant_df.columns)):
+        return False
+
+    def _collect_backends(frame: pd.DataFrame) -> set[str]:
+        values = frame["symbolic_backend"].dropna().tolist()
+        normalized = {str(value).strip().lower() for value in values}
+        aliases = {
+            "default": "baseline",
+            "fast_symbolic": "baseline",
+            "fast": "baseline",
+            "layered": "baseline",
+            "layerwise": "baseline",
+            "icbr_full": "icbr",
+        }
+        return {aliases.get(value, value) for value in normalized if value}
+
+    return _collect_backends(baseline_df) == {"baseline"} and _collect_backends(variant_df) == {"icbr"}
 
 
 def _values_match(a, b) -> bool:
@@ -336,6 +357,9 @@ def _baseline_icbr_shared_check(
     base_df: pd.DataFrame,
     icbr_df: pd.DataFrame,
     trace_seedwise: pd.DataFrame,
+    *,
+    baseline_name: str,
+    icbr_name: str,
 ) -> pd.DataFrame:
     _ensure_analysis_deps()
     shared_fields = [
@@ -345,12 +369,12 @@ def _baseline_icbr_shared_check(
         "selected_stage",
         "pre_symbolic_n_edge",
     ]
-    base = _dedupe_stage_seed(base_df, source_label="baseline_icbr shared baseline").set_index("stage_seed")
-    cur = _dedupe_stage_seed(icbr_df, source_label="baseline_icbr shared icbr").set_index("stage_seed")
+    base = _dedupe_stage_seed(base_df, source_label=f"baseline_icbr shared {baseline_name}").set_index("stage_seed")
+    cur = _dedupe_stage_seed(icbr_df, source_label=f"baseline_icbr shared {icbr_name}").set_index("stage_seed")
     merged = base.join(cur, lsuffix="_base", rsuffix="_icbr", how="inner")
 
-    trace_base = trace_seedwise[trace_seedwise["variant"] == "baseline"].set_index("stage_seed")
-    trace_icbr = trace_seedwise[trace_seedwise["variant"] == "baseline_icbr"].set_index("stage_seed")
+    trace_base = trace_seedwise[trace_seedwise["variant"] == baseline_name].set_index("stage_seed")
+    trace_icbr = trace_seedwise[trace_seedwise["variant"] == icbr_name].set_index("stage_seed")
     trace_merged = trace_base.join(trace_icbr, lsuffix="_base", rsuffix="_icbr", how="inner")
 
     rows = []
@@ -546,13 +570,16 @@ def main() -> None:
         variant_names=variant_names,
         frame_map=frame_map,
     ):
+        icbr_name = variant_names[0]
         baseline_icbr_shared = _baseline_icbr_shared_check(
             baseline_df,
-            variant_dfs["baseline_icbr"],
+            variant_dfs[icbr_name],
             trace_seedwise,
+            baseline_name=baseline_name,
+            icbr_name=icbr_name,
         )
-        baseline_icbr_primary = _baseline_icbr_primary_effect(baseline_df, variant_dfs["baseline_icbr"])
-        baseline_icbr_mechanism = _baseline_icbr_mechanism_summary(variant_dfs["baseline_icbr"])
+        baseline_icbr_primary = _baseline_icbr_primary_effect(baseline_df, variant_dfs[icbr_name])
+        baseline_icbr_mechanism = _baseline_icbr_mechanism_summary(variant_dfs[icbr_name])
         baseline_icbr_shared.to_csv(
             out_dir / "baseline_icbr_shared_check.csv",
             index=False,

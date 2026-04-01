@@ -48,7 +48,7 @@
   - `_numeric_cache/`：缓存数值训练后的共享 KAN 状态，key 明确排除 `symbolize` 配置，因此 backend-only 变体可以复用同一数值模型。
   - `_symbolic_prep_cache/`：缓存 shared symbolic-prep 之后的 prepared bundle，key 绑定 numeric cache identity 与剪枝/输入压缩/pre-symbolic fit 相关设置，但不绑定 backend-specific symbolic completion 细节。
 - `scripts/benchmark_ab_compare.py`
-  A/B 结果汇总器。默认仍生成通用 compare 产物；当比较对精确为 `baseline` vs `baseline_icbr` 时，会额外生成：
+  A/B 结果汇总器。默认仍生成通用 compare 产物；当比较对为单个 baseline-backend vs 单个 icbr-backend pair 时，会额外生成：
   - `baseline_icbr_shared_check.csv`
   - `baseline_icbr_primary_effect.csv`
   - `baseline_icbr_mechanism_summary.csv`
@@ -92,6 +92,8 @@
 - 结构化结果对象或结果字典
 
 当前 `baseline` 与 `baseline_icbr` 的公平性边界是：数值训练和 shared symbolic-prep 必须对齐，后端差异只能从 backend-specific symbolic completion 开始出现。
+
+对仅扩大函数库而不改变训练语义的 compare 变体，推荐把库覆盖写入 `symbolize.lib` / `symbolize.lib_hidden` / `symbolize.lib_output`，而不是修改非 `symbolize` section。这样可以继续命中 numeric cache，并把差异约束在符号阶段。
 
 ## 公共接口
 
@@ -152,7 +154,7 @@
 - `outputs/.../comparison/variant_summary.csv`、`pairwise_delta_summary.csv`、`trace_summary.csv`
   通用 compare 产物。
 - `outputs/.../comparison/baseline_icbr_shared_check.csv`、`baseline_icbr_primary_effect.csv`、`baseline_icbr_mechanism_summary.csv`
-  仅在 `baseline` vs `baseline_icbr` 时生成的专用 compare 产物。
+  仅在单个 baseline-backend vs 单个 icbr-backend pair 时生成的专用 compare 产物，文件名保持不变。
 
 当前时长口径需要区分：
 
