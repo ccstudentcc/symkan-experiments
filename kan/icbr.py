@@ -1,3 +1,18 @@
+"""In-memory utilities for ICBR symbolic fitting and benchmark ablations.
+
+This module keeps the Phase I ICBR workflow separate from ``MultKAN`` while
+staying close to the model's runtime data structures. The public entry points
+cover three layers of responsibility:
+
+1. Batched candidate generation from teacher caches without mutating a model.
+2. Replay/rerank/commit helpers that manipulate a cloned work model explicitly.
+3. Benchmark orchestration that compares baseline symbolic fitting with ICBR
+   variants under a shared evaluation protocol.
+
+Most helpers operate on cloned models and are expected to preserve caller-owned
+state unless their name explicitly says ``commit``.
+"""
+
 from __future__ import annotations
 
 import copy
@@ -97,6 +112,7 @@ def _build_edge_batch(
     teacher_edge_targets: torch.Tensor,
     edge_indices: list[tuple[int, int]] | None,
 ) -> tuple[torch.Tensor, torch.Tensor, list[tuple[int, int]]]:
+    """Extract a dense per-edge regression batch from layer teacher caches."""
     if teacher_acts.ndim != 2:
         raise ValueError("teacher_acts must have shape [batch, in_dim]")
     if teacher_edge_targets.ndim != 3:
@@ -138,6 +154,22 @@ def _batched_fit_params_for_function(
     iteration: int,
     device: str | torch.device | None = None,
 ) -> dict[str, torch.Tensor]:
+    """Fit affine-wrapped parameters for one symbolic function over many edges.
+
+    Args:
+        x_batch: Edge inputs with shape ``[batch, edge]``.
+        y_batch: Teacher edge targets with shape ``[batch, edge]``.
+        fun: Torch-callable symbolic primitive from ``SYMBOLIC_LIB``.
+        a_range: Search range for the pre-transform scale ``a``.
+        b_range: Search range for the pre-transform bias ``b``.
+        grid_number: Number of grid points per search axis.
+        iteration: Number of coarse-to-fine refinement rounds.
+        device: Optional device for the search tensors.
+
+    Returns:
+        Diagnostics for each edge, including fitted ``params`` in ``(a, b, c, d)``
+        order, local ``r2`` scores, and search-quality indicators.
+    """
     if x_batch.shape != y_batch.shape:
         raise ValueError("x_batch and y_batch must have the same shape [batch, edge]")
     if grid_number < 2:
@@ -278,10 +310,34 @@ def generate_layer_candidates(
     iteration: int = 3,
     device: str | torch.device | None = None,
 ) -> dict[str, object]:
-    """
-    Generate per-edge symbolic candidates from teacher caches without touching model state.
+    """Generate the best symbolic candidate for each requested edge.
 
-    Parameters are compatible with ``fit_params`` for each candidate function.
+    Args:
+        teacher_acts: Cached layer activations with shape ``[batch, in_dim]``.
+        teacher_edge_targets: Cached edge targets with shape
+            ``[batch, out_dim, in_dim]``.
+        lib: Symbolic library names or mapping to evaluate. ``None`` means the
+            full ``SYMBOLIC_LIB``.
+        edge_indices: Optional ``(input_idx, output_idx)`` subset. ``None``
+            evaluates every edge in the layer cache.
+        a_range: Search range for the pre-transform scale ``a``.
+        b_range: Search range for the pre-transform bias ``b``.
+        grid_number: Number of grid points per search axis.
+        iteration: Number of coarse-to-fine refinement rounds.
+        device: Optional device for batched fitting.
+
+    Returns:
+        A payload with one best candidate per requested edge. Each candidate
+        stores the chosen function, fitted ``(a, b, c, d)`` parameters, local
+        fit score, complexity, and search diagnostics.
+
+    Raises:
+        ValueError: If cache shapes are invalid or the search config is invalid.
+        RuntimeError: If any requested edge fails to produce a candidate.
+
+    Notes:
+        This function is intentionally side-effect free: it only reads teacher
+        caches and never mutates model symbolic state.
     """
 
     start_time = perf_counter()
@@ -344,6 +400,7 @@ def generate_layer_candidates(
 
 
 def _snapshot_symbolic_edge_state(work_model, layer_idx: int, input_idx: int, output_idx: int) -> dict[str, object]:
+    """Capture the full symbolic/numeric edge state needed for replay rollback."""
     symbolic_layer = work_model.symbolic_fun[layer_idx]
     return {
         "fun": symbolic_layer.funs[output_idx][input_idx],
@@ -363,6 +420,7 @@ def _restore_symbolic_edge_state(
     output_idx: int,
     snapshot: dict[str, object],
 ) -> None:
+    """Restore a previously snapshotted edge state exactly."""
     symbolic_layer = work_model.symbolic_fun[layer_idx]
     symbolic_layer.funs[output_idx][input_idx] = snapshot["fun"]
     symbolic_layer.funs_sympy[output_idx][input_idx] = snapshot["fun_sympy"]
@@ -380,6 +438,7 @@ def _apply_symbolic_candidate_state(
     output_idx: int,
     candidate: Mapping[str, object],
 ) -> None:
+    """Write a candidate directly into the symbolic layer and flip edge masks."""
     fun_name = str(candidate["fun_name"])
     if fun_name not in SYMBOLIC_LIB:
         raise KeyError(f"Unknown symbolic function: {fun_name}")
@@ -461,11 +520,32 @@ def replay_rerank_edge_candidates(
     singularity_avoiding: bool = False,
     y_th: float = 10.0,
 ) -> dict[str, object]:
-    """
-    Replay shortlisted symbolic candidates on ``work_model`` and rank by imitation loss.
+    """Replay shortlisted candidates and rerank them by contextual imitation loss.
 
-    The target edge state is always restored after replay. This helper does not call
-    ``log_history``/checkpoint primitives and is designed for in-memory evaluation only.
+    Args:
+        work_model: Mutable cloned model used for temporary replay.
+        teacher_model: Numeric teacher model that provides reference outputs.
+        calibration_split: Calibration input tensor or split mapping. Only the
+            input portion is consumed.
+        layer_idx: Layer index of the edge being replayed.
+        input_idx: Input index of the edge being replayed.
+        output_idx: Output index of the edge being replayed.
+        shortlist: Candidate payloads, usually ranked by local edge score.
+        singularity_avoiding: Forward-pass flag forwarded to both models.
+        y_th: Singularity guard threshold forwarded to both models.
+
+    Returns:
+        Ranking metadata sorted by replay loss ascending. ``best_candidate`` is a
+        deep-copied record that can be committed directly.
+
+    Raises:
+        ValueError: If ``shortlist`` is empty.
+        RuntimeError: If replay unexpectedly changes ``state_id`` on either model.
+
+    Notes:
+        Replay is intentionally transactional. The probed edge state is restored
+        after every candidate and again in ``finally`` so callers can treat this
+        helper as read-only with respect to persistent model state.
     """
 
     if not shortlist:
@@ -494,6 +574,8 @@ def replay_rerank_edge_candidates(
                     work_output = work_output[0]
                 work_output = work_output.detach()
 
+            # Evaluate the candidate in the full model context instead of only
+            # trusting the edge-local score produced during candidate generation.
             replay_loss = torch.mean((work_output - teacher_output).pow(2)).item()
             ranking.append(
                 {
@@ -532,11 +614,20 @@ def commit_symbolic_candidate(
     output_idx: int,
     candidate: Mapping[str, object],
 ) -> None:
-    """
-    Commit an externally selected symbolic candidate directly to model symbolic state.
+    """Commit a selected candidate into ``work_model`` without refitting.
 
-    This helper writes ``funs/funs_sympy/funs_avoid_singularity/funs_name/affine`` and
-    switches masks to symbolic mode without re-fitting via ``fix_symbolic``.
+    Args:
+        work_model: Mutable model whose symbolic edge state will be updated.
+        layer_idx: Layer index of the edge to mutate.
+        input_idx: Input index of the edge to mutate.
+        output_idx: Output index of the edge to mutate.
+        candidate: Candidate payload produced by generation or replay. For the
+            zero function, ``{"fun_name": "0"}`` is sufficient.
+
+    Notes:
+        This is a true stateful write. It updates the symbolic function handles,
+        affine parameters, and both numeric/symbolic masks so later forward
+        passes and formula export see the committed symbolic edge.
     """
 
     _apply_symbolic_candidate_state(work_model, layer_idx, input_idx, output_idx, candidate)
@@ -641,6 +732,12 @@ def _build_layer_shortlists_shared(
     grid_number: int,
     iteration: int,
 ) -> dict[tuple[int, int], list[dict[str, object]]]:
+    """Build top-k shortlists for many edges with shared batched evaluation.
+
+    The key invariant is that all ``edge_indices`` share the same teacher cache
+    tensors, allowing each library function to be fit once in batched form and
+    then split back into per-edge top-k shortlists.
+    """
     if not edge_indices:
         return {}
     per_edge_candidates: dict[tuple[int, int], list[dict[str, object]]] = {edge: [] for edge in edge_indices}
@@ -683,6 +780,12 @@ def _commit_candidate_by_refit(
     a_range: tuple[float, float],
     b_range: tuple[float, float],
 ) -> float:
+    """Commit a candidate through ``fix_symbolic`` and report parameter drift.
+
+    Returns:
+        The L2 distance between the candidate parameters selected upstream and
+        the affine parameters produced by the refit commit path.
+    """
     fun_name = str(candidate["fun_name"])
     if fun_name == "0":
         commit_symbolic_candidate(
@@ -738,6 +841,38 @@ def _run_auto_symbolic_icbr_with_models(
     commit_mode: str = "explicit",
     collect_metrics: bool = False,
 ):
+    """Run the core ICBR Phase I loop on separate teacher/work model clones.
+
+    Args:
+        teacher_model: Clone kept in numeric mode to provide caches and replay
+            targets.
+        work_model: Clone that will be progressively converted to symbolic mode.
+        calibration_input: Input batch used for cache generation and replay.
+        lib_names: Ordered symbolic primitive names to consider.
+        topk: Number of local candidates retained per edge.
+        a_range: Search range for the pre-transform scale ``a``.
+        b_range: Search range for the pre-transform bias ``b``.
+        grid_number: Number of grid points per search axis.
+        iteration: Number of coarse-to-fine refinement rounds.
+        verbose: Verbosity level for progress prints.
+        candidate_mode: ``"shared"`` batches per-layer shortlist generation,
+            while ``"serial"`` rebuilds each edge shortlist independently.
+        rerank_mode: ``"replay"`` reranks by imitation loss, while ``"local"``
+            trusts edge-local R2 ordering.
+        commit_mode: ``"explicit"`` writes the chosen candidate directly, while
+            ``"refit"`` recomputes parameters via ``fix_symbolic``.
+        collect_metrics: Whether to return timing/ablation metrics alongside the
+            mutated ``work_model``.
+
+    Returns:
+        Either ``work_model`` alone or ``(work_model, metrics)`` when
+        ``collect_metrics`` is true.
+
+    Raises:
+        ValueError: If invalid mode names are supplied or both model arguments
+            refer to the same object.
+        RuntimeError: If the final model is not fully symbolic.
+    """
     if teacher_model is work_model:
         raise ValueError("teacher_model and work_model must be different objects")
 
@@ -794,6 +929,8 @@ def _run_auto_symbolic_icbr_with_models(
                     continue
 
                 if symbolic_mask == 0.0 and numeric_mask == 0.0:
+                    # Preserve pruned/off edges as explicit zeros so downstream
+                    # symbolic export sees a complete graph.
                     commit_symbolic_candidate(
                         work_model,
                         layer_idx=layer_idx,
@@ -913,10 +1050,25 @@ def auto_symbolic_icbr(
     iteration: int = 3,
     verbose: int = 1,
 ):
-    """
-    Run Phase I ICBR symbolic fitting on a cloned work model.
+    """Run Phase I ICBR symbolic fitting on a cloned work model.
 
-    Returns a new work model and keeps the input model unchanged.
+    Args:
+        model: Trained numeric ``MultKAN`` teacher to clone.
+        calibration_split: Calibration tensor or split mapping. If omitted,
+            ``model.cache_data`` is used.
+        lib: Symbolic library names or mapping to evaluate.
+        topk: Number of local candidates retained per edge before reranking.
+        a_range: Search range for the pre-transform scale ``a``.
+        b_range: Search range for the pre-transform bias ``b``.
+        grid_number: Number of grid points per search axis.
+        iteration: Number of coarse-to-fine refinement rounds.
+        verbose: Verbosity level for progress prints.
+
+    Returns:
+        A new fully symbolic work model. The input ``model`` is left unchanged.
+
+    Raises:
+        ValueError: If no calibration input is available or the library is empty.
     """
 
     if calibration_split is None:
@@ -1009,6 +1161,7 @@ def _run_baseline_symbolic_benchmark(
     lib_names: list[str],
     formula_significant_digits: int,
 ) -> dict[str, object]:
+    """Execute the repository baseline symbolic path under the benchmark protocol."""
     baseline_model = _clone_model_memory(model)
     baseline_model.auto_save = False
     try:
@@ -1065,6 +1218,7 @@ def _run_variant_symbolic_benchmark(
     iteration: int,
     formula_significant_digits: int,
 ) -> dict[str, object]:
+    """Run one named ICBR ablation variant and collect comparable metrics."""
     candidate_mode, rerank_mode, commit_mode = _resolve_icbr_variant_modes(variant)
     teacher_model = _clone_model_memory(model)
     work_model = _clone_model_memory(model)
@@ -1144,8 +1298,6 @@ def _normalize_benchmark_variants(variants: Sequence[str] | None) -> list[str]:
             continue
         seen.add(name)
         normalized.append(name)
-    if "baseline" not in seen:
-        normalized.insert(0, "baseline")
     return normalized
 
 
@@ -1173,6 +1325,36 @@ def benchmark_symbolic_variants(
     formula_significant_digits: int = 6,
     variants: Sequence[str] | None = None,
 ) -> dict[str, object]:
+    """Benchmark baseline symbolic fitting against one or more ICBR variants.
+
+    Args:
+        model: Trained numeric ``MultKAN`` teacher to benchmark from.
+        calibration_split: Calibration tensor or split mapping used for symbolic
+            fitting and replay.
+        calibration_target: Optional calibration target override.
+        evaluation_split: Optional evaluation tensor or split mapping. Defaults
+            to the calibration input when omitted.
+        evaluation_target: Optional evaluation target override.
+        lib: Symbolic library names or mapping to evaluate.
+        topk: Number of local candidates retained per edge.
+        a_range: Search range for the pre-transform scale ``a``.
+        b_range: Search range for the pre-transform bias ``b``.
+        grid_number: Number of grid points per search axis.
+        iteration: Number of coarse-to-fine refinement rounds.
+        formula_significant_digits: Significant digits used for display-only
+            rounded formulas.
+        variants: Requested benchmark variants. ``None`` defaults to
+            ``("baseline", "icbr_full")``.
+
+    Returns:
+        A benchmark bundle containing teacher quality metrics, optional baseline
+        results, per-variant payloads, comparisons against baseline, and grouped
+        challenge evidence for the shared-shortlist/replay/commit ablations.
+
+    Raises:
+        ValueError: If the symbolic library is empty or evaluation targets do not
+            match the model output shape.
+    """
     variant_names = _normalize_benchmark_variants(variants)
     calibration_input = _extract_calibration_input(calibration_split)
     if calibration_target is None:
@@ -1191,6 +1373,8 @@ def benchmark_symbolic_variants(
     lib_names = list(symbolic_lib.keys())
     if not lib_names:
         raise ValueError("symbolic library must not be empty")
+
+    baseline_requested = "baseline" in variant_names
 
     teacher_numeric = _clone_model_memory(model)
     _set_teacher_numeric_mode(teacher_numeric)
@@ -1217,17 +1401,20 @@ def benchmark_symbolic_variants(
         teacher_target_mse = float("nan")
         teacher_target_r2 = float("nan")
 
-    baseline_payload = _run_baseline_symbolic_benchmark(
-        model,
-        calibration_input=calibration_input,
-        evaluation_input=evaluation_input,
-        teacher_evaluation_output=teacher_evaluation_output,
-        target=target,
-        input_dim=input_dim,
-        lib_names=lib_names,
-        formula_significant_digits=formula_significant_digits,
-    )
-    baseline_formula_export_success = bool(baseline_payload["formula_export_success"])
+    baseline_payload: dict[str, object] | None = None
+    baseline_formula_export_success = False
+    if baseline_requested:
+        baseline_payload = _run_baseline_symbolic_benchmark(
+            model,
+            calibration_input=calibration_input,
+            evaluation_input=evaluation_input,
+            teacher_evaluation_output=teacher_evaluation_output,
+            target=target,
+            input_dim=input_dim,
+            lib_names=lib_names,
+            formula_significant_digits=formula_significant_digits,
+        )
+        baseline_formula_export_success = bool(baseline_payload["formula_export_success"])
 
     variant_payloads: dict[str, dict[str, object]] = {}
     comparisons_vs_baseline: dict[str, dict[str, float | bool]] = {}
@@ -1254,18 +1441,29 @@ def benchmark_symbolic_variants(
         variant_imitation_mse = float(variant_payloads[variant]["imitation_mse"])
         variant_target_mse = float(variant_payloads[variant]["target_mse"])
         variant_target_r2 = float(variant_payloads[variant]["target_r2"])
-        comparisons_vs_baseline[variant] = {
-            "symbolic_wall_time_delta_s": float(
-                baseline_payload["symbolic_wall_time_s"] - variant_payloads[variant]["symbolic_wall_time_s"]
-            ),
-            "symbolic_speedup_vs_baseline": float(
-                baseline_payload["symbolic_wall_time_s"] / max(float(variant_payloads[variant]["symbolic_wall_time_s"]), 1e-12)
-            ),
-            "imitation_mse_shift": float(variant_imitation_mse - baseline_payload["imitation_mse"]),
-            "target_mse_shift": float(variant_target_mse - baseline_payload["target_mse"]),
-            "target_r2_shift": float(variant_target_r2 - baseline_payload["target_r2"]),
-            "formula_export_success": bool(variant_formula_export_success and baseline_formula_export_success),
-        }
+        if baseline_payload is not None:
+            comparisons_vs_baseline[variant] = {
+                "symbolic_wall_time_delta_s": float(
+                    baseline_payload["symbolic_wall_time_s"] - variant_payloads[variant]["symbolic_wall_time_s"]
+                ),
+                "symbolic_speedup_vs_baseline": float(
+                    baseline_payload["symbolic_wall_time_s"]
+                    / max(float(variant_payloads[variant]["symbolic_wall_time_s"]), 1e-12)
+                ),
+                "imitation_mse_shift": float(variant_imitation_mse - baseline_payload["imitation_mse"]),
+                "target_mse_shift": float(variant_target_mse - baseline_payload["target_mse"]),
+                "target_r2_shift": float(variant_target_r2 - baseline_payload["target_r2"]),
+                "formula_export_success": bool(variant_formula_export_success and baseline_formula_export_success),
+            }
+        else:
+            comparisons_vs_baseline[variant] = {
+                "symbolic_wall_time_delta_s": float("nan"),
+                "symbolic_speedup_vs_baseline": float("nan"),
+                "imitation_mse_shift": float("nan"),
+                "target_mse_shift": float("nan"),
+                "target_r2_shift": float("nan"),
+                "formula_export_success": bool(variant_formula_export_success),
+            }
 
     full = variant_payloads.get("icbr_full")
     no_shared = variant_payloads.get("icbr_no_shared")
@@ -1337,6 +1535,27 @@ def benchmark_icbr_vs_baseline(
     iteration: int = 3,
     formula_significant_digits: int = 6,
 ) -> dict[str, object]:
+    """Run the common two-way benchmark: baseline symbolic fitting vs ICBR full.
+
+    Args:
+        model: Trained numeric ``MultKAN`` teacher to benchmark from.
+        calibration_split: Calibration tensor or split mapping.
+        calibration_target: Optional calibration target override.
+        evaluation_split: Optional evaluation tensor or split mapping.
+        evaluation_target: Optional evaluation target override.
+        lib: Symbolic library names or mapping to evaluate.
+        topk: Number of local candidates retained per edge.
+        a_range: Search range for the pre-transform scale ``a``.
+        b_range: Search range for the pre-transform bias ``b``.
+        grid_number: Number of grid points per search axis.
+        iteration: Number of coarse-to-fine refinement rounds.
+        formula_significant_digits: Significant digits used for display formulas.
+
+    Returns:
+        A flattened summary of timing, imitation/target accuracy, replay metrics,
+        commit-drift metrics, and formula export outcomes for baseline vs
+        ``icbr_full``.
+    """
     bundle = benchmark_symbolic_variants(
         model,
         calibration_split=calibration_split,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import uuid
 from pathlib import Path
@@ -23,6 +24,11 @@ from scripts.icbr_benchmark import (
     main,
     run_benchmark,
 )
+
+
+def _cache_digest(payload: dict[str, object]) -> str:
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
 
 
 def test_icbr_benchmark_script_generates_outputs() -> None:
@@ -303,7 +309,8 @@ def test_teacher_cache_identity_normalizes_width_representation() -> None:
     )
 
     assert payload["width"] == [[9, 0], [5, 2], [1, 0]]
-    assert key == "feynman_I_9_18_seed2_c673a31c47af251b"
+    assert payload["dataset_split_seed"] == 2
+    assert key == f"feynman_I_9_18_seed2_{_cache_digest(payload)}"
 
 
 def test_teacher_cache_identity_aliases_include_compact_width_legacy_key() -> None:
@@ -346,10 +353,18 @@ def test_teacher_cache_identity_aliases_include_compact_width_legacy_key() -> No
         cache_version="stage22_feynman_reference_paper10_seeds1_20_v1",
     )
 
-    assert [key for key, _ in aliases] == [
-        "feynman_I_9_18_seed2_c673a31c47af251b",
-        "feynman_I_9_18_seed2_a679acdf59bafd8e",
-    ]
+    assert len(aliases) == 2
+
+    primary_key, primary_payload = aliases[0]
+    legacy_key, legacy_payload = aliases[1]
+
+    assert primary_payload["width"] == [[9, 0], [5, 2], [1, 0]]
+    assert primary_payload["dataset_split_seed"] == 2
+    assert primary_key == f"feynman_I_9_18_seed2_{_cache_digest(primary_payload)}"
+
+    assert legacy_payload["width"] == [9, [5, 2], 1]
+    assert legacy_payload["dataset_split_seed"] == 2
+    assert legacy_key == f"feynman_I_9_18_seed2_{_cache_digest(legacy_payload)}"
 
 
 def test_teacher_quality_gate_can_disable_r2_requirement() -> None:

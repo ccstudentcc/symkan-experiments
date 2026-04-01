@@ -114,6 +114,17 @@ def evaluate_regression_gate(
     thresholds: RegressionThresholds,
     per_task_thresholds: dict[str, dict[str, float]] | None = None,
 ) -> dict[str, Any]:
+    """Evaluate pass/fail regression checks against a benchmark summary.
+
+    Args:
+        summary: Parsed benchmark summary JSON payload.
+        thresholds: Global threshold configuration.
+        per_task_thresholds: Optional per-task overrides keyed by task name.
+
+    Returns:
+        A report payload containing every check, fail reasons, and the overall
+        pass/fail status.
+    """
     per_task_thresholds = per_task_thresholds or {}
     checks: list[dict[str, Any]] = []
 
@@ -320,6 +331,22 @@ def run_regression_gate(
     min_teacher_quality_gate_pass_rate: float = 0.95,
     max_target_mse_shift_mean: float = 5e-4,
 ) -> dict[str, Any]:
+    """Run the regression gate and persist JSON/Markdown reports.
+
+    Args:
+        summary_json_path: Path to the benchmark summary JSON file.
+        output_dir: Directory that receives the regression gate reports.
+        threshold_override_path: Optional JSON file with ``global`` and
+            ``per_task`` overrides.
+        min_formula_pass_rate: Default global minimum formula pass rate.
+        min_speedup_median: Default global minimum median speedup.
+        max_mse_shift_mean: Default global maximum mean imitation-MSE shift.
+        min_teacher_quality_gate_pass_rate: Default minimum teacher gate pass rate.
+        max_target_mse_shift_mean: Default global maximum mean target-MSE shift.
+
+    Returns:
+        A payload containing the in-memory report plus the written report paths.
+    """
     summary = _load_json(summary_json_path)
     threshold_override = _load_json(threshold_override_path) if threshold_override_path else None
 

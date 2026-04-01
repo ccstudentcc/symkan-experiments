@@ -3082,6 +3082,56 @@ def run_benchmark(
     make_plots: bool,
     quiet: bool,
 ) -> dict[str, object]:
+    """Run the benchmark pipeline for synthetic and local Feynman tasks.
+
+    Args:
+        tasks: Task names or task tokens to evaluate.
+        seeds: Benchmark seeds used to repeat each task.
+        output_dir: Directory that receives CSV, JSON, Markdown, and plots.
+        train_num: Teacher training sample count per task.
+        test_num: Calibration and evaluation sample count baseline.
+        train_steps: Teacher training step count.
+        lr: Teacher optimizer learning rate.
+        lamb: Teacher regularization coefficient.
+        topk: Default shortlist size for ICBR candidate reranking.
+        grid_number: Grid resolution used by symbolic candidate fitting.
+        iteration: Number of grid-refinement iterations for candidate fitting.
+        teacher_max_test_mse: Maximum allowed teacher test MSE before gating.
+        teacher_min_test_r2: Minimum allowed teacher test R2 before gating.
+        teacher_cache_dir: Root directory for persistent teacher caches.
+        teacher_cache_mode: Cache policy for teacher resolution.
+        teacher_cache_version: Version tag used in cache identities.
+        run_mode: Benchmark execution mode such as full or symbolic-only.
+        profile_name: Human-readable profile label written into outputs.
+        profile_defaults: Optional resolved defaults for the active profile.
+        profile_overrides: Optional flags indicating which profile values were overridden.
+        feynman_root: Local dataset root used for Feynman tasks.
+        feynman_variant: Feynman variant directory name under ``feynman_root``.
+        feynman_equations_csv: Optional metadata CSV override.
+        feynman_split_strategy: Dataset split strategy for Feynman tasks.
+        feynman_split_strategy_seed: Optional seed override for dataset splits.
+        feynman_post_prune_steps: Optional teacher post-prune finetuning steps.
+        feynman_post_prune_lr: Optional post-prune learning rate override.
+        feynman_post_prune_lamb: Optional post-prune regularization override.
+        feynman_post_prune_eval_every: Optional evaluation cadence for post-prune training.
+        feynman_post_prune_min_delta: Optional early-stop min-delta for post-prune training.
+        feynman_post_prune_patience: Optional early-stop patience for post-prune training.
+        feynman_fit_opt: Optional optimizer override for Feynman teachers.
+        feynman_width_mid: Optional hidden-width prior for Feynman teachers.
+        prune_iters: Optional prune iteration override.
+        feynman_max_datasets: Maximum dataset count when expanding Feynman tokens.
+        feynman_dataset_select_seed: Seed used when sampling Feynman dataset subsets.
+        variants: Requested benchmark variants. Defaults are resolved later.
+        enable_teacher_prune: Optional override for teacher pruning enablement.
+        teacher_prune_node_th: Node pruning threshold.
+        teacher_prune_edge_th: Edge pruning threshold.
+        make_plots: Whether to render visualization artifacts.
+        quiet: Whether to suppress verbose console output from inner stages.
+
+    Returns:
+        A machine-readable benchmark summary payload that mirrors the written
+        CSV/JSON/Markdown artifacts.
+    """
     if run_mode not in _RUN_MODES:
         raise ValueError(f"Unsupported run_mode: {run_mode}")
     if feynman_variant not in _FEYNMAN_VARIANTS:
