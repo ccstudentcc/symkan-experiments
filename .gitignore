@@ -9,6 +9,8 @@ __pycache__/
 .pytest_tmp/
 outputs/test_tmp/
 outputs/pytest_tmp_run_01/
+outputs/teacher_cache*/
+outputs/**/teacher_cache/
 
 In-Context-Symbolic-Regression-KAN-main/
 
@@ -16,6 +18,8 @@ MNIST/raw/
 outputs/benchmark_runs/
 model/
 notebooks/model/
+.ipynb_checkpoints/
+tmp/
 
 _safe_copy_temp*
 

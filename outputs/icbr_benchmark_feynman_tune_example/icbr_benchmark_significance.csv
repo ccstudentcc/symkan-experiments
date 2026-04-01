@@ -1,3 +1,0 @@
-task,metric,favorable_direction,sample_count,finite_count,effective_count,tie_count,improved_count,worsened_count,mean_delta,median_delta,std_delta,min_delta,max_delta,mean_delta_ci95_low,mean_delta_ci95_high,sign_test_pvalue_two_sided
-feynman_I_12_4,symbolic_wall_time_delta_s,positive,1,1,1,0,1,0,47.3423689,47.3423689,0.0,47.3423689,47.3423689,47.3423689,47.3423689,1.0
-feynman_I_12_4,final_mse_loss_shift,negative,1,1,1,0,0,1,4.5571457718551756e-10,4.5571457718551756e-10,0.0,4.5571457718551756e-10,4.5571457718551756e-10,4.5571457718551756e-10,4.5571457718551756e-10,1.0
