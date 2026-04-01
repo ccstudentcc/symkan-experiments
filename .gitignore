@@ -23,6 +23,7 @@ model/
 notebooks/model/
 .ipynb_checkpoints/
 tmp/
+AGENTS.md
 
 _safe_copy_temp*
 

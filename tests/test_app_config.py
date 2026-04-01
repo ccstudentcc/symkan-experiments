@@ -224,6 +224,47 @@ def test_benchmark_ab_fastlib_variants_reuse_baseline_non_symbolic_config() -> N
     assert baseline_icbr_fastlib.symbolize.symbolic_backend == "icbr"
 
 
+def test_benchmark_ab_fulllib_icbr_variant_reuses_baseline_non_symbolic_config() -> None:
+    baseline = load_config(Path("configs/benchmark_ab/baseline.yaml"))
+    baseline_icbr_fulllib = load_config(Path("configs/benchmark_ab/baseline_icbr_fulllib.yaml"))
+
+    assert baseline.model_dump(exclude={"symbolize"}) == baseline_icbr_fulllib.model_dump(exclude={"symbolize"})
+
+    fulllib_expected = [
+        "x",
+        "x^2",
+        "x^3",
+        "x^4",
+        "x^5",
+        "1/x",
+        "1/x^2",
+        "1/x^3",
+        "1/x^4",
+        "1/x^5",
+        "sqrt",
+        "x^0.5",
+        "x^1.5",
+        "1/sqrt(x)",
+        "1/x^0.5",
+        "exp",
+        "log",
+        "abs",
+        "sin",
+        "cos",
+        "tan",
+        "tanh",
+        "sgn",
+        "arcsin",
+        "arccos",
+        "arctan",
+        "arctanh",
+        "0",
+        "gaussian",
+    ]
+    assert baseline_icbr_fulllib.symbolize.lib == fulllib_expected
+    assert baseline_icbr_fulllib.symbolize.symbolic_backend == "icbr"
+
+
 def test_benchmark_parser_accepts_layerwise_cli_overrides() -> None:
     runner = parse_benchmark_cli_config(
         [
