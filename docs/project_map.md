@@ -159,7 +159,7 @@
 当前新增的稳定工程结论还包括：
 
 4. `baseline` 与 `baseline_icbr` 现在可以共享 numeric stage 与 shared symbolic-prep，因此 compare 结果可以被解释为后端差异，而不是训练差异。
-5. 在 `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/` 的三 seed 对照中，ICBR 在不改变最终边数的前提下显著降低了 `symbolic_core_seconds`。
+5. 当前 `2026-04-01` 的 paired compare 需要分层引用：`comparison/` 负责较保守的 layered 库 backend-only 对照，`comparison_fastlib/` 负责更大候选库下的 paired speed slice，而 `baseline_icbr_fulllib/` 仅是补充单变体观察。
 
 这些结论的详细证据都在：
 

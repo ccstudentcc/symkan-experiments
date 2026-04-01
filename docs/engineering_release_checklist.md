@@ -20,6 +20,7 @@
 - [ ] 工程版主结论有归档支撑（`engineering_rerun_report.md` 与引用目录一致）。
 - [ ] 历史版与工程版口径已拆分（`engineering_version_rerun_note.md` 可追踪）。
 - [ ] 若本轮主引用结果来自单个 baseline-backend vs icbr-backend compare，则专用 compare 产物完整，且 `shared_symbolic_prep_aligned=True`、trace 节奏一致。
+- [ ] 若本轮还引用了 `baseline_icbr_fulllib` 一类单变体补充切片，文案已明确说明 paired baseline 未跑的原因，且没有把该切片写成 backend-only compare 证据。
 
 ## 3. 文档与口径收口（按矩阵执行）
 

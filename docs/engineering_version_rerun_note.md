@@ -2,14 +2,16 @@
 
 ## 1. 文档目的
 
-本文档用于界定“历史参考版本”与“当前工程版本”在实验口径上的差异，并统一说明当前工程版内部的两组 ICBR 后端对照：
+本文档用于界定“历史参考版本”与“当前工程版本”在实验口径上的差异，并统一说明当前工程版内部的两组 paired ICBR 后端对照与一组补充单变体切片：
 
 1. `baseline` vs `baseline_icbr`
    用于最保守的 layered 库 backend-only 对照。
 2. `baseline_fastlib` vs `baseline_icbr_fastlib`
    用于在更大候选函数库下观察 ICBR 的速度潜力。
+3. `baseline_icbr_fulllib`
+   用于补充观察 ICBR 在 full symbolic library 下的单边运行表现；由于 `baseline_fulllib` 过慢而未纳入本轮复测，它不构成 paired backend-only compare。
 
-两组对照都只允许解释为“同一工程版内部的后端比较”，而不是新的训练实验。
+前两组 paired 对照可解释为“同一工程版内部的后端比较”；第三组仅是补充单边实验，不应用来替代 paired compare 结论。
 
 ## 2. 版本分层定义
 
@@ -29,7 +31,7 @@
 
 ## 4. 当前工程版复测锚点
 
-当前工程版建议区分三个锚点：
+当前工程版建议区分四个锚点：
 
 1. 工程版总体口径锚点：
    - `outputs/rerun_v2_engine_safe_20260318/`
@@ -38,8 +40,10 @@
    - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/`
 3. FAST_LIB ICBR 对照锚点：
    - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib/`
+4. full symbolic library 的补充单变体锚点：
+   - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr_fulllib/`
 
-若当前写作主题是“ICBR 在更大候选库下的速度潜力”，应优先引用第三组锚点及其配套报告 [engineering_rerun_report.md](engineering_rerun_report.md)。
+若当前写作主题是“paired backend compare 的公平性与质量变化”，优先引用第二组与第三组锚点；若只是补充说明“baseline_fulllib 太慢，因此改用 ICBR full library 单边切片观察速度与收益”，可附带引用第四组锚点，但需显式写明它不是 paired compare 证据。
 
 ## 5. 当前工程版默认设定（2026-04）
 
@@ -68,12 +72,13 @@
 
 ## 7. 报告书写建议
 
-建议采用“四层叙述”结构：
+建议采用“五层叙述”结构：
 
 1. 历史参考结果：用于提供研究脉络与可复现边界。
 2. 工程版总体复测结果：用于说明工程版相对历史版的总体口径。
 3. layered 库 ICBR 对照：用于证明 backend-only compare 语义已经修干净。
 4. FAST_LIB ICBR 对照：用于说明在更大候选库下 ICBR 的速度潜力。
+5. full symbolic library 单变体补充：用于说明 baseline full library 成本过高时，ICBR 自身在更大全库下仍可运行并带来单边收益，但不承担 paired fairness 证明职责。
 
 同时应设置“差异归因”小节，至少覆盖以下维度：
 
@@ -98,5 +103,5 @@
 
 1. 历史参考版已通过 release 冻结，不再建议频繁回切旧版本重跑。
 2. 工程版总体口径仍可参考 `2026-03-18` 的 rerun 归档。
-3. 当前关于 ICBR 接入的正式引用锚点应优先使用 `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib/` 及其配套报告；`comparison/` 保留为更保守的 layered 库参考切片。
-4. 后续若继续扩展 symbolic backend 或 library-only compare 变体，对外口径仍应保持：历史版用于参考，工程版用于正式结论，而 backend compare 需明确共享边界与专用 compare 产物。
+3. 当前关于 ICBR 接入的正式引用应按论点拆分：`comparison/` 用于较保守的 paired backend-only 结论，`comparison_fastlib/` 用于更大候选库下的 paired speed 结论，`baseline_icbr_fulllib/` 只用于补充单变体观察。
+4. 后续若继续扩展 symbolic backend 或 library-only compare 变体，对外口径仍应保持：历史版用于参考，工程版用于正式结论，而 backend compare 需明确共享边界、paired compare 产物与单边补充切片之间的差异。

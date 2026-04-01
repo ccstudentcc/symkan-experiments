@@ -26,7 +26,7 @@
 1. 配置统一：Notebook / CLI / 库层统一收敛到 `AppConfig`；相关叙述应与 `README.md`、`symkan_usage.md` 保持一致。
 2. 符号后端边界：默认仍为 `baseline`，`icbr` 仅作为显式 opt-in backend，不得被文档表述成新的训练路径。
 3. 流程边界更新：`symbolize_pipeline` 内部已拆为 shared symbolic-prep 与 backend-specific completion；相关叙述应与 `ARCHITECTURE.md`、`design.md` 保持一致。
-4. compare 口径更新：`baseline` vs `baseline_icbr` 的主引用目录为 `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/...`，并新增三份专用 compare 产物。
+4. compare 口径更新：`comparison/` 与 `comparison_fastlib/` 都是当前 `2026-04-01` 的 paired backend compare 锚点；`baseline_icbr_fulllib/` 仅作为补充单变体切片，不得替代 paired compare 证据。
 5. 指标口径统一：跨版本耗时字段仅允许 `export_wall_time_s -> symbolize_wall_time_s` 语义映射；backend compare 优先使用 `symbolic_core_seconds`。
 6. 发布前一致性检查：每次 release 前应对 `README.md` 与 `docs/` 执行一次“口径同步复核”（见 `engineering_release_checklist.md`）。
 

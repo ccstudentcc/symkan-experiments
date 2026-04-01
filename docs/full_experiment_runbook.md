@@ -284,6 +284,24 @@ python -m scripts.symkanbenchmark `
   --quiet
 ```
 
+若本轮还想补充记录 ICBR 在 full symbolic library 下的单边运行画像，可额外运行：
+
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
+python -m scripts.symkanbenchmark `
+  --tasks full `
+  --stagewise-seeds 42,52,62 `
+  --config configs/benchmark_ab/baseline_icbr_fulllib.yaml `
+  --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr_fulllib `
+  --quiet
+```
+
+说明：
+
+1. `baseline_icbr_fulllib/` 不是 paired compare 目录。
+2. 本轮常见情形是 `baseline_fulllib` 因 full symbolic library 下过慢而不再继续跑。
+3. 若没有配套 `baseline_fulllib` 与 `baseline_icbr_shared_check.csv`，该切片只能作为补充单变体结果，用于说明 ICBR 在 full library 下仍具备可接受速度并带来单边收益，不得当作 backend-only compare 证据。
+
 ### 5.3 生成 A/B 汇总
 
 ```powershell
@@ -484,6 +502,7 @@ outputs/rerun/
       baseline_icbr/
       baseline_fastlib/
       baseline_icbr_fastlib/
+      baseline_icbr_fulllib/
       comparison/
         variant_summary.csv
         pairwise_delta_summary.csv
@@ -538,7 +557,8 @@ outputs/rerun/
    - `baseline_icbr_shared_check.csv` 已生成，且三条 seed 都为 `shared_symbolic_prep_aligned=True`
    - `trace_summary.csv` 中 baseline-backend 与 icbr-backend 变体的节奏一致
    - `baseline_icbr_primary_effect.csv` 与 `baseline_icbr_mechanism_summary.csv` 已生成
-6. `outputs/rerun/benchmark_ablation/layerwiseft_analysis/` 与 `layerwiseft_improved_analysis/` 均有 CSV 输出，表明专项分析链路执行成功。
+6. 若本轮还生成了 `baseline_icbr_fulllib/` 之类的单变体补充切片，应确认文档明确写出：`baseline_fulllib` 未跑的原因、该切片的补充用途，以及它不是 paired backend-only compare 证据。
+7. `outputs/rerun/benchmark_ablation/layerwiseft_analysis/` 与 `layerwiseft_improved_analysis/` 均有 CSV 输出，表明专项分析链路执行成功。
 
 如需进一步解读结果，继续参考：
 

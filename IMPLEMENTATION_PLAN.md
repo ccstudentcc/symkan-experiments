@@ -99,11 +99,11 @@ Integrate ICBR into `symkan` as an opt-in symbolic backend, keep baseline symbol
 1. `baseline_icbr_shared_check.csv` reports `shared_numeric_aligned=True`、`trace_aligned=True` 与 `shared_symbolic_prep_aligned=True` for seeds `42/52/62`。
 2. `trace_summary.csv` shows identical `Symbolize Trace Rhythm` for `baseline` and `baseline_icbr`。
 3. `baseline_icbr_primary_effect.csv` reports:
-   - `symbolic_core_speedup_vs_baseline = 2.377025`
-   - `final_teacher_imitation_mse_shift = -0.006009`
-   - `final_target_mse_shift = -0.008364`
-   - `final_target_r2_shift = 0.092972`
-4. `baseline_icbr_mechanism_summary.csv` shows candidate generation is about `1.65%` of core time, while replay rerank rises to about `97.76%` after teacher-output reuse.
+   - `symbolic_core_speedup_vs_baseline = 1.751763`
+   - `final_teacher_imitation_mse_shift = -0.006330`
+   - `final_target_mse_shift = -0.008691`
+   - `final_target_r2_shift = 0.096602`
+4. `baseline_icbr_mechanism_summary.csv` shows candidate generation is about `1.7539%` of core time, while replay rerank rises to about `97.6469%` after teacher-output reuse.
 
 ## Generated Artifacts
 
@@ -147,8 +147,33 @@ The final comparison set under `outputs/rerun_v2_engine_safe_20260401/benchmark_
 1. `comparison_fastlib/baseline_icbr_shared_check.csv` reports `shared_numeric_aligned=True`、`trace_aligned=True` 与 `shared_symbolic_prep_aligned=True` for seeds `42/52/62`.
 2. Both `baseline_fastlib` and `baseline_icbr_fastlib` report `numeric_cache_hit=True` and `symbolic_prep_cache_hit=True` for all requested seeds.
 3. `comparison_fastlib/baseline_icbr_primary_effect.csv` reports:
-   - `symbolic_core_speedup_vs_baseline = 6.092446`
+   - `symbolic_core_speedup_vs_baseline = 2.350452`
    - `final_teacher_imitation_mse_shift = 0.000062`
    - `final_target_mse_shift = -0.000023`
    - `final_target_r2_shift = 0.000258`
-4. `comparison_fastlib/baseline_icbr_mechanism_summary.csv` shows replay rerank still dominates the remaining ICBR core time even after widening the candidate library, now at about `96.26%` of core time.
+4. `comparison_fastlib/baseline_icbr_mechanism_summary.csv` shows replay rerank still dominates the remaining ICBR core time even after widening the candidate library, now at about `96.0892%` of core time.
+
+## Stage 8: Full-Library ICBR Supplement
+
+- Goal: Add a single-arm supplementary slice that shows ICBR can still keep the full symbolic library path runnable when the paired baseline full-library path is too slow to include in the rerun.
+- Success criteria:
+  - `baseline_fulllib` is explicitly treated as intentionally skipped for cost reasons rather than forgotten evidence.
+  - `baseline_icbr_fulllib` is documented as supplementary single-arm evidence, not as paired backend-only compare proof.
+  - The docs record both the single-arm quality gains vs `baseline_icbr_fastlib` and the remaining acceptable ICBR runtime profile.
+- Validation:
+  - `C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/baseline_icbr_fulllib.yaml --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr_fulllib --quiet`
+- Status: Complete
+
+## Observed Evidence (Full-Library ICBR Supplement, 2026-04-01)
+
+1. `baseline_fulllib` was intentionally not regenerated because the full-library baseline path is too slow for this rerun.
+2. `baseline_icbr_fulllib/symkanbenchmark_runs.csv` reports:
+   - `final_acc = 0.795433`
+   - `macro_auc = 0.963225`
+   - `final_target_r2 = 0.601003`
+   - `symbolic_core_seconds = 35.218785`
+3. Relative to `baseline_icbr_fastlib`, the full-library ICBR slice keeps the path runnable while improving single-arm quality:
+   - `final_acc +0.002200`
+   - `macro_auc +0.000592`
+   - `final_target_r2 +0.004067`
+   - `symbolic_core_seconds +3.227987`

@@ -29,6 +29,7 @@ Keep the repaired ICBR integration documented and interpretable across both the 
   - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr`
   - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_fastlib`
   - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr_fastlib`
+  - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr_fulllib`
 - Compare artifacts regenerated under:
   - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison`
   - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib`
@@ -64,11 +65,11 @@ Keep the repaired ICBR integration documented and interpretable across both the 
   - `baseline_icbr` has `numeric_cache_hit=True` and `symbolic_prep_cache_hit=True` for all three seeds.
   - `baseline_icbr` final edge counts are now `88,89,88` instead of exploding into the full dense graph.
   - `baseline_icbr_primary_effect.csv` reports:
-    - mean `symbolic_core_speedup_vs_baseline = 2.377025`
-    - mean `final_teacher_imitation_mse_shift = -0.006009`
-    - mean `final_target_mse_shift = -0.008364`
-    - mean `final_target_r2_shift = 0.092972`
-  - `comparison/baseline_icbr_mechanism_summary.csv` now reports candidate generation at about `1.65%` of core time and replay rerank at about `97.76%`.
+    - mean `symbolic_core_speedup_vs_baseline = 1.751763`
+    - mean `final_teacher_imitation_mse_shift = -0.006330`
+    - mean `final_target_mse_shift = -0.008691`
+    - mean `final_target_r2_shift = 0.096602`
+  - `comparison/baseline_icbr_mechanism_summary.csv` now reports candidate generation at about `1.7539%` of core time and replay rerank at about `97.6469%`.
   - For seeds `42,52,62`, `baseline_fastlib` and `baseline_icbr_fastlib` also have identical:
     - `base_acc`
     - `enhanced_acc`
@@ -80,17 +81,24 @@ Keep the repaired ICBR integration documented and interpretable across both the 
   - `comparison_fastlib/baseline_icbr_shared_check.csv` reports `shared_symbolic_prep_aligned=True` for all three seeds.
   - Both fastlib variants have `numeric_cache_hit=True` and `symbolic_prep_cache_hit=True` for all three seeds.
   - `comparison_fastlib/baseline_icbr_primary_effect.csv` reports:
-    - mean `symbolic_core_speedup_vs_baseline = 6.092446`
+    - mean `symbolic_core_speedup_vs_baseline = 2.350452`
     - mean `final_teacher_imitation_mse_shift = 0.000062`
     - mean `final_target_mse_shift = -0.000023`
     - mean `final_target_r2_shift = 0.000258`
-  - `comparison_fastlib/baseline_icbr_mechanism_summary.csv` now reports candidate generation at about `3.42%` of core time and replay rerank at about `96.26%`.
+  - `comparison_fastlib/baseline_icbr_mechanism_summary.csv` now reports candidate generation at about `3.5573%` of core time and replay rerank at about `96.0892%`.
+  - `baseline_icbr_fulllib` is now available as a supplementary single-arm slice:
+    - `baseline_fulllib` was intentionally skipped because the full-library baseline path is too slow for this rerun.
+    - mean `final_acc = 0.795433`
+    - mean `macro_auc = 0.963225`
+    - mean `final_target_r2 = 0.601003`
+    - mean `symbolic_core_seconds = 35.218785`
 
 ## Residual Risks
 
 - `symbolize_wall_time_s` is still a wall-clock measure that includes export overhead, so the compare conclusion for baseline/icbr should prefer `symbolic_core_seconds` and the new specialized summary tables.
 - The symbolic-prep cache key intentionally excludes backend-only settings; if future workflows introduce additional shared-prep toggles, they must be added to `_symbolic_prep_cache_key`.
 - The FAST_LIB slice improves speed much more strongly than the layered-library slice, but quality deltas are near-zero and mixed in sign; this should be reported as a speed-focused result, not a broad quality-improvement claim.
+- `baseline_icbr_fulllib` can demonstrate that ICBR keeps the full-library path runnable and can bring single-arm gains, but it is not paired backend-only evidence because no `baseline_fulllib` compare was generated.
 - Historical CSVs generated before this repair do not contain the new `final_teacher_imitation_mse` / `final_target_*` / `symbolic_prep_*` columns and should not be mixed into the new comparison set.
 
 ## Next Step

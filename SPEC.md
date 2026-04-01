@@ -115,6 +115,7 @@
 - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_fastlib/`
 - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr_fastlib/`
 - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib/`
+- `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr_fulllib/`
 
 ### 5.1 Layered 库对照
 
@@ -126,11 +127,11 @@
    - `shared_symbolic_prep_aligned=True`
 2. `baseline` 与 `baseline_icbr` 的 `final_n_edge` 均值一致，说明 ICBR 不再恢复已剪掉的边。
 3. `baseline_icbr_primary_effect.csv` 报告：
-   - `symbolic_core_speedup_vs_baseline` 均值约 `2.377025`
+   - `symbolic_core_speedup_vs_baseline` 均值约 `1.751763`
    - `final_teacher_imitation_mse_shift < 0`
    - `final_target_mse_shift < 0`
    - `final_target_r2_shift > 0`
-4. `baseline_icbr_mechanism_summary.csv` 与 markdown summary 已生成；其中 candidate generation 占核心时间约 `1.65%`，replay rerank 占比约 `97.76%`。
+4. `baseline_icbr_mechanism_summary.csv` 与 markdown summary 已生成；其中 candidate generation 占核心时间约 `1.7539%`，replay rerank 占比约 `97.6469%`。
 5. baseline 与 icbr 两侧公式导出成功率当前均为 `1.0`。
 
 ### 5.2 FAST_LIB 对照
@@ -144,10 +145,27 @@
 2. `baseline_fastlib` 与 `baseline_icbr_fastlib` 的 `numeric_cache_hit=True`、`symbolic_prep_cache_hit=True`，说明本轮库扩展仍复用了既有 numeric/shared-prep 缓存。
 3. `comparison_fastlib/variant_summary.csv` 报告两侧 `final_n_edge` 均值同为 `88.333333`。
 4. `comparison_fastlib/baseline_icbr_primary_effect.csv` 报告：
-   - `symbolic_core_speedup_vs_baseline` 均值约 `6.092446`
+   - `symbolic_core_speedup_vs_baseline` 均值约 `2.350452`
    - `final_target_mse_shift < 0`
    - `final_target_r2_shift > 0`
-5. `comparison_fastlib/baseline_icbr_mechanism_summary.csv` 报告 candidate generation 占核心时间约 `3.42%`，replay rerank 占比约 `96.26%`。
+5. `comparison_fastlib/baseline_icbr_mechanism_summary.csv` 报告 candidate generation 占核心时间约 `3.5573%`，replay rerank 占比约 `96.0892%`。
+
+### 5.3 Full symbolic library 的补充单变体切片
+
+当前还存在一组补充结果：
+
+- `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr_fulllib/`
+
+其解释边界如下：
+
+1. `baseline_fulllib` 本轮未跑，原因是 full symbolic library 下 baseline 路径过慢。
+2. 因此 `baseline_icbr_fulllib/` 不是 paired backend-only compare 证据，也不受第 3.2 节 shared-state fairness 合同的 paired compare 解释保护。
+3. 该切片仅用于补充说明：ICBR 在 full symbolic library 下仍可运行，并带来单边收益。
+4. 当前单边均值约为：
+   - `final_acc = 0.795433`
+   - `macro_auc = 0.963225`
+   - `final_target_r2 = 0.601003`
+   - `symbolic_core_seconds = 35.218785`
 
 ## 6. 失效条件
 
