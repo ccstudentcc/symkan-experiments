@@ -13,6 +13,7 @@ outputs/teacher_cache*/
 outputs/**/teacher_cache/
 
 In-Context-Symbolic-Regression-KAN-main/
+ICBR-KAN/
 
 MNIST/raw/
 outputs/benchmark_runs/
