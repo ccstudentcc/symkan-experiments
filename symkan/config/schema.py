@@ -280,6 +280,7 @@ class SymbolizeConfig(BaseModel):
     """Runtime configuration consumed by ``symbolize_pipeline``.
 
     Attributes:
+        symbolic_backend: Symbolic fitting backend selector.
         target_edges: Desired edge count before symbolic fixing.
         max_prune_rounds: Maximum prune rounds during symbolic preparation.
         lib: Optional flat symbolic library override.
@@ -328,6 +329,7 @@ class SymbolizeConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
+    symbolic_backend: Literal["baseline", "icbr"] = "baseline"
     target_edges: int = Field(default=60, ge=0)
     max_prune_rounds: int = Field(default=40, ge=0)
     lib: Optional[list[Any]] = None

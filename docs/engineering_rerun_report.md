@@ -1,160 +1,206 @@
-# 工程版复测报告（Rerun）
+# 工程版复测报告（2026-04-01 ICBR 集成对照）
 
 ## 1. 研究设定与口径
 
-1. 历史参考版（Legacy）：`d8e09b5edadb988bd4a1638ea7109cf3ff5ef7d7`，对应 pre-release `v1.0.0-legacy-d8`。
-2. 工程版（Current）：当前 `main`。
-3. 本轮复测默认参数：`stagewise.guard_mode=light`，`stagewise.prune_acc_drop_tol=0.08`。
-4. 复测执行日期：`2026-03-18`。
-5. 本轮输出目录：`outputs/rerun_v2_engine_safe_20260318_rerun/`。
-6. 对照目录（上一轮工程归档）：`outputs/rerun_v2_engine_safe_20260318/`。
+1. 本报告对应的比较问题不是“工程版 vs 历史版”，而是“在当前工程版中，baseline symbolic backend 与 ICBR symbolic backend 的对照”。
+2. 复测执行日期：`2026-04-01`。
+3. 主引用输出目录：`outputs/rerun_v2_engine_safe_20260401/benchmark_ab/`。
+4. 对照目录包括：
+   - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline/`
+   - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr/`
+   - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/`
+5. 本报告的结论边界是：只讨论符号拟合后端差异，不把结果解释成训练策略差异。
+6. 入口口径：常规 CLI 使用 `python -m scripts.*`；本轮对照通过 `scripts.symkanbenchmark.py` 与 `scripts.benchmark_ab_compare.py` 直接完成。
 7. 命令默认执行环境：`PowerShell`（Windows）。
-8. 入口口径：常规 CLI 使用 `python -m scripts.*`；本报告复测链路使用 `scripts/run_engineering_rerun.ps1` 作为编排封装入口。
-9. 输出口径：项目默认输出目录为 `outputs/benchmark_*`；本报告使用工程归档输出目录 `outputs/rerun_v2_engine_safe_20260318_rerun/`。
-10. 跨版本字段映射：仅将 `export_wall_time_s` 语义映射到 `symbolize_wall_time_s`；`run_total_wall_time_s` 为工程版新增字段，历史版无同名可比项。
-11. 测试设备与运行时环境：
+8. 测试设备与运行时环境：
    - 操作系统：Windows 11 专业版 `23H2`（OS Build `22631.5472`）
    - Python：`Miniconda` 的 `kan` 环境，解释器路径 `C:\Users\chenpeng\miniconda3\envs\kan\python.exe`（`3.9.25`）
    - CPU：`12th Gen Intel(R) Core(TM) i5-12500H`
    - 内存：`16 GB`
-   - 深度学习运行时：`PyTorch 2.1.2+cpu`（本轮复测按 CPU 路径执行）
-12. 执行命令（PowerShell）：
+   - 深度学习运行时：`PyTorch 2.1.2+cpu`
+
+执行命令（PowerShell）：
 
 ```powershell
 # 运行目录：仓库根目录（symkan-experiments/）
-.\scripts\run_engineering_rerun.ps1 -PythonExe C:\Users\chenpeng\miniconda3\envs\kan\python.exe -OutRoot outputs/rerun_v2_engine_safe_20260318_rerun
+C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.symkanbenchmark `
+  --tasks full `
+  --stagewise-seeds 42,52,62 `
+  --config configs/benchmark_ab/baseline.yaml `
+  --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline `
+  --quiet
+
+C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.symkanbenchmark `
+  --tasks full `
+  --stagewise-seeds 42,52,62 `
+  --config configs/benchmark_ab/baseline_icbr.yaml `
+  --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr `
+  --quiet
+
+C:\Users\chenpeng\miniconda3\envs\kan\python.exe -m scripts.benchmark_ab_compare `
+  --root outputs/rerun_v2_engine_safe_20260401/benchmark_ab `
+  --baseline baseline `
+  --variants baseline_icbr `
+  --output outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison
 ```
 
-## 2. 产物完整性核验
+## 2. 实现边界
 
-核验结论：本轮产物完整，具备后续统计分析条件。
+本轮对照建立在两个明确的工程边界上：
 
-1. 主 benchmark：`benchmark_runs/` 下共 `3` 个 run 目录，并存在 `symkanbenchmark_runs.csv`。
-2. A/B 三变体：`baseline/adaptive/adaptive_auto` 各包含 `3` 个 run，且各自 `symkanbenchmark_runs.csv` 完整。
-3. A/B 汇总文件齐全：`variant_summary.csv`、`pairwise_delta_summary.csv`、`seedwise_delta.csv`、`trace_seedwise.csv`、`trace_summary.csv`、`comparison_summary.md`。
-4. 消融五变体齐全：`full/wostagewise/wopruning/wocompact/wolayerwiseft` 各包含 `3` 个 run，并生成 `ablation_runs_raw.csv` 与 `ablation_runs_summary.csv`。
+1. ICBR 只改变符号拟合后端，不改变数值训练。
+2. `baseline` 与 `baseline_icbr` 共享 numeric cache 与 shared symbolic-prep 边界。
 
-## 3. 主 benchmark 统计结果（本轮 rerun）
+当前 `symkan.symbolic.pipeline` 的内部结构是：
 
-数据源：`outputs/rerun_v2_engine_safe_20260318_rerun/benchmark_runs/symkanbenchmark_runs.csv`
+1. `prepare_symbolic_bundle(...)`
+   负责共享 symbolic-prep：渐进剪枝、输入压缩、pre-symbolic fit 和 trace 生成。
+2. `symbolize_pipeline_from_prepared(...)`
+   负责 backend-specific symbolic completion：
+   - `baseline` 走原有 layered symbolic search。
+   - `icbr` 调用 `kan.icbr` 中的 ICBR 后端。
 
-| 指标 | 均值 | 标准差 |
+因此，本报告中的任何性能或质量差异，都只能解释为“同一数值 KAN、同一 shared symbolic-prep 之后的后端差异”。
+
+## 3. 产物完整性核验
+
+核验结论：本轮产物完整，具备对 `baseline` 与 `baseline_icbr` 做 backend-only 对照的条件。
+
+1. `baseline/` 与 `baseline_icbr/` 各包含 `3` 个 run 目录，且各自 `symkanbenchmark_runs.csv` 完整。
+2. 通用 compare 产物齐全：
+   - `variant_summary.csv`
+   - `pairwise_delta_summary.csv`
+   - `seedwise_delta.csv`
+   - `trace_seedwise.csv`
+   - `trace_summary.csv`
+   - `comparison_summary.md`
+3. baseline/icbr 专用 compare 产物齐全：
+   - `baseline_icbr_shared_check.csv`
+   - `baseline_icbr_primary_effect.csv`
+   - `baseline_icbr_mechanism_summary.csv`
+
+## 4. Shared-State 对齐核验
+
+`baseline_icbr_shared_check.csv` 的核心作用是验证当前 compare 是否真的只反映后端差异。
+
+| stage_seed | shared_numeric_aligned | trace_aligned | shared_symbolic_prep_aligned | baseline_numeric_cache_hit | icbr_numeric_cache_hit | baseline_symbolic_prep_cache_hit | icbr_symbolic_prep_cache_hit |
+| ---: | --- | --- | --- | --- | --- | --- | --- |
+| 42 | True | True | True | True | True | False | True |
+| 52 | True | True | True | True | True | False | True |
+| 62 | True | True | True | True | True | False | True |
+
+解释：
+
+1. 三个 seed 的 `shared_numeric_aligned=True`，说明数值训练结果一致。
+2. 三个 seed 的 `trace_aligned=True`，说明 `symbolize_trace.csv` 记录的节奏来自相同的 shared symbolic-prep。
+3. 三个 seed 的 `shared_symbolic_prep_aligned=True`，说明 ICBR 并未重新执行一套不同的剪枝或输入压缩流程。
+4. baseline 侧的 `baseline_symbolic_prep_cache_hit=False`、ICBR 侧的 `icbr_symbolic_prep_cache_hit=True` 是当前实现预期：baseline 首次生成 prepared bundle，ICBR 复用同一 prepared bundle。
+
+## 5. 主结果
+
+### 5.1 变体均值
+
+`comparison_summary.md` 给出的核心均值如下：
+
+| 变体 | final_acc | final_n_edge | macro_auc | run_total_wall_time_s | symbolic_core_seconds | symbolize_wall_time_s | validation_mean_r2 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline | 0.777767 | 88.333333 | 0.951587 | 149.814120 | 56.559906 | 128.000426 | -0.482755 |
+| baseline_icbr | 0.788667 | 88.333333 | 0.961440 | 71.447204 | 26.114427 | 68.817573 | -0.409281 |
+
+直接观察有三点：
+
+1. `final_n_edge` 均值完全一致，说明 ICBR 不再恢复被剪掉的边，也不会把零占位边重新计入最终复杂度。
+2. `symbolic_core_seconds` 和 `symbolize_wall_time_s` 都明显下降，说明 ICBR 的速度优势已经在当前工程版中稳定落地。
+3. `final_acc`、`macro_auc` 与 `validation_mean_r2` 没有表现出退化，当前样本下甚至略优于 baseline。
+
+### 5.2 pairwise 差分
+
+| 指标 | mean_delta (baseline_icbr - baseline) | win / lose / tie |
 | --- | ---: | ---: |
-| `final_acc` | 0.7692 | 0.0054 |
-| `macro_auc` | 0.9568 | 0.0014 |
-| `final_n_edge` | 87.6667 | 2.6247 |
-| `stage_total_seconds` | 45.1728 | 1.4216 |
-| `symbolic_total_seconds` | 35.6519 | 2.3925 |
-| `symbolize_wall_time_s` | 75.6998 | 2.8740 |
-| `run_total_wall_time_s` | 140.3330 | 3.5777 |
-
-## 4. 与上一轮工程归档对照（`...20260318`）
-
-数据源：
-
-1. 本轮：`outputs/rerun_v2_engine_safe_20260318_rerun/benchmark_runs/symkanbenchmark_runs.csv`
-2. 上轮：`outputs/rerun_v2_engine_safe_20260318/benchmark_runs/symkanbenchmark_runs.csv`
-
-| 指标 | 本轮 rerun | 上轮工程版 | 差值 | 相对变化 |
-| --- | ---: | ---: | ---: | ---: |
-| `final_acc` | 0.7692 | 0.7786 | -0.0095 | -1.22% |
-| `macro_auc` | 0.9568 | 0.9567 | +0.0001 | +0.01% |
-| `final_n_edge` | 87.6667 | 89.0000 | -1.3333 | -1.50% |
-| `stage_total_seconds` | 45.1728 | 46.1217 | -0.9489 | -2.06% |
-| `symbolic_total_seconds` | 35.6519 | 36.0723 | -0.4204 | -1.17% |
-| `symbolize_wall_time_s` | 75.6998 | 88.5343 | -12.8345 | -14.50% |
-| `run_total_wall_time_s` | 140.3330 | 154.0382 | -13.7053 | -8.90% |
+| `final_acc` | +0.010900 | 3 / 0 / 0 |
+| `final_n_edge` | +0.000000 | 0 / 0 / 3 |
+| `macro_auc` | +0.009853 | 3 / 0 / 0 |
+| `run_total_wall_time_s` | -78.366916 | 3 / 0 / 0 |
+| `symbolic_core_seconds` | -30.445479 | 3 / 0 / 0 |
+| `symbolize_wall_time_s` | -59.182853 | 3 / 0 / 0 |
+| `validation_mean_r2` | +0.073474 | 2 / 1 / 0 |
 
 解释：
 
-1. 相较上一轮工程归档，本轮端到端 wall-time 明显收敛并下降。
-2. `macro_auc` 基本稳定，而 `final_acc` 出现轻微回落。
-3. `final_n_edge` 进一步降低，提示结构压缩程度提高，与精度轻微下降方向一致。
+1. `final_n_edge` 差分为零，是这轮 repair 最关键的正确性信号之一。
+2. `symbolic_core_seconds` 与 `symbolize_wall_time_s` 均为 `3/3` 更快，说明 ICBR 的速度优势不是单个 seed 偶然造成。
+3. 由于当前样本量只有 3 个 seed，精度相关提升应表述为“未观察到退化，且当前样本下方向有利”，而不是直接写成充分统计显著性结论。
 
-## 5. 与历史参考版（Legacy）对照
+## 6. ICBR 主效应与机制拆解
 
-历史参考数据源：`outputs/benchmark_ab/baseline/symkanbenchmark_runs.csv`
+### 6.1 主效应
 
-口径说明：
+`baseline_icbr_primary_effect.csv` 汇总如下：
 
-1. Legacy 使用 `export_wall_time_s`，其语义对应工程版 `symbolize_wall_time_s`。
-2. Legacy 不含 `run_total_wall_time_s`，该指标无法做一一对应比较。
-3. 为避免跨版本误读，本文仅在上述语义映射成立时进行对照，不将新增字段强行并入同名比较。
-
-| 指标 | 本轮 rerun | 历史参考版 | 差值 | 相对变化 |
-| --- | ---: | ---: | ---: | ---: |
-| `final_acc` | 0.7692 | 0.7807 | -0.0116 | -1.48% |
-| `macro_auc` | 0.9568 | 0.9548 | +0.0019 | +0.20% |
-| `final_n_edge` | 87.6667 | 89.6667 | -2.0000 | -2.23% |
-| `stage_total_seconds` | 45.1728 | 39.7912 | +5.3817 | +13.52% |
-| `symbolic_total_seconds` | 35.6519 | 33.2678 | +2.3841 | +7.17% |
-| `symbolize_wall_time_s` | 75.6998 | 73.1687 | +2.5311 | +3.46% |
+| 指标 | mean | median | std |
+| --- | ---: | ---: | ---: |
+| `symbolic_core_speedup_vs_baseline` | 2.174967 | 1.411476 | 1.086859 |
+| `final_teacher_imitation_mse_shift` | -0.006009 | -0.006910 | 0.001299 |
+| `final_target_mse_shift` | -0.008364 | -0.008328 | 0.000504 |
+| `final_target_r2_shift` | 0.092972 | 0.092567 | 0.005597 |
+| `baseline_formula_export_success_rate` | 1.000000 | 1.000000 | 0.000000 |
+| `icbr_formula_export_success_rate` | 1.000000 | 1.000000 | 0.000000 |
 
 解释：
 
-1. 工程版在增强可观测性与稳健性后，仍保持与 Legacy 接近的 AUC 水平。
-2. `final_acc` 仍存在可见差距，阶段训练与符号化核心耗时也高于 Legacy。
-3. 与上一轮工程归档相比，本轮 `symbolize_wall_time_s` 的下降幅度较大，提示工程链路内部仍有可优化空间。
+1. 当前工程版已经满足 ICBR 设计文档中的核心边界：比较只发生在符号拟合后端。
+2. `final_teacher_imitation_mse_shift < 0` 与 `final_target_mse_shift < 0` 说明 ICBR 并未为了加速而牺牲当前样本下的后端拟合质量。
+3. 两侧公式导出成功率都为 `1.0`，可以支持“导出链路稳定”这一工程性结论，但不应外推为真实公式恢复正确率。
 
-## 6. 工程版 A/B 结果（本轮 rerun）
+### 6.2 机制拆解
 
-数据源：
+`baseline_icbr_mechanism_summary.csv` 汇总如下：
 
-1. `outputs/rerun_v2_engine_safe_20260318_rerun/benchmark_ab/comparison/variant_summary.csv`
-2. `outputs/rerun_v2_engine_safe_20260318_rerun/benchmark_ab/comparison/pairwise_delta_summary.csv`
+| 指标 | mean | median | std |
+| --- | ---: | ---: | ---: |
+| `icbr_candidate_generation_wall_time_s` | 0.349936 | 0.338095 | 0.016835 |
+| `icbr_replay_rerank_wall_time_s` | 19.251307 | 19.356854 | 0.189021 |
+| `icbr_candidate_share_of_core_time` | 0.013407 | 0.012895 | 0.000762 |
+| `icbr_replay_share_of_core_time` | 0.737183 | 0.737223 | 0.001157 |
+| `icbr_other_core_seconds` | 6.513185 | 6.513407 | 0.055354 |
+| `icbr_replay_rank_inversion_rate` | 0.113253 | 0.101124 | 0.051747 |
 
-关键均值：
+解释：
 
-1. `baseline`：`final_acc=0.7774`，`macro_auc=0.9561`，`run_total_wall_time_s=153.4705`。
-2. `adaptive`：`final_acc=0.7425`，`macro_auc=0.9457`，`run_total_wall_time_s=209.5523`。
-3. `adaptive_auto`：`final_acc=0.7515`，`macro_auc=0.9462`，`run_total_wall_time_s=130.7152`。
+1. 当前 ICBR 的核心时间主要仍落在 replay rerank，而不是 candidate generation。
+2. candidate generation 占比约 `1.34%`，说明“shared-tensor candidate evaluation” 已把候选生成本身压到了很低的常数开销。
+3. replay rank inversion rate 当前均值约 `0.113`，说明 replay 仍然在实际改写部分候选排序，而不是一个空转模块。
 
-pairwise（variant - baseline）：
+## 7. Symbolize Trace Rhythm
 
-| 比较 | 指标 | mean_delta | 胜 / 负 / 平 |
-| --- | --- | ---: | ---: |
-| `adaptive vs baseline` | `final_acc` | -0.0349 | 0 / 3 / 0 |
-| `adaptive vs baseline` | `macro_auc` | -0.0104 | 0 / 3 / 0 |
-| `adaptive vs baseline` | `run_total_wall_time_s` | +56.0818 | 1 / 2 / 0 |
-| `adaptive_auto vs baseline` | `final_acc` | -0.0260 | 0 / 3 / 0 |
-| `adaptive_auto vs baseline` | `macro_auc` | -0.0099 | 0 / 3 / 0 |
-| `adaptive_auto vs baseline` | `run_total_wall_time_s` | -22.7553 | 2 / 1 / 0 |
+`trace_summary.csv` 当前结果如下：
 
-说明：
+| variant | rounds_mean | effective_rounds_mean | total_edges_removed_mean | mean_drop_ratio_mean | max_drop_ratio_mean |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| baseline | 5.0000 | 3.6667 | 15.3333 | 0.033881 | 0.080582 |
+| baseline_icbr | 5.0000 | 3.6667 | 15.3333 | 0.033881 | 0.080582 |
 
-1. 对 `run_total_wall_time_s`，`win` 定义为“耗时更低（delta < 0）”。
-2. `adaptive` 在本轮呈现较高方差（`symbolize_wall_time_s` 标准差约 `59.78s`），存在 seed 级异常放大风险。
-3. `adaptive_auto` 在端到端耗时上最优，但准确率仍低于 baseline。
+这组结果的重要性在于：
 
-## 7. 工程版消融结果（本轮 rerun）
+1. 它直接证明 `Symbolize Trace Rhythm` 已经对齐。
+2. 这意味着 ICBR 的速度优势不来自“少做了剪枝轮次”或“绕开了 shared symbolic-prep”。
+3. 当前 compare 可以被解释为同一 shared trace 之后的后端差异，而不是阶段语义污染。
 
-数据源：`outputs/rerun_v2_engine_safe_20260318_rerun/benchmark_ablation/ablation_runs_summary.csv`
+## 8. 与历史文档的关系
 
-| 变体 | `final_acc_mean` | `macro_auc_mean` | `symbolic_total_seconds_mean` | `effective_input_dim_mean` |
-| --- | ---: | ---: | ---: | ---: |
-| `full` | 0.7750 | 0.9526 | 34.9771 | 57.6667 |
-| `wostagewise` | 0.4060 | 0.8303 | 17.1687 | 22.6667 |
-| `wopruning` | 0.7998 | 0.9635 | 44.3185 | 70.0000 |
-| `wocompact` | 0.7907 | 0.9561 | 44.8960 | 120.0000 |
-| `wolayerwiseft` | 0.7821 | 0.9566 | 21.6407 | 53.0000 |
+1. `2026-03-18` 和 `2026-03-27` 的 rerun 结果仍是历史参考，尤其用于说明工程版相对历史版、`adaptive` 系列以及 `radial_bf` 专题的口径。
+2. 本报告是当前关于 ICBR 接入结果的主引用文档。
+3. 若论文或答辩需要说明“工程版总体口径”，可继续引用 `engineering_version_rerun_note.md`；若需要说明“ICBR 在当前工程版中的实际表现”，应优先引用本报告与 `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/`。
 
-主要观察：
+## 9. 方法学限制
 
-1. `wostagewise` 依旧显著失效，说明 stagewise 训练是核心必要组件。
-2. `wopruning` 与 `wocompact` 虽提高精度，但符号化成本显著上升。
-3. `wolayerwiseft` 在当前口径下仍体现较高成本收益比。
+1. 当前统计仅基于固定三 seed，具备工程判断意义，但不应表述为充分统计显著性结论。
+2. `symbolize_wall_time_s` 仍包含导出前后的额外墙钟开销，因此 backend 比较应优先看 `symbolic_core_seconds`。
+3. 当前报告只覆盖 `baseline` vs `baseline_icbr`，不替代已有 adaptive、ablation、LayerwiseFT 专题文档。
 
-## 8. 方法学限制
+## 10. 结论
 
-1. 历史版与工程版的指标体系并非完全同构，部分对比仅可做语义映射而非严格同名比较。
-2. 本轮统计基于固定三 seed，结论具备工程决策意义，但不应外推为充分统计显著性结论。
-3. `adaptive` 的高方差提示其在局部随机条件下仍可能出现不稳定行为，后续需结合更细粒度日志进一步定位。
-
-## 9. 结论与后续工作
-
-1. 本轮 rerun 产物完整、口径一致，可作为当前工程版的主引用结果。
-2. 建议继续采用“双锚点”叙述：Legacy 作为历史参考，工程版 rerun 作为当前正式结论。
-3. 后续优化优先级建议：
-   - 针对 `adaptive` 的 seed 级异常放大进行机制性排查；
-   - 持续压缩 `symbolize_wall_time_s` 的非核心开销；
-   - 在维持 `macro_auc` 稳定前提下，回收 `final_acc` 的小幅损失。
+1. 当前工程版已经实现了“baseline 默认、ICBR 可显式选择”的后端接入目标。
+2. `baseline` 与 `baseline_icbr` 现已共享 numeric stage 与 shared symbolic-prep 边界，`trace` 完全对齐。
+3. 在当前三 seed 对照中，ICBR 没有改变最终边数，却把 `symbolic_core_seconds` 平均提升到约 `2.17x` 的速度优势。
+4. 这使得当前 ICBR 结果与 `ICBR-KAN_design.md` 的核心设计预期保持一致：改动集中在符号拟合后端，而不是训练本身。

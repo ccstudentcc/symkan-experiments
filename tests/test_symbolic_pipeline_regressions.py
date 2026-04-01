@@ -32,6 +32,12 @@ class _MaskHolder:
         self.mask = mask
 
 
+class _SymbolicMaskHolder(_MaskHolder):
+    def __init__(self, mask: torch.Tensor, funs_name: list[list[str]]) -> None:
+        super().__init__(mask)
+        self.funs_name = funs_name
+
+
 class FailingSuggestModel:
     def __init__(self) -> None:
         self.width_in = [1]
@@ -96,6 +102,10 @@ def _fake_symbolic_result() -> dict[str, object]:
     }
 
 
+def _set_optional_symbolize_attr(config: AppConfig, name: str, value) -> None:
+    object.__setattr__(config.symbolize, name, value)
+
+
 def test_select_dataset_inputs_preserves_validation_split() -> None:
     dataset = {
         "train_input": torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float32),
@@ -146,6 +156,15 @@ def test_safe_attribute_raises_when_feature_score_is_missing() -> None:
 
     with pytest.raises(RuntimeError, match="feature_score"):
         safe_attribute(MissingFeatureScoreModel(input_dim=2), dataset, n_sample=1)
+
+
+def test_count_effective_edges_ignores_symbolic_zero_functions() -> None:
+    class _EdgeCountModel:
+        width_in = [2, 1]
+        act_fun = [_MaskHolder(torch.zeros((2, 1), dtype=torch.int64))]
+        symbolic_fun = [_SymbolicMaskHolder(torch.ones((1, 2), dtype=torch.int64), [["0", "x"]])]
+
+    assert symbolic_pipeline._count_effective_edges(_EdgeCountModel()) == 1
 
 
 def test_layerwise_symbolic_reports_suggest_failures() -> None:
@@ -259,3 +278,192 @@ def test_symbolize_pipeline_records_input_compaction_fallback(monkeypatch: pytes
             "error_type": "ValueError",
         }
     ]
+
+
+def test_symbolize_pipeline_keeps_baseline_backend_as_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset = _make_pipeline_dataset()
+    captured: dict[str, object] = {"fast_symbolic_called": 0}
+
+    monkeypatch.setattr(symbolic_pipeline, "clone_model", lambda model, **kwargs: copy.deepcopy(model))
+    monkeypatch.setattr(symbolic_pipeline, "model_acc_ds", lambda *args, **kwargs: 0.9)
+    monkeypatch.setattr(symbolic_pipeline, "get_n_edge", lambda model: model.n_edge)
+    monkeypatch.setattr(symbolic_pipeline, "_fit_or_raise", lambda *args, **kwargs: None)
+    monkeypatch.setattr(symbolic_pipeline, "_heavy_finetune", lambda *args, **kwargs: None)
+    monkeypatch.setattr(symbolic_pipeline, "collect_valid_formulas", lambda formulas: [])
+    monkeypatch.setattr(
+        symbolic_pipeline,
+        "auto_symbolic_icbr",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ICBR backend should stay disabled by default")),
+    )
+
+    def fake_fast_symbolic(model, fit_dataset, **kwargs):
+        captured["fast_symbolic_called"] = int(captured["fast_symbolic_called"]) + 1
+        captured["fit_shape"] = tuple(fit_dataset["train_input"].shape)
+        captured["lib_hidden"] = list(kwargs["lib_hidden"])
+        captured["lib_output"] = list(kwargs["lib_output"])
+        return _fake_symbolic_result()
+
+    monkeypatch.setattr(symbolic_pipeline, "fast_symbolic", fake_fast_symbolic)
+
+    config = AppConfig()
+    config.symbolize.max_prune_rounds = 0
+    config.symbolize.enable_input_compaction = False
+    config.symbolize.verbose = False
+
+    result = symbolic_pipeline.symbolize_pipeline(PipelineModel(), dataset, config)
+
+    assert captured["fast_symbolic_called"] == 1
+    assert captured["fit_shape"] == tuple(dataset["train_input"].shape)
+    assert captured["lib_hidden"] == symbolic_pipeline.LIB_HIDDEN
+    assert captured["lib_output"] == symbolic_pipeline.LIB_OUTPUT
+    assert result["timing"]["symbolic_backend"] == "baseline"
+    assert result["sym_stats"]["backend"] == "baseline"
+
+
+def test_symbolize_pipeline_icbr_backend_uses_flattened_library_and_preserves_result_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset = _make_pipeline_dataset()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(symbolic_pipeline, "clone_model", lambda model, **kwargs: copy.deepcopy(model))
+    monkeypatch.setattr(symbolic_pipeline, "model_acc_ds", lambda *args, **kwargs: 0.9)
+    monkeypatch.setattr(symbolic_pipeline, "get_n_edge", lambda model: model.n_edge)
+    monkeypatch.setattr(symbolic_pipeline, "_fit_or_raise", lambda *args, **kwargs: None)
+    monkeypatch.setattr(symbolic_pipeline, "_heavy_finetune", lambda *args, **kwargs: None)
+    monkeypatch.setattr(symbolic_pipeline, "collect_valid_formulas", lambda formulas: [])
+    monkeypatch.setattr(
+        symbolic_pipeline,
+        "fast_symbolic",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("baseline symbolic backend should not run")),
+    )
+
+    def fake_run_auto_symbolic_icbr_with_models(
+        teacher_model,
+        work_model,
+        calibration_input,
+        *,
+        lib_names,
+        topk,
+        a_range,
+        b_range,
+        grid_number,
+        iteration,
+        verbose,
+        collect_metrics,
+        **kwargs,
+    ):
+        captured["calibration_shape"] = tuple(calibration_input.shape)
+        captured["lib"] = list(lib_names)
+        captured["topk"] = int(topk)
+        captured["a_range"] = tuple(a_range)
+        captured["b_range"] = tuple(b_range)
+        captured["grid_number"] = int(grid_number)
+        captured["iteration"] = int(iteration)
+        captured["verbose"] = int(verbose)
+        work = copy.deepcopy(work_model)
+        work.n_edge = 2
+        return work, {
+            "candidate_generation_wall_time_s": 0.2,
+            "replay_rerank_wall_time_s": 0.1,
+            "replay_rank_inversion_count": 1,
+            "replay_rank_inversion_total": 2,
+            "replay_rank_inversion_rate": 0.5,
+            "commit_param_drift_l2_mean": float("nan"),
+            "commit_param_drift_l2_max": float("nan"),
+        }
+
+    monkeypatch.setattr(symbolic_pipeline, "_run_auto_symbolic_icbr_with_models", fake_run_auto_symbolic_icbr_with_models)
+
+    config = AppConfig()
+    config.symbolize.max_prune_rounds = 0
+    config.symbolize.enable_input_compaction = False
+    config.symbolize.verbose = False
+    config.symbolize.lib_hidden = ["x", "tanh"]
+    config.symbolize.lib_output = ["x^2", "tanh"]
+    config.symbolize.symbolic_backend = "icbr"
+    _set_optional_symbolize_attr(config, "icbr_topk", 7)
+    _set_optional_symbolize_attr(config, "icbr_a_range", (-3.0, 3.0))
+    _set_optional_symbolize_attr(config, "icbr_b_range", (-1.5, 1.5))
+    _set_optional_symbolize_attr(config, "icbr_grid_number", 33)
+    _set_optional_symbolize_attr(config, "icbr_iteration", 2)
+
+    result = symbolic_pipeline.symbolize_pipeline(PipelineModel(), dataset, config)
+
+    assert captured["calibration_shape"] == tuple(dataset["train_input"].shape)
+    assert captured["lib"] == ["x", "tanh", "x^2"]
+    assert captured["topk"] == 7
+    assert captured["a_range"] == (-3.0, 3.0)
+    assert captured["b_range"] == (-1.5, 1.5)
+    assert captured["grid_number"] == 33
+    assert captured["iteration"] == 2
+    assert captured["verbose"] == 0
+    assert result["timing"]["symbolic_backend"] == "icbr"
+    assert result["timing"]["symbolic_backend_library"] == ["x", "tanh", "x^2"]
+    assert result["timing"]["symbolic_backend_topk"] == 7
+    assert result["sym_stats"]["backend"] == "icbr"
+    assert result["sym_stats"]["library"] == ["x", "tanh", "x^2"]
+    assert set(result) >= {"model", "formulas", "final_acc", "final_n_edge", "timing", "sym_stats"}
+
+
+def test_symbolize_pipeline_from_prepared_reuses_shared_trace_across_backends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset = _make_pipeline_dataset()
+
+    monkeypatch.setattr(symbolic_pipeline, "clone_model", lambda model, **kwargs: copy.deepcopy(model))
+    monkeypatch.setattr(symbolic_pipeline, "model_acc_ds", lambda *args, **kwargs: 0.9)
+    monkeypatch.setattr(symbolic_pipeline, "get_n_edge", lambda model: model.n_edge)
+    monkeypatch.setattr(symbolic_pipeline, "_fit_or_raise", lambda *args, **kwargs: None)
+    monkeypatch.setattr(symbolic_pipeline, "_heavy_finetune", lambda *args, **kwargs: None)
+    monkeypatch.setattr(symbolic_pipeline, "collect_valid_formulas", lambda formulas: [])
+
+    def fake_fast_symbolic(model, fit_dataset, **kwargs):
+        return _fake_symbolic_result()
+
+    def fake_run_auto_symbolic_icbr_with_models(
+        teacher_model,
+        work_model,
+        calibration_input,
+        *,
+        lib_names,
+        topk,
+        a_range,
+        b_range,
+        grid_number,
+        iteration,
+        verbose,
+        collect_metrics,
+        **kwargs,
+    ):
+        work = copy.deepcopy(work_model)
+        work.n_edge = 2
+        return work, {
+            "candidate_generation_wall_time_s": 0.2,
+            "replay_rerank_wall_time_s": 0.1,
+            "replay_rank_inversion_count": 0,
+            "replay_rank_inversion_total": 1,
+            "replay_rank_inversion_rate": 0.0,
+            "commit_param_drift_l2_mean": float("nan"),
+            "commit_param_drift_l2_max": float("nan"),
+        }
+
+    monkeypatch.setattr(symbolic_pipeline, "fast_symbolic", fake_fast_symbolic)
+    monkeypatch.setattr(symbolic_pipeline, "_run_auto_symbolic_icbr_with_models", fake_run_auto_symbolic_icbr_with_models)
+
+    config = AppConfig()
+    config.symbolize.max_prune_rounds = 1
+    config.symbolize.enable_input_compaction = False
+    config.symbolize.verbose = False
+
+    prepared = symbolic_pipeline.prepare_symbolic_bundle(PipelineModel(), dataset, config)
+    baseline_result = symbolic_pipeline.symbolize_pipeline_from_prepared(copy.deepcopy(prepared), dataset, config)
+
+    config_icbr = config.model_copy(deep=True)
+    config_icbr.symbolize.symbolic_backend = "icbr"
+    icbr_result = symbolic_pipeline.symbolize_pipeline_from_prepared(copy.deepcopy(prepared), dataset, config_icbr)
+
+    assert baseline_result["trace"].to_dict(orient="records") == icbr_result["trace"].to_dict(orient="records")
+    assert baseline_result["effective_input_indices"] == icbr_result["effective_input_indices"]
+    assert baseline_result["sym_stats"]["backend"] == "baseline"
+    assert icbr_result["sym_stats"]["backend"] == "icbr"

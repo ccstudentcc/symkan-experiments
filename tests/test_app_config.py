@@ -59,6 +59,7 @@ def test_validate_app_config_nested_sections() -> None:
                 "numeric_basis": "radial_bf",
             },
             "symbolize": {
+                "symbolic_backend": "icbr",
                 "target_edges": 48,
                 "layerwise_finetune_steps": 0,
             },
@@ -71,6 +72,7 @@ def test_validate_app_config_nested_sections() -> None:
     assert config.stagewise.width == [12, 16, 3]
     assert config.stagewise.steps_per_stage == 80
     assert config.model.numeric_basis == "radial_bf"
+    assert config.symbolize.symbolic_backend == "icbr"
     assert config.symbolize.target_edges == 48
     assert config.symbolize.layerwise_finetune_steps == 0
 
@@ -114,6 +116,7 @@ def test_load_config_rejects_invalid_nested_field() -> None:
         ({"stagewise": {"prune_acc_drop_tol": -0.01}}, "stagewise.prune_acc_drop_tol"),
         ({"stagewise": {"prune_acc_drop_tol": 1.5}}, "stagewise.prune_acc_drop_tol"),
         ({"model": {"numeric_basis": "unknown"}}, "model.numeric_basis"),
+        ({"symbolize": {"symbolic_backend": "unknown"}}, "symbolize.symbolic_backend"),
         ({"data": {"mnist_classes": []}}, "mnist_classes"),
         ({"evaluation": {"validate_n_sample": 0}}, "evaluation.validate_n_sample"),
     ],
@@ -142,6 +145,7 @@ def test_benchmark_cli_overrides_are_applied_to_nested_app_config() -> None:
         device="cpu",
         numeric_basis="radial_bf",
         global_seed=321,
+        symbolic_backend="icbr",
         max_prune_rounds=12,
         layerwise_finetune_steps=5,
         layerwise_finetune_lamb=2e-5,
@@ -160,6 +164,7 @@ def test_benchmark_cli_overrides_are_applied_to_nested_app_config() -> None:
     assert config.runtime.device == "cpu"
     assert config.model.numeric_basis == "radial_bf"
     assert config.runtime.global_seed == 321
+    assert config.symbolize.symbolic_backend == "icbr"
     assert config.symbolize.max_prune_rounds == 12
     assert config.symbolize.layerwise_finetune_steps == 5
     assert config.symbolize.layerwise_finetune_lamb == pytest.approx(2e-5)
@@ -188,7 +193,20 @@ def test_benchmark_without_config_uses_checked_in_runner_defaults() -> None:
     assert config.stagewise.prune_start_stage == 3
     assert config.stagewise.target_edges == 120
     assert config.stagewise.guard_mode == "light"
+    assert config.symbolize.symbolic_backend == "baseline"
     assert config.symbolize.target_edges == 90
+
+
+def test_benchmark_ab_baseline_icbr_variant_switches_only_symbolic_backend() -> None:
+    baseline = load_config(Path("configs/benchmark_ab/baseline.yaml"))
+    baseline_icbr = load_config(Path("configs/benchmark_ab/baseline_icbr.yaml"))
+
+    assert baseline.model_dump(exclude={"symbolize"}) == baseline_icbr.model_dump(exclude={"symbolize"})
+    assert baseline.symbolize.model_dump(exclude={"symbolic_backend"}) == baseline_icbr.symbolize.model_dump(
+        exclude={"symbolic_backend"}
+    )
+    assert baseline.symbolize.symbolic_backend == "baseline"
+    assert baseline_icbr.symbolize.symbolic_backend == "icbr"
 
 
 def test_benchmark_parser_accepts_layerwise_cli_overrides() -> None:
@@ -220,6 +238,11 @@ def test_benchmark_parser_accepts_layerwise_cli_overrides() -> None:
     assert runner.layerwise_early_stop_min_delta == pytest.approx(5e-4)
     assert runner.layerwise_eval_interval == 10
     assert runner.layerwise_validation_n_sample == 128
+
+
+def test_benchmark_parser_accepts_symbolic_backend_override() -> None:
+    runner = parse_benchmark_cli_config(["--symbolic-backend", "icbr"])
+    assert runner.symbolic_backend == "icbr"
 
 
 def test_benchmark_parser_accepts_numeric_basis_override() -> None:

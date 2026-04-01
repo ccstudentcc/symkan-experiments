@@ -10,7 +10,7 @@
 - notebook 参数细节：[kan_parameters](kan_parameters.md)
 - 消融实验说明：[ablation_usage](ablation_usage.md)
 
-## 工程版口径入口（2026-03）
+## 工程版口径入口（2026-04）
 
 1. 若需要“历史参考版 vs 当前工程版”的统一说明，优先阅读 [engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
 2. 若需要工程版主引用结果（目录、指标、对照解释），优先阅读 [engineering_rerun_report.md](engineering_rerun_report.md)。
@@ -88,7 +88,7 @@ KAN 每条边学到的是**单变量光滑函数**。训练收敛后，可以直
 - `symkan.config`：统一配置对象、YAML 加载与校验边界。
 - `symkan.config.notebook`：旧 notebook 函数式参数到 canonical `AppConfig` 的转换入口。
 - `stagewise_train`：分阶段训练、验证集驱动选模与快照回滚。
-- `symbolize_pipeline`：渐进剪枝、逐层符号化与微调。
+- `symbolize_pipeline`：共享 symbolic-prep、backend-specific symbolic completion 与微调。
 - 导出接口：用于生成结构化日志与结果文件。
 
 需要特别区分的是：`symkan` 是库层，提供配置、训练、符号化、评估与导出能力；benchmark / ablation 的 CLI、YAML 配置与批量复现入口属于工具层脚本，不属于 `symkan` 包 API。
@@ -111,6 +111,7 @@ $$
 
 - `stagewise_train`：分阶段训练，支持剪枝回滚、验证集驱动、符号化就绪评分。
 - `symbolize_pipeline`：渐进剪枝 + 输入压缩 + 严格逐层符号化 + 强化微调。
+- 默认 symbolic backend 仍为 `baseline`；如需切换到 ICBR，需显式设置 `symbolize.symbolic_backend = icbr`。
 - `validate_formula_numerically`：对导出表达式做 R2 与数值稳定性验证。
 - `save_*` 导出接口：将阶段日志、符号汇总、bundle 统一落盘。
 
@@ -331,7 +332,14 @@ flowchart TB
 
 ### 5.2 符号变换逻辑
 
-在 `symbolize_pipeline` 中，每层活跃连接会调用候选函数搜索（`suggest_symbolic` 路径），随后固定为具体表达式（`fix_symbolic` 路径），并进行层间微调。
+在 `symbolize_pipeline` 中，当前需要区分两个边界：
+
+1. shared symbolic-prep：渐进剪枝、输入压缩与 pre-symbolic fit，这一段与 symbolic backend 无关。
+2. backend-specific symbolic completion：
+   - `baseline` 使用原有 layered symbolic search。
+   - `icbr` 调用 `kan.icbr` 的 ICBR 后端。
+
+也就是说，当前库层语义已经不是“所有路径都走 `suggest_symbolic`”，而是“默认 backend 走原有路径，显式 ICBR backend 走替代性的符号拟合实现”，但两者共享同一 prepared state。
 
 可把每层输出抽象为：
 
@@ -425,9 +433,15 @@ $$
 | --- | --- | --- | --- |
 | `symbolize_pipeline(...)` | 主符号化流水线 | `config=AppConfig(...)` | `dict` |
 | `symbolize_pipeline_report(...)` | 结构化版本 | 同上 | `SymbolizeResult` |
+| `prepare_symbolic_bundle(...)` | 共享 symbolic-prep 预处理 | `model`, `dataset`, `config` | `dict` |
 | `register_custom_functions()` | 注册 `sigmoid/softplus` | 无 | `None` |
 
 预设函数库：`LIB_HIDDEN`, `LIB_OUTPUT`, `FAST_LIB`, `EXPRESSIVE_LIB`, `FULL_LIB`。
+
+补充说明：
+
+- `SymbolizeConfig.symbolic_backend` 默认是 `baseline`。
+- `icbr` 只改变 backend-specific symbolic completion，不改变数值训练与 shared symbolic-prep。
 
 ### 6.6 `symkan.eval`
 
@@ -552,6 +566,7 @@ sym_res = symbolize_pipeline(
 | `baseline` | 不启用任何 adaptive 功能，作为精度上限参考 |
 | `adaptive` | 启用验证集反馈 + 自适应阈值/lamb/微调步数 |
 | `adaptive_auto` | 在 `adaptive` 基础上，额外启用阶段早停与符号化自适应剪枝节奏控制 |
+| `baseline_icbr` | 与 `baseline` 共享 numeric stage 与 shared symbolic-prep，只把 symbolic backend 切到 `icbr` |
 
 ```powershell
 # 运行目录：仓库根目录（symkan-experiments/）

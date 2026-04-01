@@ -14,7 +14,7 @@
 - [2. 运行前准备](#2-运行前准备)
 - [3. 推荐复跑顺序](#3-推荐复跑顺序)
 - [4. Step 1: 主 benchmark 复跑](#4-step-1-主-benchmark-复跑)
-- [5. Step 2: Adaptive A/B 实验与汇总](#5-step-2-adaptive-ab-实验与汇总)
+- [5. Step 2: A/B 实验与汇总](#5-step-2-ab-实验与汇总)
 - [6. Step 3: 单因素消融复跑](#6-step-3-单因素消融复跑)
 - [7. Step 4: LayerwiseFT 专项分析](#7-step-4-layerwiseft-专项分析)
 - [8. 预期输出目录树](#8-预期输出目录树)
@@ -25,7 +25,7 @@
 本文面向“从零开始复现当前项目完整实验链路”的场景，覆盖：
 
 1. 主 benchmark 多 seed 复跑。
-2. Adaptive A/B 三组对照及汇总。
+2. A/B 对照及汇总（含 adaptive 系列与 baseline/icbr 后端对照）。
 3. 单因素消融矩阵。
 4. LayerwiseFT 专项分析与改进版对比。
 
@@ -114,7 +114,7 @@ python -m scripts.benchmark_ab_compare --help
 推荐顺序如下：
 
 1. 先跑主 benchmark，确认基础链路和主要结果可复现。
-2. 再跑 Adaptive A/B，并生成对比汇总表。
+2. 再跑 A/B 对照，并生成对比汇总表。
 3. 再跑单因素消融矩阵。
 4. 最后基于消融结果做 LayerwiseFT 专项分析。
 
@@ -198,11 +198,11 @@ python -m scripts.symkanbenchmark `
 4. `formula_validation.csv`
    用于检查导出公式的数值 `R²` 与数值稳定性。
 
-## 5. Step 2: Adaptive A/B 实验与汇总
+## 5. Step 2: A/B 实验与汇总
 
-### 5.1 跑三组实验
+### 5.1 跑常规 A/B 变体
 
-下面三条命令假定你已经准备好了三份配置：
+常规 adaptive A/B 复跑：
 
 - `configs/benchmark_ab/baseline.yaml`
 - `configs/benchmark_ab/adaptive.yaml`
@@ -238,7 +238,31 @@ python -m scripts.symkanbenchmark `
   --quiet
 ```
 
-### 5.2 生成 A/B 汇总
+### 5.2 baseline vs baseline_icbr 后端对照
+
+若本轮目标是验证 ICBR 仅改变符号拟合后端，建议额外运行：
+
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
+python -m scripts.symkanbenchmark `
+  --tasks full `
+  --stagewise-seeds 42,52,62 `
+  --config configs/benchmark_ab/baseline.yaml `
+  --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline `
+  --quiet
+```
+
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
+python -m scripts.symkanbenchmark `
+  --tasks full `
+  --stagewise-seeds 42,52,62 `
+  --config configs/benchmark_ab/baseline_icbr.yaml `
+  --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr `
+  --quiet
+```
+
+### 5.3 生成 A/B 汇总
 
 ```powershell
 # 运行目录：仓库根目录（symkan-experiments/）
@@ -249,7 +273,18 @@ python -m scripts.benchmark_ab_compare `
   --output outputs/rerun/benchmark_ab/comparison
 ```
 
-### 5.3 预期生成的文件
+若本轮是 `baseline` vs `baseline_icbr` 后端对照，则改为：
+
+```powershell
+# 运行目录：仓库根目录（symkan-experiments/）
+python -m scripts.benchmark_ab_compare `
+  --root outputs/rerun_v2_engine_safe_20260401/benchmark_ab `
+  --baseline baseline `
+  --variants baseline_icbr `
+  --output outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison
+```
+
+### 5.4 预期生成的文件
 
 三组实验各自会生成与 Step 1 相同结构的 benchmark 结果：
 
@@ -265,6 +300,12 @@ python -m scripts.benchmark_ab_compare `
 - `trace_seedwise.csv`
 - `trace_summary.csv`
 - `comparison_summary.md`
+
+若 compare 对是 `baseline` vs `baseline_icbr`，则还应额外生成：
+
+- `baseline_icbr_shared_check.csv`
+- `baseline_icbr_primary_effect.csv`
+- `baseline_icbr_mechanism_summary.csv`
 
 ## 6. Step 3: 单因素消融复跑
 
@@ -404,6 +445,20 @@ outputs/rerun/
       trace_seedwise.csv
       trace_summary.csv
       comparison_summary.md
+  rerun_v2_engine_safe_20260401/
+    benchmark_ab/
+      baseline/
+      baseline_icbr/
+      comparison/
+        variant_summary.csv
+        pairwise_delta_summary.csv
+        seedwise_delta.csv
+        trace_seedwise.csv
+        trace_summary.csv
+        comparison_summary.md
+        baseline_icbr_shared_check.csv
+        baseline_icbr_primary_effect.csv
+        baseline_icbr_mechanism_summary.csv
   benchmark_ablation/
     ablation_runs_raw.csv
     ablation_runs_summary.csv
@@ -433,8 +488,12 @@ outputs/rerun/
    - `symbolic_abort_stage`
    - `symbolic_abort_reason`
    - `input_compaction_fallback`
-4. `outputs/rerun/benchmark_ab/comparison/comparison_summary.md` 已生成，表明 A/B 汇总链路执行成功。
-5. `outputs/rerun/benchmark_ablation/layerwiseft_analysis/` 与 `layerwiseft_improved_analysis/` 均有 CSV 输出，表明专项分析链路执行成功。
+4. `outputs/rerun/benchmark_ab/comparison/comparison_summary.md` 已生成，表明通用 A/B 汇总链路执行成功。
+5. 若本轮做了 ICBR 后端对照，还应确认 `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/` 中：
+   - `baseline_icbr_shared_check.csv` 已生成，且三条 seed 都为 `shared_symbolic_prep_aligned=True`
+   - `trace_summary.csv` 中 `baseline` 与 `baseline_icbr` 的节奏一致
+   - `baseline_icbr_primary_effect.csv` 与 `baseline_icbr_mechanism_summary.csv` 已生成
+6. `outputs/rerun/benchmark_ablation/layerwiseft_analysis/` 与 `layerwiseft_improved_analysis/` 均有 CSV 输出，表明专项分析链路执行成功。
 
 如需进一步解读结果，继续参考：
 

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import gc
+import hashlib
 import os
 import json
 import math
+import random
 import time
 import warnings
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
@@ -53,8 +56,11 @@ LIB_HIDDEN = None
 LIB_OUTPUT = None
 collect_all_formulas = None
 format_expr = None
+prepare_symbolic_bundle = None
+select_dataset_inputs = None
 symbolize_pipeline = None
 symbolize_pipeline_report = None
+symbolize_pipeline_from_prepared_report = None
 stagewise_train_report = None
 psutil = _UNSET
 eval_metrics_module = _UNSET
@@ -90,7 +96,8 @@ def _ensure_runtime_deps() -> None:
     global compute_multiclass_roc_auc, validate_formula_numerically
     global save_export_bundle, save_stage_logs, save_symbolic_summary, safe_attribute
     global EXPRESSIVE_LIB, FAST_LIB, LIB_HIDDEN, LIB_OUTPUT, collect_all_formulas, format_expr
-    global symbolize_pipeline, symbolize_pipeline_report, stagewise_train_report
+    global prepare_symbolic_bundle, select_dataset_inputs
+    global symbolize_pipeline, symbolize_pipeline_report, symbolize_pipeline_from_prepared_report, stagewise_train_report
     global psutil, eval_metrics_module
 
     _ensure_config_deps()
@@ -149,7 +156,12 @@ def _ensure_runtime_deps() -> None:
             format_expr as _format_expr,
             symbolize_pipeline as _symbolize_pipeline,
         )
-        from symkan.symbolic.pipeline import symbolize_pipeline_report as _symbolize_pipeline_report
+        from symkan.symbolic.compact import select_dataset_inputs as _select_dataset_inputs
+        from symkan.symbolic.pipeline import (
+            prepare_symbolic_bundle as _prepare_symbolic_bundle,
+            symbolize_pipeline_from_prepared_report as _symbolize_pipeline_from_prepared_report,
+            symbolize_pipeline_report as _symbolize_pipeline_report,
+        )
         from symkan.tuning import stagewise_train_report as _stagewise_train_report
 
         KAN = _KAN
@@ -176,8 +188,11 @@ def _ensure_runtime_deps() -> None:
         LIB_OUTPUT = _LIB_OUTPUT
         collect_all_formulas = _collect_all_formulas
         format_expr = _format_expr
+        prepare_symbolic_bundle = _prepare_symbolic_bundle
+        select_dataset_inputs = _select_dataset_inputs
         symbolize_pipeline = _symbolize_pipeline
         symbolize_pipeline_report = _symbolize_pipeline_report
+        symbolize_pipeline_from_prepared_report = _symbolize_pipeline_from_prepared_report
         stagewise_train_report = _stagewise_train_report
 
     if psutil is _UNSET:
@@ -247,6 +262,7 @@ class BenchmarkRunnerConfig:
     lib_preset: Optional[str] = None
     disable_stagewise_train: Optional[bool] = None
     stage_guard_mode: Optional[str] = None
+    symbolic_backend: Optional[str] = None
     max_prune_rounds: Optional[int] = None
     layerwise_finetune_steps: Optional[int] = None
     layerwise_finetune_lamb: Optional[float] = None
@@ -261,6 +277,13 @@ class BenchmarkRunnerConfig:
     prune_collapse_floor: Optional[float] = None
     symbolic_prune_adaptive_acc_drop_tol: Optional[float] = None
     validate_n_sample: Optional[int] = None
+
+
+@dataclass
+class _CachedNumericModelInfo:
+    width: List[int]
+    numeric_basis: str
+    n_edge: int
 
 
 def parse_csv_list(raw: str) -> List[str]:
@@ -278,6 +301,173 @@ def parse_csv_floats(raw: str) -> List[float]:
 def ensure_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _to_cpu_state_dict(model) -> Dict[str, Any]:
+    state_dict = model.state_dict()
+    return {
+        key: value.detach().cpu().clone() if hasattr(value, "detach") else value
+        for key, value in state_dict.items()
+    }
+
+
+def _numeric_cache_root(output_dir: str) -> Path:
+    return ensure_dir(Path(output_dir).resolve().parent / "_numeric_cache")
+
+
+def _symbolic_prep_cache_root(output_dir: str) -> Path:
+    return ensure_dir(Path(output_dir).resolve().parent / "_symbolic_prep_cache")
+
+
+def _numeric_cache_key(config: AppConfig, *, stage_seed: int, batch_size: int, device: str) -> str:
+    payload = {
+        "app_config": config.model_dump(exclude={"symbolize"}, mode="python"),
+        "stage_seed": int(stage_seed),
+        "batch_size": int(batch_size),
+        "device": str(device),
+        "cache_version": 1,
+    }
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
+
+
+def _symbolic_prep_cache_key(config: AppConfig, *, numeric_cache_key: str) -> str:
+    symbolize = config.symbolize
+    payload = {
+        "numeric_cache_key": str(numeric_cache_key),
+        "symbolic_prep": {
+            "target_edges": int(symbolize.target_edges),
+            "max_prune_rounds": int(symbolize.max_prune_rounds),
+            "finetune_steps": int(symbolize.finetune_steps),
+            "finetune_lr": float(symbolize.finetune_lr),
+            "batch_size": int(symbolize.batch_size) if symbolize.batch_size is not None else None,
+            "enable_input_compaction": bool(symbolize.enable_input_compaction),
+            "prune_collapse_floor": float(symbolize.prune_collapse_floor),
+            "prune_eval_interval": int(symbolize.prune_eval_interval),
+            "prune_attr_sample_adaptive": bool(symbolize.prune_attr_sample_adaptive),
+            "prune_attr_sample_min": int(symbolize.prune_attr_sample_min),
+            "prune_attr_sample_max": int(symbolize.prune_attr_sample_max),
+            "prune_threshold_start": float(symbolize.prune_threshold_start),
+            "prune_threshold_end": float(symbolize.prune_threshold_end),
+            "prune_max_drop_ratio_per_round": float(symbolize.prune_max_drop_ratio_per_round),
+            "prune_threshold_backoff": float(symbolize.prune_threshold_backoff),
+            "prune_adaptive_threshold": bool(symbolize.prune_adaptive_threshold),
+            "prune_adaptive_step": float(symbolize.prune_adaptive_step),
+            "prune_adaptive_acc_drop_tol": float(symbolize.prune_adaptive_acc_drop_tol),
+            "prune_adaptive_min_edges_gain": int(symbolize.prune_adaptive_min_edges_gain),
+            "prune_adaptive_low_gain_patience": int(symbolize.prune_adaptive_low_gain_patience),
+        },
+        "cache_version": 1,
+    }
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
+
+
+def _numeric_cache_bundle_path(output_dir: str, cache_key: str) -> Path:
+    cache_dir = ensure_dir(_numeric_cache_root(output_dir) / cache_key)
+    return cache_dir / "numeric_stage.pt"
+
+
+def _symbolic_prep_cache_bundle_path(output_dir: str, cache_key: str) -> Path:
+    cache_dir = ensure_dir(_symbolic_prep_cache_root(output_dir) / cache_key)
+    return cache_dir / "symbolic_prep.pt"
+
+
+def _load_numeric_stage_cache(output_dir: str, cache_key: str) -> Optional[Dict[str, Any]]:
+    bundle_path = _numeric_cache_bundle_path(output_dir, cache_key)
+    if not bundle_path.exists():
+        return None
+    return torch.load(bundle_path, map_location="cpu")
+
+
+def _load_symbolic_prep_cache(output_dir: str, cache_key: str) -> Optional[Dict[str, Any]]:
+    bundle_path = _symbolic_prep_cache_bundle_path(output_dir, cache_key)
+    if not bundle_path.exists():
+        return None
+    return torch.load(bundle_path, map_location="cpu")
+
+
+def _save_numeric_stage_cache(output_dir: str, cache_key: str, payload: Dict[str, Any]) -> None:
+    bundle_path = _numeric_cache_bundle_path(output_dir, cache_key)
+    tmp_path = bundle_path.with_suffix(".tmp")
+    torch.save(payload, tmp_path)
+    tmp_path.replace(bundle_path)
+
+
+def _save_symbolic_prep_cache(output_dir: str, cache_key: str, payload: Dict[str, Any]) -> None:
+    bundle_path = _symbolic_prep_cache_bundle_path(output_dir, cache_key)
+    tmp_path = bundle_path.with_suffix(".tmp")
+    torch.save(payload, tmp_path)
+    tmp_path.replace(bundle_path)
+
+
+def _release_numeric_stage_refs(*objects: Any) -> None:
+    for obj in objects:
+        del obj
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def _build_symbolic_prep_cache_payload(prepared_bundle: Dict[str, Any]) -> Dict[str, Any]:
+    prepared_model = prepared_bundle["prepared_model"]
+    trace_df = prepared_bundle.get("trace")
+    if trace_df is None:
+        trace_rows: List[Dict[str, Any]] = []
+    elif hasattr(trace_df, "to_dict"):
+        trace_rows = trace_df.to_dict(orient="records")
+    else:
+        trace_rows = list(trace_df)
+    return {
+        "prepared_width": _normalize_kan_width(prepared_model),
+        "prepared_state_dict": _to_cpu_state_dict(prepared_model),
+        "trace_rows": trace_rows,
+        "timing": prepared_bundle.get("timing", {}),
+        "effective_target_edges": int(prepared_bundle.get("effective_target_edges", 0)),
+        "input_n_edge": int(prepared_bundle.get("input_n_edge", 0)),
+        "effective_input_indices": list(prepared_bundle.get("effective_input_indices", [])),
+        "effective_input_dim": int(prepared_bundle.get("effective_input_dim", 0)),
+        "original_input_id": prepared_bundle.get("original_input_id"),
+    }
+
+
+def _restore_symbolic_prep_bundle(
+    *,
+    payload: Dict[str, Any],
+    dataset,
+    config: AppConfig,
+    stage_seed: int,
+):
+    effective_inputs = list(payload.get("effective_input_indices", []))
+    prepared_width = [int(v) for v in payload.get("prepared_width", [])]
+    prepared_model = KAN(
+        width=prepared_width,
+        grid=config.model.grid,
+        k=config.model.k,
+        numeric_basis=config.model.numeric_basis,
+        seed=int(stage_seed),
+        auto_save=False,
+        symbolic_enabled=True,
+        save_act=True,
+        device=get_device(),
+    )
+    prepared_model.load_state_dict(payload["prepared_state_dict"])
+    prepared_dataset = dataset
+    if effective_inputs and len(effective_inputs) < int(dataset["train_input"].shape[1]):
+        prepared_dataset = select_dataset_inputs(dataset, effective_inputs)
+    trace_rows = payload.get("trace_rows", [])
+    trace_df = pd.DataFrame(trace_rows) if trace_rows else pd.DataFrame()
+    return {
+        "prepared_model": prepared_model,
+        "prepared_dataset": prepared_dataset,
+        "trace": trace_df,
+        "timing": dict(payload.get("timing", {})),
+        "effective_target_edges": int(payload.get("effective_target_edges", 0)),
+        "input_n_edge": int(payload.get("input_n_edge", 0)),
+        "effective_input_indices": effective_inputs,
+        "effective_input_dim": int(payload.get("effective_input_dim", len(effective_inputs))),
+        "original_input_id": payload.get("original_input_id"),
+    }
 
 
 @contextmanager
@@ -301,10 +491,28 @@ def _run_label(run_index: int, total_runs: int, stage_seed: int) -> str:
 
 def set_global_seed(seed: int) -> None:
     _ensure_runtime_deps()
+    seed = int(seed)
+    random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+    cudnn = getattr(torch.backends, "cudnn", None)
+    if cudnn is not None:
+        cudnn.deterministic = True
+        cudnn.benchmark = False
+    use_deterministic_algorithms = getattr(torch, "use_deterministic_algorithms", None)
+    if callable(use_deterministic_algorithms):
+        try:
+            use_deterministic_algorithms(True, warn_only=True)
+        except TypeError:
+            use_deterministic_algorithms(True)
+
+
+def _stable_topk_feature_indices(feature_score, top_k: int):
+    _ensure_runtime_deps()
+    ranked = np.argsort(-np.asarray(feature_score), kind="stable")[: int(top_k)]
+    return np.sort(ranked.astype(np.int64))
 
 
 def resolve_path(raw: str, base_dir: Path) -> Path:
@@ -411,6 +619,10 @@ def _build_experiment_metrics(
     expr_complexity_mean: float,
     auc_macro: float,
     val_df,
+    final_teacher_imitation_mse: float,
+    final_target_mse: float,
+    final_target_r2: float,
+    formula_export_success: bool,
     stage_total_seconds: float,
     stage_train_total_seconds: float,
     stage_prune_total_seconds: float,
@@ -428,6 +640,7 @@ def _build_experiment_metrics(
     input_n_edge = int(symbolize_result.get("input_n_edge", get_n_edge(enhanced_model)))
     pipeline_warnings = timing.get("pipeline_warnings", [])
     warning_count = len(pipeline_warnings) if isinstance(pipeline_warnings, list) else 0
+    sym_stats = symbolize_result.get("sym_stats", {}) or {}
 
     return {
         "run_index": run_index,
@@ -446,8 +659,19 @@ def _build_experiment_metrics(
         "enhanced_n_edge": int(get_n_edge(enhanced_model)),
         "selected_stage": stage_result.get("selected_stage"),
         "selected_score": float(stage_result.get("selected_score", float("nan"))),
+        "numeric_cache_hit": bool(stage_result.get("numeric_cache_hit", False)),
+        "cached_stage_total_seconds_ref": float(stage_result.get("cached_stage_total_seconds", float("nan"))),
+        "symbolic_backend": str(sym_stats.get("backend", timing.get("symbolic_backend", "baseline"))),
+        "symbolic_prep_cache_hit": bool(timing.get("symbolic_prep_cache_hit", False)),
+        "cached_symbolic_prep_seconds_ref": float(
+            timing.get("symbolic_prep_total_seconds_ref", timing.get("symbolic_prep_total_seconds", float("nan")))
+        ),
         "final_acc": float(symbolize_result.get("final_acc", float("nan"))),
         "final_n_edge": int(symbolize_result.get("final_n_edge", -1)),
+        "final_teacher_imitation_mse": float(final_teacher_imitation_mse),
+        "final_target_mse": float(final_target_mse),
+        "final_target_r2": float(final_target_r2),
+        "formula_export_success": bool(formula_export_success),
         "effective_target_edges": int(symbolize_result.get("effective_target_edges", -1)),
         "effective_input_dim": int(symbolize_result.get("effective_input_dim", -1)),
         "valid_expression_count": int(len(valid_exprs)),
@@ -471,6 +695,15 @@ def _build_experiment_metrics(
         "symbolic_abort_reason": timing.get("abort_reason"),
         "symbolic_abort_error_type": timing.get("abort_error_type"),
         "symbolic_warning_count": int(warning_count),
+        "icbr_candidate_generation_wall_time_s": float(
+            timing.get("icbr_candidate_generation_wall_time_s", sym_stats.get("candidate_generation_wall_time_s", float("nan")))
+        ),
+        "icbr_replay_rerank_wall_time_s": float(
+            timing.get("icbr_replay_rerank_wall_time_s", sym_stats.get("replay_rerank_wall_time_s", float("nan")))
+        ),
+        "icbr_replay_rank_inversion_rate": float(
+            timing.get("icbr_replay_rank_inversion_rate", sym_stats.get("replay_rank_inversion_rate", float("nan")))
+        ),
         # backward-compatible alias (legacy name): same value as symbolize_wall_time_s
         "export_wall_time_s": symbolize_wall_time,
         "pre_symbolic_n_edge": input_n_edge,
@@ -764,6 +997,27 @@ def _compute_symbolic_non_core_seconds(symbolic_core_seconds: float, symbolize_w
     return symbolic_non_core_seconds, True
 
 
+def _compute_prediction_mse_and_r2(prediction: np.ndarray, target: np.ndarray) -> tuple[float, float]:
+    pred = np.asarray(prediction, dtype=np.float64)
+    tgt = np.asarray(target, dtype=np.float64)
+    mse = float(np.mean((pred - tgt) ** 2))
+    target_centered = tgt - np.mean(tgt, axis=0, keepdims=True)
+    ss_tot = float(np.sum(target_centered**2))
+    if ss_tot <= 1e-12:
+        return mse, float("nan")
+    ss_res = float(np.sum((pred - tgt) ** 2))
+    return mse, float(1.0 - (ss_res / ss_tot))
+
+
+def _formula_export_success(summary_df: pd.DataFrame, n_classes: int) -> bool:
+    if summary_df is None or len(summary_df) < int(n_classes):
+        return False
+    if "expr_full" not in summary_df.columns:
+        return False
+    valid_count = int((summary_df["expr_full"] != "N/A (零或常数)").sum())
+    return valid_count >= int(n_classes)
+
+
 def build_runtime_app_config(
     config: AppConfig,
     width: List[int],
@@ -897,6 +1151,8 @@ def apply_benchmark_overrides(config: AppConfig, args: BenchmarkRunnerConfig) ->
         workflow_update["disable_stagewise_train"] = args.disable_stagewise_train
     if args.stage_guard_mode is not None:
         stagewise_update["guard_mode"] = args.stage_guard_mode
+    if args.symbolic_backend is not None:
+        symbolize_update["symbolic_backend"] = args.symbolic_backend
     if args.max_prune_rounds is not None:
         symbolize_update["max_prune_rounds"] = args.max_prune_rounds
     if args.layerwise_finetune_steps is not None:
@@ -1342,57 +1598,32 @@ def run_single_experiment(
     dataset_full = build_dataset(data["X_train"], data["Y_train"], data["X_test"], data["Y_test"])
     inner_dim = int(config.model.inner_dim)
     width_base = [data["input_dim"], inner_dim, data["n_classes"]]
-
-    base_model = KAN(
-        width=width_base,
-        grid=config.model.grid,
-        k=config.model.k,
-        numeric_basis=config.model.numeric_basis,
-        seed=config.runtime.baseline_seed,
-        auto_save=False,
-        symbolic_enabled=True,
-        save_act=True,
-        device=get_device(),
+    baseline_seed = (
+        int(config.runtime.baseline_seed)
+        if config.runtime.baseline_seed is not None
+        else int(config.runtime.global_seed)
     )
-    emit_progress(show_progress, f"{run_label} baseline fit start")
-    with maybe_silent(silent):
-        base_res = safe_fit(
-            base_model,
-            dataset_full,
-            opt="Adam",
-            steps=config.model.baseline_steps,
-            lr=config.model.baseline_lr,
-            lamb=config.model.baseline_lamb,
-            batch=batch_size,
-            update_grid=True,
-            singularity_avoiding=True,
-            log=config.model.baseline_log,
+    stage_seed = int(stage_seed)
+    cache_key = _numeric_cache_key(config, stage_seed=stage_seed, batch_size=batch_size, device=device)
+    cached_numeric = _load_numeric_stage_cache(runner.output_dir, cache_key)
+
+    if cached_numeric is not None:
+        emit_progress(show_progress, f"{run_label} numeric cache hit: key={cache_key}")
+        keep_idx = np.asarray(cached_numeric["keep_idx"], dtype=np.int64)
+        base_res = dict(cached_numeric.get("base_res", {}))
+        base_acc = float(cached_numeric["base_acc"])
+        x_train_sel = data["X_train"][:, keep_idx]
+        x_test_sel = data["X_test"][:, keep_idx]
+        dataset_enhanced = build_dataset(x_train_sel, data["Y_train"], x_test_sel, data["Y_test"])
+        app_config = build_runtime_app_config(
+            config,
+            width=list(cached_numeric["enhanced_width"]),
+            stage_seed=stage_seed,
+            batch_size=batch_size,
+            library_cfg=library_cfg,
         )
-    base_acc = float(model_acc(base_model, data["X_test"], data["y_test"]))
-
-    feature_score = safe_attribute(base_model, dataset_full)
-    top_k = min(int(config.model.top_k), data["input_dim"])
-    keep_idx = np.sort(np.argsort(-feature_score)[:top_k])
-    emit_progress(
-        show_progress,
-        f"{run_label} baseline done: acc={base_acc:.4f}, kept_inputs={len(keep_idx)}/{data['input_dim']}",
-    )
-    x_train_sel = data["X_train"][:, keep_idx]
-    x_test_sel = data["X_test"][:, keep_idx]
-    dataset_enhanced = build_dataset(x_train_sel, data["Y_train"], x_test_sel, data["Y_test"])
-    app_config = build_runtime_app_config(
-        config,
-        width=[int(x_train_sel.shape[1]), inner_dim, data["n_classes"]],
-        stage_seed=stage_seed,
-        batch_size=batch_size,
-        library_cfg=library_cfg,
-    )
-
-    stage_fallback_t0 = time.perf_counter()
-    if config.workflow.disable_stagewise_train:
-        emit_progress(show_progress, f"{run_label} end-to-end fit start")
         enhanced_model = KAN(
-            width=[int(x_train_sel.shape[1]), inner_dim, data["n_classes"]],
+            width=list(cached_numeric["enhanced_width"]),
             grid=config.model.grid,
             k=config.model.k,
             numeric_basis=config.model.numeric_basis,
@@ -1402,108 +1633,249 @@ def run_single_experiment(
             save_act=True,
             device=get_device(),
         )
-        e2e_steps = (
-            int(config.workflow.e2e_steps)
-            if int(config.workflow.e2e_steps) > 0
-            else int(len(config.stagewise.lr_schedule) * config.stagewise.steps_per_stage)
+        enhanced_model.load_state_dict(cached_numeric["enhanced_state_dict"])
+        base_model = _CachedNumericModelInfo(
+            width=list(cached_numeric["base_width"]),
+            numeric_basis=str(config.model.numeric_basis),
+            n_edge=int(cached_numeric["base_n_edge"]),
         )
-        e2e_lr = (
-            float(config.workflow.e2e_lr)
-            if float(config.workflow.e2e_lr) > 0
-            else float(np.median(config.stagewise.lr_schedule))
+        stage_result = dict(cached_numeric["stage_result"])
+        stage_result["numeric_cache_hit"] = True
+        stage_result["cached_stage_total_seconds"] = float(cached_numeric["stage_total_seconds"])
+        stage_result["cached_stage_train_total_seconds"] = float(cached_numeric["stage_train_total_seconds"])
+        stage_result["cached_stage_prune_total_seconds"] = float(cached_numeric["stage_prune_total_seconds"])
+        stage_result["cached_stage_final_finetune_seconds"] = float(cached_numeric["stage_final_finetune_seconds"])
+        enhanced_res = dict(stage_result)
+        enhanced_acc = float(cached_numeric["enhanced_acc"])
+        stage_total_seconds = 0.0
+        stage_train_total_seconds = 0.0
+        stage_prune_total_seconds = 0.0
+        stage_final_finetune_seconds = 0.0
+        emit_progress(
+            show_progress,
+            (
+                f"{run_label} numeric cache restored: selected_stage={stage_result.get('selected_stage')}, "
+                f"acc={enhanced_acc:.4f}, edges={int(get_n_edge(enhanced_model))}"
+            ),
         )
-        e2e_lamb = (
-            float(config.workflow.e2e_lamb)
-            if float(config.workflow.e2e_lamb) >= 0
-            else float(np.median(config.stagewise.lamb_schedule))
+        _release_numeric_stage_refs(cached_numeric)
+    else:
+        emit_progress(show_progress, f"{run_label} numeric cache miss: key={cache_key}")
+        set_global_seed(baseline_seed)
+        base_model = KAN(
+            width=width_base,
+            grid=config.model.grid,
+            k=config.model.k,
+            numeric_basis=config.model.numeric_basis,
+            seed=baseline_seed,
+            auto_save=False,
+            symbolic_enabled=True,
+            save_act=True,
+            device=get_device(),
         )
+        emit_progress(show_progress, f"{run_label} baseline fit start")
         with maybe_silent(silent):
-            e2e_res = safe_fit(
-                enhanced_model,
-                dataset_enhanced,
+            base_res = safe_fit(
+                base_model,
+                dataset_full,
                 opt="Adam",
-                steps=e2e_steps,
-                lr=e2e_lr,
-                lamb=e2e_lamb,
+                steps=config.model.baseline_steps,
+                lr=config.model.baseline_lr,
+                lamb=config.model.baseline_lamb,
                 batch=batch_size,
                 update_grid=True,
                 singularity_avoiding=True,
-                log=max(1, e2e_steps // 10),
+                log=config.model.baseline_log,
             )
-        stage_total_seconds = float(time.perf_counter() - stage_fallback_t0)
-        enhanced_res = {
-            "train_loss": list(e2e_res.get("train_loss", [])),
-            "test_loss": list(e2e_res.get("test_loss", [])),
-            "stage_logs": [
-                {
-                    "stage": 0,
-                    "lamb": float(e2e_lamb),
-                    "effective_lamb": float(e2e_lamb),
-                    "lr": float(e2e_lr),
-                    "acc_before": float("nan"),
-                    "acc_after": float(model_acc_ds(enhanced_model, dataset_enhanced)),
-                    "edges_before": float("nan"),
-                    "edges_after": int(get_n_edge(enhanced_model)),
-                    "prune_accepted": False,
-                    "prune_attempts": [],
-                    "prune_attempt_count": 0,
-                    "rollback": "",
-                    "prune_th": float("nan"),
-                    "sym_score": float("nan"),
-                    "train_seconds": float(stage_total_seconds),
-                    "prune_seconds": 0.0,
-                    "stage_seconds": float(stage_total_seconds),
-                }
-            ],
-            "best_acc": float(model_acc_ds(enhanced_model, dataset_enhanced)),
-            "selected_stage": "e2e",
-            "selected_edges": int(get_n_edge(enhanced_model)),
-            "selected_score": float("nan"),
-            "stage_snapshots": [],
-            "stage_early_stopped": False,
-            "stage_early_stop_reason": "",
-            "stage_timings": [
-                {
-                    "stage": 0,
-                    "train_seconds": float(stage_total_seconds),
-                    "prune_seconds": 0.0,
-                    "stage_seconds": float(stage_total_seconds),
-                }
-            ],
-            "stage_train_total_seconds": float(stage_total_seconds),
-            "stage_prune_total_seconds": 0.0,
-            "final_finetune_seconds": 0.0,
-            "stage_total_seconds": float(stage_total_seconds),
-        }
-    else:
-        emit_progress(show_progress, f"{run_label} stagewise train start")
-        with maybe_silent(silent):
-            enhanced_model, enhanced_res = stagewise_train_report(dataset_enhanced, app_config)
-    stage_result = enhanced_res.to_legacy_dict() if hasattr(enhanced_res, "to_legacy_dict") else enhanced_res
-    enhanced_acc = float(model_acc_ds(enhanced_model, dataset_enhanced))
-    stage_total_seconds = float(stage_result.get("stage_total_seconds", time.perf_counter() - stage_fallback_t0))
-    stage_train_total_seconds = float(stage_result.get("stage_train_total_seconds", float("nan")))
-    stage_prune_total_seconds = float(stage_result.get("stage_prune_total_seconds", float("nan")))
-    stage_final_finetune_seconds = float(stage_result.get("final_finetune_seconds", float("nan")))
-    stage_mode = "end-to-end fit" if config.workflow.disable_stagewise_train else "stagewise train"
-    emit_progress(
-        show_progress,
-        (
-            f"{run_label} {stage_mode} done: selected_stage={stage_result.get('selected_stage')}, "
-            f"acc={enhanced_acc:.4f}, edges={int(get_n_edge(enhanced_model))}, "
-            f"wall_time={stage_total_seconds:.1f}s"
-        ),
-    )
+        base_acc = float(model_acc(base_model, data["X_test"], data["y_test"]))
+
+        feature_score = safe_attribute(base_model, dataset_full)
+        top_k = min(int(config.model.top_k), data["input_dim"])
+        keep_idx = _stable_topk_feature_indices(feature_score, top_k)
+        emit_progress(
+            show_progress,
+            f"{run_label} baseline done: acc={base_acc:.4f}, kept_inputs={len(keep_idx)}/{data['input_dim']}",
+        )
+        x_train_sel = data["X_train"][:, keep_idx]
+        x_test_sel = data["X_test"][:, keep_idx]
+        dataset_enhanced = build_dataset(x_train_sel, data["Y_train"], x_test_sel, data["Y_test"])
+        set_global_seed(stage_seed)
+        app_config = build_runtime_app_config(
+            config,
+            width=[int(x_train_sel.shape[1]), inner_dim, data["n_classes"]],
+            stage_seed=stage_seed,
+            batch_size=batch_size,
+            library_cfg=library_cfg,
+        )
+
+        stage_fallback_t0 = time.perf_counter()
+        if config.workflow.disable_stagewise_train:
+            emit_progress(show_progress, f"{run_label} end-to-end fit start")
+            enhanced_model = KAN(
+                width=[int(x_train_sel.shape[1]), inner_dim, data["n_classes"]],
+                grid=config.model.grid,
+                k=config.model.k,
+                numeric_basis=config.model.numeric_basis,
+                seed=stage_seed,
+                auto_save=False,
+                symbolic_enabled=True,
+                save_act=True,
+                device=get_device(),
+            )
+            e2e_steps = (
+                int(config.workflow.e2e_steps)
+                if int(config.workflow.e2e_steps) > 0
+                else int(len(config.stagewise.lr_schedule) * config.stagewise.steps_per_stage)
+            )
+            e2e_lr = (
+                float(config.workflow.e2e_lr)
+                if float(config.workflow.e2e_lr) > 0
+                else float(np.median(config.stagewise.lr_schedule))
+            )
+            e2e_lamb = (
+                float(config.workflow.e2e_lamb)
+                if float(config.workflow.e2e_lamb) >= 0
+                else float(np.median(config.stagewise.lamb_schedule))
+            )
+            with maybe_silent(silent):
+                e2e_res = safe_fit(
+                    enhanced_model,
+                    dataset_enhanced,
+                    opt="Adam",
+                    steps=e2e_steps,
+                    lr=e2e_lr,
+                    lamb=e2e_lamb,
+                    batch=batch_size,
+                    update_grid=True,
+                    singularity_avoiding=True,
+                    log=max(1, e2e_steps // 10),
+                )
+            stage_total_seconds = float(time.perf_counter() - stage_fallback_t0)
+            enhanced_res = {
+                "train_loss": list(e2e_res.get("train_loss", [])),
+                "test_loss": list(e2e_res.get("test_loss", [])),
+                "stage_logs": [
+                    {
+                        "stage": 0,
+                        "lamb": float(e2e_lamb),
+                        "effective_lamb": float(e2e_lamb),
+                        "lr": float(e2e_lr),
+                        "acc_before": float("nan"),
+                        "acc_after": float(model_acc_ds(enhanced_model, dataset_enhanced)),
+                        "edges_before": float("nan"),
+                        "edges_after": int(get_n_edge(enhanced_model)),
+                        "prune_accepted": False,
+                        "prune_attempts": [],
+                        "prune_attempt_count": 0,
+                        "rollback": "",
+                        "prune_th": float("nan"),
+                        "sym_score": float("nan"),
+                        "train_seconds": float(stage_total_seconds),
+                        "prune_seconds": 0.0,
+                        "stage_seconds": float(stage_total_seconds),
+                    }
+                ],
+                "best_acc": float(model_acc_ds(enhanced_model, dataset_enhanced)),
+                "selected_stage": "e2e",
+                "selected_edges": int(get_n_edge(enhanced_model)),
+                "selected_score": float("nan"),
+                "stage_snapshots": [],
+                "stage_early_stopped": False,
+                "stage_early_stop_reason": "",
+                "stage_timings": [
+                    {
+                        "stage": 0,
+                        "train_seconds": float(stage_total_seconds),
+                        "prune_seconds": 0.0,
+                        "stage_seconds": float(stage_total_seconds),
+                    }
+                ],
+                "stage_train_total_seconds": float(stage_total_seconds),
+                "stage_prune_total_seconds": 0.0,
+                "final_finetune_seconds": 0.0,
+                "stage_total_seconds": float(stage_total_seconds),
+            }
+        else:
+            emit_progress(show_progress, f"{run_label} stagewise train start")
+            with maybe_silent(silent):
+                enhanced_model, enhanced_res = stagewise_train_report(dataset_enhanced, app_config)
+        stage_result = enhanced_res.to_legacy_dict() if hasattr(enhanced_res, "to_legacy_dict") else enhanced_res
+        stage_result["numeric_cache_hit"] = False
+        enhanced_acc = float(model_acc_ds(enhanced_model, dataset_enhanced))
+        stage_total_seconds = float(stage_result.get("stage_total_seconds", time.perf_counter() - stage_fallback_t0))
+        stage_train_total_seconds = float(stage_result.get("stage_train_total_seconds", float("nan")))
+        stage_prune_total_seconds = float(stage_result.get("stage_prune_total_seconds", float("nan")))
+        stage_final_finetune_seconds = float(stage_result.get("final_finetune_seconds", float("nan")))
+        stage_mode = "end-to-end fit" if config.workflow.disable_stagewise_train else "stagewise train"
+        emit_progress(
+            show_progress,
+            (
+                f"{run_label} {stage_mode} done: selected_stage={stage_result.get('selected_stage')}, "
+                f"acc={enhanced_acc:.4f}, edges={int(get_n_edge(enhanced_model))}, "
+                f"wall_time={stage_total_seconds:.1f}s"
+            ),
+        )
+        _save_numeric_stage_cache(
+            runner.output_dir,
+            cache_key,
+            {
+                "base_width": list(width_base),
+                "base_n_edge": int(get_n_edge(base_model)),
+                "base_acc": float(base_acc),
+                "base_res": base_res,
+                "keep_idx": np.asarray(keep_idx, dtype=np.int64),
+                "enhanced_width": [int(x_train_sel.shape[1]), inner_dim, data["n_classes"]],
+                "enhanced_state_dict": _to_cpu_state_dict(enhanced_model),
+                "stage_result": stage_result,
+                "enhanced_acc": float(enhanced_acc),
+                "stage_total_seconds": float(stage_total_seconds),
+                "stage_train_total_seconds": float(stage_train_total_seconds),
+                "stage_prune_total_seconds": float(stage_prune_total_seconds),
+                "stage_final_finetune_seconds": float(stage_final_finetune_seconds),
+            },
+        )
+
     stage_logs = enhanced_res.stage_logs if hasattr(enhanced_res, "stage_logs") else stage_result.get("stage_logs", [])
     stage_df = pd.DataFrame(stage_logs)
     save_stage_logs(stage_df, csv_path=str(run_dir / "kan_stage_logs.csv"))
 
+    prep_cache_key = _symbolic_prep_cache_key(app_config, numeric_cache_key=cache_key)
+    cached_symbolic_prep = _load_symbolic_prep_cache(runner.output_dir, prep_cache_key)
+    if cached_symbolic_prep is not None:
+        emit_progress(show_progress, f"{run_label} symbolic prep cache hit: key={prep_cache_key}")
+        prepared_bundle = _restore_symbolic_prep_bundle(
+            payload=cached_symbolic_prep,
+            dataset=dataset_enhanced,
+            config=config,
+            stage_seed=stage_seed,
+        )
+        symbolic_prep_seconds_ref = float(
+            prepared_bundle["timing"].get("symbolic_prep_total_seconds", float("nan"))
+        )
+        symbol_prep_cache_hit = True
+        _release_numeric_stage_refs(cached_symbolic_prep)
+    else:
+        emit_progress(show_progress, f"{run_label} symbolic prep cache miss: key={prep_cache_key}")
+        set_global_seed(stage_seed)
+        with maybe_silent(silent):
+            prepared_bundle = prepare_symbolic_bundle(enhanced_model, dataset_enhanced, app_config)
+        symbolic_prep_seconds_ref = float(prepared_bundle["timing"].get("symbolic_prep_total_seconds", float("nan")))
+        symbol_prep_cache_hit = False
+        _save_symbolic_prep_cache(
+            runner.output_dir,
+            prep_cache_key,
+            _build_symbolic_prep_cache_payload(prepared_bundle),
+        )
+
     symbolize_t0 = time.perf_counter()
     emit_progress(show_progress, f"{run_label} symbolize start")
     with maybe_silent(silent):
-        export_result = symbolize_pipeline_report(enhanced_model, dataset_enhanced, app_config)
+        export_result = symbolize_pipeline_from_prepared_report(prepared_bundle, dataset_enhanced, app_config)
     symbolize_wall_time = float(time.perf_counter() - symbolize_t0)
     symbolize_result = export_result.to_legacy_dict() if hasattr(export_result, "to_legacy_dict") else export_result
+    symbolize_result.setdefault("timing", {})
+    symbolize_result["timing"]["symbolic_prep_cache_hit"] = bool(symbol_prep_cache_hit)
+    symbolize_result["timing"]["symbolic_prep_total_seconds_ref"] = float(symbolic_prep_seconds_ref)
 
     export_model = export_result.model
     export_formulas = export_result.formulas
@@ -1526,14 +1898,21 @@ def run_single_experiment(
         val_df.to_csv(run_dir / "formula_validation.csv", index=False, encoding="utf-8-sig")
 
     logits_sym = model_logits(export_model, x_test_sel)
+    logits_teacher = model_logits(enhanced_model, x_test_sel)
     y_prob_sym = scipy_softmax(logits_sym, axis=1)
     roc_data = compute_multiclass_roc_auc(dataset_enhanced["test_label"].detach().cpu().numpy(), y_prob_sym)
     auc_macro = float(np.mean([roc_data[class_idx]["auc"] for class_idx in range(data["n_classes"])]))
+    final_teacher_imitation_mse, _ = _compute_prediction_mse_and_r2(logits_sym, logits_teacher)
+    final_target_mse, final_target_r2 = _compute_prediction_mse_and_r2(
+        logits_sym,
+        dataset_enhanced["test_label"].detach().cpu().numpy(),
+    )
 
     summary_df = build_formula_summary(export_formulas, valid_exprs, roc_data, data["n_classes"])
     save_symbolic_summary(summary_df, csv_path=str(run_dir / "kan_symbolic_summary.csv"))
     valid_complexity = summary_df.loc[summary_df["expr_full"] != "N/A (零或常数)", "复杂度"]
     expr_complexity_mean = float(valid_complexity.mean()) if len(valid_complexity) > 0 else float("nan")
+    formula_export_success = _formula_export_success(summary_df, data["n_classes"])
 
     roc_rows = [
         {"class": class_idx, "auc": float(roc_data[class_idx]["auc"])} for class_idx in range(data["n_classes"])
@@ -1573,6 +1952,10 @@ def run_single_experiment(
         expr_complexity_mean=expr_complexity_mean,
         auc_macro=auc_macro,
         val_df=val_df,
+        final_teacher_imitation_mse=final_teacher_imitation_mse,
+        final_target_mse=final_target_mse,
+        final_target_r2=final_target_r2,
+        formula_export_success=formula_export_success,
         stage_total_seconds=stage_total_seconds,
         stage_train_total_seconds=stage_train_total_seconds,
         stage_prune_total_seconds=stage_prune_total_seconds,
@@ -1634,6 +2017,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["light", "full"],
         default=None,
         help="显式覆盖 stagewise.guard_mode（light 更快，full 更稳健）",
+    )
+    parser.add_argument(
+        "--symbolic-backend",
+        choices=["baseline", "icbr"],
+        default=None,
+        help="显式覆盖 symbolize.symbolic_backend",
     )
     parser.add_argument("--max-prune-rounds", type=int, default=None, help="显式覆盖 symbolize.max_prune_rounds")
     parser.add_argument("--layerwise-finetune-steps", type=int, default=None)

@@ -641,11 +641,10 @@ def _set_teacher_numeric_mode(teacher_model) -> None:
 def _ensure_fully_symbolic_completion(work_model) -> None:
     for layer_idx in range(len(work_model.width_in) - 1):
         numeric_mask = work_model.act_fun[layer_idx].mask
-        symbolic_mask = work_model.symbolic_fun[layer_idx].mask
-        fully_symbolic = torch.logical_and(numeric_mask == 0, symbolic_mask.T == 1)
-        if not bool(torch.all(fully_symbolic).item()):
+        remaining_numeric = torch.as_tensor(numeric_mask) > 0
+        if bool(torch.any(remaining_numeric).item()):
             raise RuntimeError(
-                f"Layer {layer_idx} is not fully symbolic; exporter should not be considered complete."
+                f"Layer {layer_idx} still has active numeric edges; exporter should not be considered complete."
             )
 
 
@@ -929,17 +928,11 @@ def _run_auto_symbolic_icbr_with_models(
                     continue
 
                 if symbolic_mask == 0.0 and numeric_mask == 0.0:
-                    # Preserve pruned/off edges as explicit zeros so downstream
-                    # symbolic export sees a complete graph.
-                    commit_symbolic_candidate(
-                        work_model,
-                        layer_idx=layer_idx,
-                        input_idx=input_idx,
-                        output_idx=output_idx,
-                        candidate={"fun_name": "0"},
-                    )
-                    if verbose >= 1:
-                        print(f"commit ({layer_idx},{input_idx},{output_idx}) as 0")
+                    # Pruned/off edges must stay inactive. Leaving them as
+                    # (numeric=0, symbolic=0) preserves the pruned graph and
+                    # avoids reactivating zero-value symbolic edges.
+                    if verbose >= 2:
+                        print(f"skip ({layer_idx},{input_idx},{output_idx}) inactive/pruned")
                     continue
 
                 if not _is_edge_active_for_symbolic(

@@ -13,7 +13,7 @@
 - 参数细节：[kan_parameters](kan_parameters.md)
 - 消融说明：[ablation_usage](ablation_usage.md)
 
-## 工程版口径入口（2026-03）
+## 工程版口径入口（2026-04）
 
 1. 若需要“历史参考版 vs 当前工程版”的版本边界，优先阅读 [engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
 2. 若需要当前工程版的主引用结果与指标解释，优先阅读 [engineering_rerun_report.md](engineering_rerun_report.md)。
@@ -30,6 +30,7 @@
 - [行内注释策略](#行内注释策略)
 - [风险与边界](#风险与边界)
 - [工程化改动落地（2026-03-19）](#工程化改动落地2026-03-19)
+- [ICBR 接入后的设计收敛（2026-04）](#icbr-接入后的设计收敛2026-04)
 - [实验回证后的设计收敛（2026-03）](#实验回证后的设计收敛2026-03)
 - [默认设定与兼容约束](#默认设定与兼容约束)
 - [后续演进方向](#后续演进方向)
@@ -86,12 +87,13 @@ flowchart LR
 
 ### symbolize_pipeline 的职责
 
-`symbolize_pipeline` 接管的是另一件事：把已经足够稀疏的模型变成解析式。它分成四段：
+`symbolize_pipeline` 接管的是另一件事：把已经足够稀疏的模型变成解析式。当前公开入口未变，但内部已拆成“共享 symbolic-prep + backend-specific completion”两段。若从内部职责看，它分成五段：
 
 1. 渐进剪枝：继续向目标边数靠近，但每轮都有限幅和回滚保护。
 2. 输入压缩：删掉第一层已经完全失活的输入，降低后续符号搜索维度。
-3. 逐层符号搜索：按层 fix 边函数，避免一次性全局搜索导致状态污染。
-4. 强化微调：在固定符号函数后恢复仿射参数和整体精度。
+3. pre-symbolic fit：在 shared symbolic-prep 边界上把 prepared model 稳定到可进入后端的状态。
+4. backend-specific symbolic completion：按 `baseline` 或 `icbr` 后端完成符号拟合。
+5. 强化微调：在固定符号函数后恢复仿射参数和整体精度。
 
 这一划分还与 `pykan` 中 `suggest_symbolic` 会临时修改模型状态有关。共享同一模型进行并行搜索会引入额外风险，因此当前实现优先保证正确性，再考虑并行效率。
 
@@ -156,6 +158,24 @@ $$
 5. 跨版本指标边界：仅允许 `export_wall_time_s` 到 `symbolize_wall_time_s` 的语义映射；`run_total_wall_time_s` 是工程版新增字段，不与历史版做同名比较。
 6. 文档治理约束：当入口、配置、指标或目录语义发生变化时，`README.md`、`docs/index.md`、`docs/project_map.md` 与本文必须同步更新。
 
+## ICBR 接入后的设计收敛（2026-04）
+
+本节记录 ICBR 接入后已经固定下来的设计层事实。
+
+1. `baseline` 仍是默认符号后端。
+   - `icbr` 是显式 opt-in backend，而不是新的训练模式；文档与实现都不应把它描述成对数值训练路径的替换。
+2. 符号化流程已显式拆为 shared symbolic-prep 与 backend-specific completion。
+   - `prepare_symbolic_bundle(...)` 负责渐进剪枝、输入压缩与 pre-symbolic fit。
+   - `symbolize_pipeline_from_prepared(...)` 负责 `baseline` 或 `icbr` 的后端完成。
+3. benchmark compare 的公平性边界前移到了 shared symbolic-prep。
+   - numeric cache 排除了 `symbolize` 配置。
+   - symbolic-prep cache 只绑定共享预处理所需设置，不绑定 backend-only 差异。
+4. baseline/icbr 对照使用专用 compare 产物表达结论。
+   - 通用 compare 仍保留。
+   - 只有在 `baseline` vs `baseline_icbr` 时，才额外生成 shared-check、primary-effect 与 mechanism-summary。
+5. 当前设计更强调“边界可证明正确”，而不是“把所有 ICBR 指标都并入通用 benchmark”。
+   - 共享阶段指标与专用 compare 指标只服务于 baseline/icbr 对照，不回写为所有 compare 的默认叙述。
+
 ## 实验结果支持下的设计收敛（2026-03）
 
 基于 `outputs/benchmark_ablation/` 与 `outputs/benchmark_ab/comparison/` 的结果，当前若干设计决策具备成为项目层默认设定的经验依据：
@@ -187,6 +207,7 @@ $$
     - 保留渐进剪枝；
     - 输入压缩默认开启；
     - 2 层网络默认关闭 LayerwiseFT（可通过参数开启改进版）。
+    - 默认 symbolic backend 保持 `baseline`。
 3. A/B 结果用于说明这些设定的经验依据：
     - 当前统计结果中，`baseline` 在 `final_acc` 与 `macro_auc` 上均领先 `adaptive`/`adaptive_auto`。
     - `adaptive` 系列的主要价值仍是流程控制与部分耗时场景的工程可调性，不应表述为“默认精度增强”。
@@ -198,4 +219,5 @@ $$
 2. 如果要提高评估质量，优先补更稳定的公式验证与异常表达式筛除。
 3. 对输入压缩，增加“按累计归因质量保留”的保守策略，避免 Top-K 过早丢失弱相关维度。
 4. 对 LayerwiseFT，只保留改进版路径（验证早停+轻正则+短步数），并继续评估是否值得长期保留。
-5. 如果要继续扩展接口，优先在结构化结果对象里加字段，不要直接破坏旧返回值。
+5. 若后续继续扩展 symbolic backend，优先保持 shared symbolic-prep 边界稳定，再增加 compare-only 专用指标，而不要直接污染 generic compare 结果对象。
+6. 如果要继续扩展接口，优先在结构化结果对象里加字段，不要直接破坏旧返回值。

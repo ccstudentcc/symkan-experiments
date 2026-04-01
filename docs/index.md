@@ -19,15 +19,16 @@
    - 报告类文档应在“研究设定与口径/默认设定”章节给出设备与运行时环境。
    - 同一轮实验复测使用同一套环境描述，避免跨文档表述不一致。
 
-## 0.2 最近改动同步基线（2026-03-19）
+## 0.2 最近改动同步基线（2026-04-01）
 
 本节用于把“最近工程改动”显式绑定到文档系统，避免只改代码不改叙述。
 
 1. 配置统一：Notebook / CLI / 库层统一收敛到 `AppConfig`；相关叙述应与 `README.md`、`symkan_usage.md` 保持一致。
-2. Notebook 桥接收口：`symkan.config.notebook` 负责 canonical 化；`symkan.notebook_compat` 仅为薄桥接，不应在其他文档中被描述为“主配置层”。
-3. 命令风格统一：执行命令统一 `python -m scripts.*`（工程复测可补充 `scripts/run_engineering_rerun.ps1`），并保持 PowerShell 代码块风格。
-4. 指标口径统一：跨版本耗时字段仅允许 `export_wall_time_s -> symbolize_wall_time_s` 语义映射；`run_total_wall_time_s` 视为工程版新增字段。
-5. 发布前一致性检查：每次 release 前应对 `README.md` 与 `docs/` 执行一次“口径同步复核”（见 `engineering_release_checklist.md`）。
+2. 符号后端边界：默认仍为 `baseline`，`icbr` 仅作为显式 opt-in backend，不得被文档表述成新的训练路径。
+3. 流程边界更新：`symbolize_pipeline` 内部已拆为 shared symbolic-prep 与 backend-specific completion；相关叙述应与 `ARCHITECTURE.md`、`design.md` 保持一致。
+4. compare 口径更新：`baseline` vs `baseline_icbr` 的主引用目录为 `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/...`，并新增三份专用 compare 产物。
+5. 指标口径统一：跨版本耗时字段仅允许 `export_wall_time_s -> symbolize_wall_time_s` 语义映射；backend compare 优先使用 `symbolic_core_seconds`。
+6. 发布前一致性检查：每次 release 前应对 `README.md` 与 `docs/` 执行一次“口径同步复核”（见 `engineering_release_checklist.md`）。
 
 ## 0.3 文档同步矩阵（SSOT）
 
@@ -66,11 +67,11 @@
 
 ### 2.3 实验执行与复现
 
-1. [symkanbenchmark_usage.md](symkanbenchmark_usage.md)：主 benchmark CLI 与 A/B 结果口径。
+1. [symkanbenchmark_usage.md](symkanbenchmark_usage.md)：主 benchmark CLI、A/B 结果口径与 `baseline` vs `baseline_icbr` 专用 compare 产物。
 2. [ablation_usage.md](ablation_usage.md)：单因素消融与 LayerwiseFT 专项实验说明。
 3. [full_experiment_runbook.md](full_experiment_runbook.md)：完整复跑操作手册。
 4. [engineering_version_rerun_note.md](engineering_version_rerun_note.md)：历史版与工程版口径分层说明。
-5. [engineering_rerun_report.md](engineering_rerun_report.md)：工程版复测报告及对照分析。
+5. [engineering_rerun_report.md](engineering_rerun_report.md)：当前工程版 ICBR 对照主报告，重点解释 shared symbolic-prep 对齐与 backend-only 差异。
 6. [engineering_release_checklist.md](engineering_release_checklist.md)：工程版发布前检查清单。
 
 ### 2.4 报告与结论解释
@@ -90,7 +91,7 @@
 2. 架构与实现边界梳理：`project_map -> ../ARCHITECTURE.md -> design`
 3. 实验复现：`symkanbenchmark_usage -> ablation_usage`
 4. 全流程复跑：`full_experiment_runbook -> symkanbenchmark_usage -> ablation_usage`
-5. 报告撰写：`engineering_version_rerun_note -> engineering_rerun_report -> ablation_report`
+5. 报告撰写：`engineering_version_rerun_note -> engineering_rerun_report -> symkanbenchmark_usage`
 6. 发布前确认：`engineering_release_checklist -> engineering_version_rerun_note -> engineering_rerun_report`
 
 ## 4. 返回项目入口

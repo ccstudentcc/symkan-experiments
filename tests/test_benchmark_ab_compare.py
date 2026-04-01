@@ -7,7 +7,14 @@ from uuid import uuid4
 import pandas as pd
 import pytest
 
-from scripts.benchmark_ab_compare import _pairwise_delta, _trace_effective_rounds
+from scripts.benchmark_ab_compare import (
+    _baseline_icbr_compare_enabled,
+    _baseline_icbr_mechanism_summary,
+    _baseline_icbr_primary_effect,
+    _baseline_icbr_shared_check,
+    _pairwise_delta,
+    _trace_effective_rounds,
+)
 
 
 def _write_trace_csv(path: Path, rows: list[tuple[int, int, float]]) -> None:
@@ -194,3 +201,95 @@ def test_trace_effective_rounds_raises_when_variant_dir_missing() -> None:
     missing_root = Path("outputs") / f"trace_missing_{uuid4().hex}"
     with pytest.raises(FileNotFoundError, match="variant directory not found"):
         _trace_effective_rounds(missing_root, variant="baseline", seeds=[42])
+
+
+def test_baseline_icbr_compare_enabled_only_for_expected_pair() -> None:
+    base_df = pd.DataFrame(
+        {
+            "symbolic_core_seconds": [1.0],
+            "final_teacher_imitation_mse": [0.1],
+            "final_target_mse": [0.2],
+            "final_target_r2": [0.7],
+            "formula_export_success": [True],
+            "base_acc": [0.8],
+            "enhanced_acc": [0.85],
+            "enhanced_n_edge": [10],
+            "selected_stage": ["final"],
+            "pre_symbolic_n_edge": [9],
+        }
+    )
+    frame_map = {"baseline": base_df, "baseline_icbr": base_df.copy()}
+
+    assert _baseline_icbr_compare_enabled(
+        baseline_name="baseline",
+        variant_names=["baseline_icbr"],
+        frame_map=frame_map,
+    )
+    assert not _baseline_icbr_compare_enabled(
+        baseline_name="adaptive",
+        variant_names=["baseline_icbr"],
+        frame_map=frame_map,
+    )
+
+
+def test_baseline_icbr_special_summaries_capture_alignment_and_effects() -> None:
+    base_df = pd.DataFrame(
+        {
+            "stage_seed": [42, 52],
+            "base_acc": [0.8, 0.81],
+            "enhanced_acc": [0.85, 0.86],
+            "enhanced_n_edge": [10, 11],
+            "selected_stage": ["final", "final"],
+            "pre_symbolic_n_edge": [9, 9],
+            "numeric_cache_hit": [False, False],
+            "symbolic_prep_cache_hit": [False, False],
+            "symbolic_core_seconds": [4.0, 5.0],
+            "final_teacher_imitation_mse": [0.20, 0.18],
+            "final_target_mse": [0.30, 0.28],
+            "final_target_r2": [0.70, 0.72],
+            "formula_export_success": [True, True],
+        }
+    )
+    icbr_df = pd.DataFrame(
+        {
+            "stage_seed": [42, 52],
+            "base_acc": [0.8, 0.81],
+            "enhanced_acc": [0.85, 0.86],
+            "enhanced_n_edge": [10, 11],
+            "selected_stage": ["final", "final"],
+            "pre_symbolic_n_edge": [9, 9],
+            "numeric_cache_hit": [True, True],
+            "symbolic_prep_cache_hit": [True, True],
+            "symbolic_core_seconds": [2.0, 2.5],
+            "final_teacher_imitation_mse": [0.10, 0.12],
+            "final_target_mse": [0.25, 0.22],
+            "final_target_r2": [0.75, 0.78],
+            "formula_export_success": [True, True],
+            "icbr_candidate_generation_wall_time_s": [0.8, 1.0],
+            "icbr_replay_rerank_wall_time_s": [0.4, 0.5],
+            "icbr_replay_rank_inversion_rate": [0.25, 0.5],
+        }
+    )
+    trace_seedwise = pd.DataFrame(
+        {
+            "variant": ["baseline", "baseline", "baseline_icbr", "baseline_icbr"],
+            "stage_seed": [42, 52, 42, 52],
+            "rounds": [2, 3, 2, 3],
+            "effective_rounds": [1, 2, 1, 2],
+            "total_edges_removed": [5, 7, 5, 7],
+            "mean_drop_ratio": [0.1, 0.2, 0.1, 0.2],
+            "max_drop_ratio": [0.1, 0.25, 0.1, 0.25],
+        }
+    )
+
+    shared = _baseline_icbr_shared_check(base_df, icbr_df, trace_seedwise)
+    primary = _baseline_icbr_primary_effect(base_df, icbr_df)
+    mechanism = _baseline_icbr_mechanism_summary(icbr_df)
+
+    assert shared["shared_symbolic_prep_aligned"].tolist() == [True, True]
+    speedup_row = primary[primary["metric"] == "symbolic_core_speedup_vs_baseline"].iloc[0]
+    assert float(speedup_row["mean"]) == pytest.approx(2.0)
+    target_shift_row = primary[primary["metric"] == "final_target_mse_shift"].iloc[0]
+    assert float(target_shift_row["mean"]) == pytest.approx(-0.055)
+    candidate_share_row = mechanism[mechanism["metric"] == "icbr_candidate_share_of_core_time"].iloc[0]
+    assert float(candidate_share_row["mean"]) == pytest.approx(0.4)

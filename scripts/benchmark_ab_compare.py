@@ -297,6 +297,149 @@ def _metric_prefers_higher(metric: str) -> bool:
     return metric not in lower_is_better
 
 
+def _baseline_icbr_compare_enabled(
+    *,
+    baseline_name: str,
+    variant_names: List[str],
+    frame_map: Dict[str, pd.DataFrame],
+) -> bool:
+    required_variant = "baseline_icbr"
+    if baseline_name != "baseline" or variant_names != [required_variant]:
+        return False
+    required_columns = {
+        "symbolic_core_seconds",
+        "final_teacher_imitation_mse",
+        "final_target_mse",
+        "final_target_r2",
+        "formula_export_success",
+        "base_acc",
+        "enhanced_acc",
+        "enhanced_n_edge",
+        "selected_stage",
+        "pre_symbolic_n_edge",
+    }
+    return all(required_columns.issubset(set(frame.columns)) for frame in frame_map.values())
+
+
+def _values_match(a, b) -> bool:
+    if pd.isna(a) and pd.isna(b):
+        return True
+    if isinstance(a, str) or isinstance(b, str):
+        return a == b
+    try:
+        return bool(np.isclose(float(a), float(b), equal_nan=True))
+    except Exception:
+        return a == b
+
+
+def _baseline_icbr_shared_check(
+    base_df: pd.DataFrame,
+    icbr_df: pd.DataFrame,
+    trace_seedwise: pd.DataFrame,
+) -> pd.DataFrame:
+    _ensure_analysis_deps()
+    shared_fields = [
+        "base_acc",
+        "enhanced_acc",
+        "enhanced_n_edge",
+        "selected_stage",
+        "pre_symbolic_n_edge",
+    ]
+    base = _dedupe_stage_seed(base_df, source_label="baseline_icbr shared baseline").set_index("stage_seed")
+    cur = _dedupe_stage_seed(icbr_df, source_label="baseline_icbr shared icbr").set_index("stage_seed")
+    merged = base.join(cur, lsuffix="_base", rsuffix="_icbr", how="inner")
+
+    trace_base = trace_seedwise[trace_seedwise["variant"] == "baseline"].set_index("stage_seed")
+    trace_icbr = trace_seedwise[trace_seedwise["variant"] == "baseline_icbr"].set_index("stage_seed")
+    trace_merged = trace_base.join(trace_icbr, lsuffix="_base", rsuffix="_icbr", how="inner")
+
+    rows = []
+    for stage_seed in merged.index.tolist():
+        row = {
+            "stage_seed": int(stage_seed),
+            "shared_numeric_aligned": True,
+            "trace_aligned": True,
+            "baseline_numeric_cache_hit": bool(merged.loc[stage_seed, "numeric_cache_hit_base"])
+            if "numeric_cache_hit_base" in merged.columns
+            else False,
+            "icbr_numeric_cache_hit": bool(merged.loc[stage_seed, "numeric_cache_hit_icbr"])
+            if "numeric_cache_hit_icbr" in merged.columns
+            else False,
+            "baseline_symbolic_prep_cache_hit": bool(merged.loc[stage_seed, "symbolic_prep_cache_hit_base"])
+            if "symbolic_prep_cache_hit_base" in merged.columns
+            else False,
+            "icbr_symbolic_prep_cache_hit": bool(merged.loc[stage_seed, "symbolic_prep_cache_hit_icbr"])
+            if "symbolic_prep_cache_hit_icbr" in merged.columns
+            else False,
+        }
+        for field in shared_fields:
+            match = _values_match(merged.loc[stage_seed, f"{field}_base"], merged.loc[stage_seed, f"{field}_icbr"])
+            row[f"{field}_aligned"] = bool(match)
+            row["shared_numeric_aligned"] = bool(row["shared_numeric_aligned"] and match)
+        if stage_seed in trace_merged.index:
+            trace_fields = ["rounds", "effective_rounds", "total_edges_removed", "mean_drop_ratio", "max_drop_ratio"]
+            for field in trace_fields:
+                match = _values_match(trace_merged.loc[stage_seed, f"{field}_base"], trace_merged.loc[stage_seed, f"{field}_icbr"])
+                row[f"trace_{field}_aligned"] = bool(match)
+                row["trace_aligned"] = bool(row["trace_aligned"] and match)
+        else:
+            row["trace_aligned"] = False
+        row["shared_symbolic_prep_aligned"] = bool(row["shared_numeric_aligned"] and row["trace_aligned"])
+        rows.append(row)
+    return pd.DataFrame(rows).sort_values("stage_seed").reset_index(drop=True)
+
+
+def _summarize_series(name: str, values: pd.Series) -> dict[str, object]:
+    return {
+        "metric": name,
+        "mean": float(values.mean()),
+        "median": float(values.median()),
+        "std": float(values.std(ddof=0)),
+        "min": float(values.min()),
+        "max": float(values.max()),
+    }
+
+
+def _baseline_icbr_primary_effect(base_df: pd.DataFrame, icbr_df: pd.DataFrame) -> pd.DataFrame:
+    _ensure_analysis_deps()
+    base = _dedupe_stage_seed(base_df, source_label="baseline_icbr primary baseline").set_index("stage_seed")
+    cur = _dedupe_stage_seed(icbr_df, source_label="baseline_icbr primary icbr").set_index("stage_seed")
+    merged = base.join(cur, lsuffix="_base", rsuffix="_icbr", how="inner")
+
+    speedup = merged["symbolic_core_seconds_base"] / merged["symbolic_core_seconds_icbr"]
+    target_mse_shift = merged["final_target_mse_icbr"] - merged["final_target_mse_base"]
+    target_r2_shift = merged["final_target_r2_icbr"] - merged["final_target_r2_base"]
+    imitation_shift = merged["final_teacher_imitation_mse_icbr"] - merged["final_teacher_imitation_mse_base"]
+    rows = [
+        _summarize_series("symbolic_core_speedup_vs_baseline", speedup),
+        _summarize_series("final_teacher_imitation_mse_shift", imitation_shift),
+        _summarize_series("final_target_mse_shift", target_mse_shift),
+        _summarize_series("final_target_r2_shift", target_r2_shift),
+        _summarize_series("baseline_formula_export_success_rate", merged["formula_export_success_base"].astype(float)),
+        _summarize_series("icbr_formula_export_success_rate", merged["formula_export_success_icbr"].astype(float)),
+    ]
+    return pd.DataFrame(rows)
+
+
+def _baseline_icbr_mechanism_summary(icbr_df: pd.DataFrame) -> pd.DataFrame:
+    _ensure_analysis_deps()
+    df = _dedupe_stage_seed(icbr_df, source_label="baseline_icbr mechanism icbr").copy()
+    candidate_share = df["icbr_candidate_generation_wall_time_s"] / df["symbolic_core_seconds"]
+    replay_share = df["icbr_replay_rerank_wall_time_s"] / df["symbolic_core_seconds"]
+    other_core = (
+        df["symbolic_core_seconds"] - df["icbr_candidate_generation_wall_time_s"] - df["icbr_replay_rerank_wall_time_s"]
+    )
+    rows = [
+        _summarize_series("icbr_candidate_generation_wall_time_s", df["icbr_candidate_generation_wall_time_s"]),
+        _summarize_series("icbr_replay_rerank_wall_time_s", df["icbr_replay_rerank_wall_time_s"]),
+        _summarize_series("icbr_candidate_share_of_core_time", candidate_share),
+        _summarize_series("icbr_replay_share_of_core_time", replay_share),
+        _summarize_series("icbr_other_core_seconds", other_core),
+        _summarize_series("icbr_replay_rank_inversion_rate", df["icbr_replay_rank_inversion_rate"]),
+    ]
+    return pd.DataFrame(rows)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate benchmark_ab comparison tables.")
     parser.add_argument("--root", default=DEFAULT_BENCHMARK_AB_DIR, help="benchmark root directory")
@@ -395,6 +538,37 @@ def main() -> None:
     trace_seedwise.to_csv(out_dir / "trace_seedwise.csv", index=False, encoding="utf-8-sig")
     trace_summary.to_csv(out_dir / "trace_summary.csv", index=False, encoding="utf-8-sig")
 
+    baseline_icbr_shared = pd.DataFrame()
+    baseline_icbr_primary = pd.DataFrame()
+    baseline_icbr_mechanism = pd.DataFrame()
+    if _baseline_icbr_compare_enabled(
+        baseline_name=baseline_name,
+        variant_names=variant_names,
+        frame_map=frame_map,
+    ):
+        baseline_icbr_shared = _baseline_icbr_shared_check(
+            baseline_df,
+            variant_dfs["baseline_icbr"],
+            trace_seedwise,
+        )
+        baseline_icbr_primary = _baseline_icbr_primary_effect(baseline_df, variant_dfs["baseline_icbr"])
+        baseline_icbr_mechanism = _baseline_icbr_mechanism_summary(variant_dfs["baseline_icbr"])
+        baseline_icbr_shared.to_csv(
+            out_dir / "baseline_icbr_shared_check.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
+        baseline_icbr_primary.to_csv(
+            out_dir / "baseline_icbr_primary_effect.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
+        baseline_icbr_mechanism.to_csv(
+            out_dir / "baseline_icbr_mechanism_summary.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
+
     # Markdown summary for paper/report usage.
     md_lines = []
     md_lines.append("# Benchmark AB Comparison Summary")
@@ -421,6 +595,41 @@ def main() -> None:
         for _, row in pairwise_summary.sort_values(["variant", "metric"]).iterrows():
             md_lines.append(
                 f"| {row['baseline']} | {row['variant']} | {row['metric']} | {row['mean_delta']:.6f} | {row['median_delta']:.6f} | {row['std_delta']:.6f} | {int(row['win_count'])} | {int(row['lose_count'])} | {int(row['tie_count'])} |"
+            )
+    md_lines.append("")
+
+    if not baseline_icbr_shared.empty:
+        md_lines.append("## Shared Numeric Stage Check")
+        md_lines.append("")
+        md_lines.append(
+            "| stage_seed | shared_numeric_aligned | trace_aligned | shared_symbolic_prep_aligned | baseline_numeric_cache_hit | icbr_numeric_cache_hit | baseline_symbolic_prep_cache_hit | icbr_symbolic_prep_cache_hit |"
+        )
+        md_lines.append("|---:|---|---|---|---|---|---|---|")
+        for _, row in baseline_icbr_shared.iterrows():
+            md_lines.append(
+                f"| {int(row['stage_seed'])} | {bool(row['shared_numeric_aligned'])} | {bool(row['trace_aligned'])} | {bool(row['shared_symbolic_prep_aligned'])} | {bool(row['baseline_numeric_cache_hit'])} | {bool(row['icbr_numeric_cache_hit'])} | {bool(row['baseline_symbolic_prep_cache_hit'])} | {bool(row['icbr_symbolic_prep_cache_hit'])} |"
+            )
+        md_lines.append("")
+
+    if not baseline_icbr_primary.empty:
+        md_lines.append("## Primary ICBR Effect")
+        md_lines.append("")
+        md_lines.append("| metric | mean | median | std | min | max |")
+        md_lines.append("|---|---:|---:|---:|---:|---:|")
+        for _, row in baseline_icbr_primary.iterrows():
+            md_lines.append(
+                f"| {row['metric']} | {row['mean']:.6f} | {row['median']:.6f} | {row['std']:.6f} | {row['min']:.6f} | {row['max']:.6f} |"
+            )
+        md_lines.append("")
+
+    if not baseline_icbr_mechanism.empty:
+        md_lines.append("## ICBR Mechanism Breakdown")
+        md_lines.append("")
+        md_lines.append("| metric | mean | median | std | min | max |")
+        md_lines.append("|---|---:|---:|---:|---:|---:|")
+        for _, row in baseline_icbr_mechanism.iterrows():
+            md_lines.append(
+                f"| {row['metric']} | {row['mean']:.6f} | {row['median']:.6f} | {row['std']:.6f} | {row['min']:.6f} | {row['max']:.6f} |"
             )
         md_lines.append("")
 
@@ -482,6 +691,13 @@ def main() -> None:
         "comparison_summary.md",
     ]:
         print(str(out_dir / name))
+    if not baseline_icbr_shared.empty:
+        for name in [
+            "baseline_icbr_shared_check.csv",
+            "baseline_icbr_primary_effect.csv",
+            "baseline_icbr_mechanism_summary.csv",
+        ]:
+            print(str(out_dir / name))
 
 
 if __name__ == "__main__":

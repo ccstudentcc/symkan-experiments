@@ -17,7 +17,7 @@
 - [3. 输出目录与文件含义](#3-输出目录与文件含义)
 - [4. 参数速查](#4-参数速查)
 - [5. 结果解读最小集合](#5-结果解读最小集合)
-- [6. AB Experiments Adaptive Bspline RadialBf](#6-ab-experiments-adaptive-bspline-radialbf)
+- [6. A/B Experiments And Backend Compare](#6-ab-experiments-and-backend-compare)
 - [7. 报告口径](#7-报告口径)
 - [8. 与总文档统一口径（2026-03）](#8-与总文档统一口径2026-03)
 
@@ -277,6 +277,13 @@ outputs/benchmark_runs/
 - `post_symbolic_eval_wall_time_s`
 - `run_total_wall_time_s`
 - `stage_guard_mode`
+- `numeric_cache_hit`
+- `symbolic_prep_cache_hit`
+- `cached_stage_total_seconds_ref`
+- `cached_symbolic_prep_seconds_ref`
+- `final_teacher_imitation_mse`
+- `final_target_mse`
+- `final_target_r2`
 
 若用于论文写作，不宜依据单次运行结果下结论，至少应在 3 个 seeds 上统计：
 
@@ -292,17 +299,29 @@ outputs/benchmark_runs/
 4. `post_symbolic_eval_wall_time_s`：符号化完成后到指标导出（验证、AUC、summary 写出）的耗时。
 5. `run_total_wall_time_s`：单次 run 的端到端墙钟耗时。
 
+其中与当前 baseline/icbr 对照最相关的补充字段含义如下：
+
+1. `numeric_cache_hit`：当前 run 是否复用了共享 numeric stage 缓存。
+2. `symbolic_prep_cache_hit`：当前 run 是否复用了 shared symbolic-prep 缓存。
+3. `cached_stage_total_seconds_ref` / `cached_symbolic_prep_seconds_ref`：共享阶段参考时长，只用于说明被复用的阶段成本，不应被计作当前 symbolization-only run 的实时耗时。
+4. `final_teacher_imitation_mse`：最终符号模型相对共享 numeric teacher 的 imitation 误差。
+5. `final_target_mse` / `final_target_r2`：最终符号模型相对真实目标的误差与拟合优度。
+6. `icbr_candidate_generation_wall_time_s` / `icbr_replay_rerank_wall_time_s` / `icbr_replay_rank_inversion_rate`：仅在 ICBR backend 下有意义，用于机制拆解。
+
 ---
 
-## 6. AB Experiments Adaptive Bspline RadialBf
+## 6. A/B Experiments And Backend Compare
 
-三组定义：
+### 6.1 当前常用变体
 
-1. `baseline`：不启用 adaptive。
+当前仓库中的 benchmark A/B 变体至少包括四类：
+
+1. `baseline`：默认工程口径。
 2. `adaptive`：启用验证反馈 + 自适应阈值 + 自适应 lamb/ft。
-3. `adaptive_auto`：在 adaptive 上增加阶段早停与 symbolize 自适应剪枝节奏。
+3. `adaptive_auto`：在 `adaptive` 上增加阶段早停与 symbolize 自适应剪枝节奏。
+4. `baseline_icbr`：与 `baseline` 共享 numeric stage 和 shared symbolic-prep，只把 `symbolize.symbolic_backend` 切到 `icbr`。
 
-### 6.1 命令模板
+### 6.2 命令模板
 
 公共参数：
 
@@ -313,7 +332,6 @@ python -m scripts.symkanbenchmark `
   --stagewise-seeds 42,52,62 `
   --config <VARIANT_APP_CONFIG> `
   --output-dir <OUT_DIR> `
-  <EXTRA_FLAGS> `
   --quiet
 ```
 
@@ -321,171 +339,95 @@ python -m scripts.symkanbenchmark `
 
 ```powershell
 # 运行目录：仓库根目录（symkan-experiments/）
-# baseline
-python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/baseline.yaml --output-dir outputs/benchmark_ab/baseline --quiet
-
-# adaptive
-python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/adaptive.yaml --output-dir outputs/benchmark_ab/adaptive --quiet
-
-# adaptive_auto
-python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/adaptive_auto.yaml --output-dir outputs/benchmark_ab/adaptive_auto --quiet
+python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/baseline.yaml --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline --quiet
+python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/baseline_icbr.yaml --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr --quiet
 ```
 
-### 6.2 配置建议
+当前 `baseline_icbr.yaml` 的设计意图是：保持 baseline 数值训练与 shared symbolic-prep 语义不变，只切换 symbolic backend。
+
+### 6.3 配置建议
 
 这一组实验不再推荐通过长 CLI 逐项传参。
 
-- `baseline`、`adaptive`、`adaptive_auto` 的差异应直接体现在各自的 `AppConfig` YAML 中。
-- 当前仓库已内置 `configs/benchmark_ab/baseline.yaml`、`configs/benchmark_ab/adaptive.yaml` 与 `configs/benchmark_ab/adaptive_auto.yaml` 三份模板；若需扩展，再从它们复制出你自己的 variant 配置文件。
-- benchmark CLI 主要保留 `--config`、`--output-dir`、`--stagewise-seeds` 和一小组显式白名单覆盖项。
-- 需要复现实验时，优先保留完整 YAML，而不是把研究参数重新散落回命令行。
-- 不建议把三个变体都指向同一份 YAML；否则只会得到不同输出目录下的同配置结果，而不是有效对照。
+1. 变体差异应直接体现在各自的 `AppConfig` YAML 中。
+2. 当前仓库已内置 `configs/benchmark_ab/baseline.yaml`、`adaptive.yaml`、`adaptive_auto.yaml` 与 `baseline_icbr.yaml`。
+3. benchmark CLI 主要保留 `--config`、`--output-dir`、`--stagewise-seeds` 和一小组显式白名单覆盖项。
+4. 若对比目标是 ICBR，优先保留独立的 `baseline_icbr.yaml`，不要只在命令行临时覆盖 `--symbolic-backend icbr` 后丢失可追踪配置。
 
-### 6.3 结果自动汇总
+### 6.4 结果自动汇总
 
-结果汇总可使用 [benchmark_ab_compare.py](../benchmark_ab_compare.py)：
+结果汇总可使用 [benchmark_ab_compare.py](../benchmark_ab_compare.py)。
+
+通用 compare 示例：
 
 ```powershell
 # 运行目录：仓库根目录（symkan-experiments/）
 python -m scripts.benchmark_ab_compare --root outputs/benchmark_ab --baseline baseline --variants adaptive,adaptive_auto --output outputs/benchmark_ab/comparison
 ```
 
-输出：
-
-- [outputs/benchmark_ab/comparison/variant_summary.csv](../outputs/benchmark_ab/comparison/variant_summary.csv)
-- [outputs/benchmark_ab/comparison/pairwise_delta_summary.csv](../outputs/benchmark_ab/comparison/pairwise_delta_summary.csv)
-- [outputs/benchmark_ab/comparison/seedwise_delta.csv](../outputs/benchmark_ab/comparison/seedwise_delta.csv)
-- [outputs/benchmark_ab/comparison/trace_seedwise.csv](../outputs/benchmark_ab/comparison/trace_seedwise.csv)
-- [outputs/benchmark_ab/comparison/trace_summary.csv](../outputs/benchmark_ab/comparison/trace_summary.csv)
-- [outputs/benchmark_ab/comparison/comparison_summary.md](../outputs/benchmark_ab/comparison/comparison_summary.md)
-
-### 6.4 历史参考统计结果（seed: 42/52/62）
-
-该小节基于历史参考产物 `outputs/benchmark_ab/...`，用于保留旧版对照语义。工程版复测结论请优先参考 [engineering_rerun_report.md](engineering_rerun_report.md)。
-
-基于 [outputs/benchmark_ab/comparison/variant_summary.csv](../outputs/benchmark_ab/comparison/variant_summary.csv)、[outputs/benchmark_ab/comparison/pairwise_delta_summary.csv](../outputs/benchmark_ab/comparison/pairwise_delta_summary.csv) 与 [outputs/benchmark_ab/comparison/trace_summary.csv](../outputs/benchmark_ab/comparison/trace_summary.csv)，可优先报告以下三张表。
-
-#### 表 1：核心指标汇总（mean ± std）
-
-| 变体 | final_acc | macro_auc | validation_mean_r2 | symbolic_total_seconds | export_wall_time_s | final_n_edge |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| baseline | 0.7807 ± 0.0010 | 0.9548 ± 0.0023 | -0.6135 ± 0.0271 | 33.27 ± 0.37 | 73.17 ± 2.06 | 89.67 ± 0.47 |
-| adaptive | 0.7678 ± 0.0117 | 0.9486 ± 0.0021 | -0.5361 ± 0.1061 | 31.05 ± 0.98 | 75.72 ± 12.88 | 85.33 ± 2.49 |
-| adaptive_auto | 0.7491 ± 0.0186 | 0.9430 ± 0.0044 | -0.6137 ± 0.0306 | 30.88 ± 1.76 | 72.58 ± 14.62 | 85.33 ± 5.25 |
-
-结果解释：
-
-1. 分类指标上，baseline 仍是当前最优（`final_acc` 与 `macro_auc` 均最高，且 `final_acc` 方差最小）。
-2. adaptive 系列在 `symbolic_total_seconds` 上更快（约快 2.2s~2.4s），但分类指标同步下降。
-3. `final_n_edge` 在 adaptive 系列下降（约 -4.33），说明确实更激进地压缩了结构。
-
-#### 表 2：相对 baseline 的 pairwise 差分
-
-| 比较 | 指标 | mean_delta (variant-baseline) | median_delta | win/lose/tie |
-| --- | --- | ---: | ---: | ---: |
-| adaptive vs baseline | final_acc | -0.0130 | -0.0160 | 1 / 2 / 0 |
-| adaptive_auto vs baseline | final_acc | -0.0316 | -0.0370 | 0 / 3 / 0 |
-| adaptive vs baseline | macro_auc | -0.0063 | -0.0051 | 0 / 3 / 0 |
-| adaptive_auto vs baseline | macro_auc | -0.0118 | -0.0149 | 0 / 3 / 0 |
-| adaptive vs baseline | validation_mean_r2 | +0.0774 | +0.0640 | 2 / 1 / 0 |
-| adaptive_auto vs baseline | validation_mean_r2 | -0.0002 | +0.0279 | 2 / 1 / 0 |
-| adaptive vs baseline | symbolic_total_seconds | -2.2148 | -1.7458 | 3 / 0 / 0 |
-| adaptive_auto vs baseline | symbolic_total_seconds | -2.3840 | -2.4327 | 2 / 1 / 0 |
-| adaptive vs baseline | export_wall_time_s | +2.5513 | +9.5640 | 1 / 2 / 0 |
-| adaptive_auto vs baseline | export_wall_time_s | -0.5918 | -6.9048 | 2 / 1 / 0 |
-
-结果解释：
-
-1. 精度主指标（`final_acc` / `macro_auc`）上，adaptive 系列未形成对 baseline 的稳定优势。
-2. `validation_mean_r2` 的方向更复杂：adaptive 有改善趋势，但 adaptive_auto 的均值几乎为 0、对 seed 更敏感。
-3. `symbolic_total_seconds` 的加速较稳定；`symbolize_wall_time_s` 受 pre/post-symbolic 流程波动影响较大，不宜只看均值。
-
-#### 表 3：symbolize 节奏（trace）
-
-| 变体 | rounds_mean | effective_rounds_mean | total_edges_removed_mean | mean_drop_ratio_mean | max_drop_ratio_mean |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| baseline | 6.67 | 5.33 | 26.33 | 0.0352 | 0.1281 |
-| adaptive | 1.00 | 1.00 | 16.33 | 0.1588 | 0.1588 |
-| adaptive_auto | 3.67 | 3.33 | 12.67 | 0.0273 | 0.1002 |
-
-结果解释：
-
-1. adaptive 呈现明显单轮过剪（`rounds_mean=1.00`，且单轮平均 drop ratio 最高）。
-2. adaptive_auto 把节奏从“单轮过剪”拉回到“多轮收缩”，但其分类指标仍未追平 baseline。
-3. baseline 的探索轮次最多，当前样本下对应了更高的分类指标上限。
-
-综合而言：
-
-1. 现阶段应把 adaptive 系列定位为“流程控制/结构压缩策略”，而不是“已证实精度增强策略”。
-2. 如果目标是分类指标，baseline 仍是默认首选；如果目标是符号化时延，可按场景评估 adaptive_auto。
-3. 在当前 `n=3` 证据下，更适宜将结果表述为“流程层收益成立，精度增益尚未得到验证”。
-
-样本量与证据边界如下：
-
-1. 当前仅 `3` 个 seed，统计功效有限。
-2. 存在“均值与中位数方向不一致”的情况，说明结果对异常 seed 敏感。
-3. 若需进一步判断显著性，宜扩展到至少 `10` 个 seed，并补充非参数检验（如 Wilcoxon 符号秩）与效应量。
-
-### 6.5 baseline（bspline）vs radial_bf 对比（rerun_v2_engine_safe_20260327）
-
-该小节基于你本次 rerun 产物：
-
-- [outputs/rerun_v2_engine_safe_20260327/benchmark_ab/comparison/variant_summary.csv](../outputs/rerun_v2_engine_safe_20260327/benchmark_ab/comparison/variant_summary.csv)
-- [outputs/rerun_v2_engine_safe_20260327/benchmark_ab/comparison/pairwise_delta_summary.csv](../outputs/rerun_v2_engine_safe_20260327/benchmark_ab/comparison/pairwise_delta_summary.csv)
-- [outputs/rerun_v2_engine_safe_20260327/benchmark_ab/comparison/comparison_summary.md](../outputs/rerun_v2_engine_safe_20260327/benchmark_ab/comparison/comparison_summary.md)
-
-其中 `baseline` 即 `model.numeric_basis=bspline`，`radial_bf` 即 `model.numeric_basis=radial_bf`。
-
-#### 表 1：核心指标（mean ± std）
-
-| 变体 | final_acc | macro_auc | run_total_wall_time_s | symbolize_wall_time_s | final_n_edge |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| baseline (bspline) | 0.7774 ± 0.0139 | 0.9561 ± 0.0025 | 201.64 ± 18.25 | 118.65 ± 14.90 | 88.67 ± 0.94 |
-| radial_bf | 0.7654 ± 0.0057 | 0.9538 ± 0.0045 | 136.66 ± 1.67 | 76.37 ± 1.83 | 89.00 ± 0.82 |
-
-#### 表 2：relative baseline 的 pairwise delta（variant - baseline）
-
-| 比较 | 指标 | mean_delta | win/lose/tie |
-| --- | --- | ---: | ---: |
-| radial_bf vs baseline | final_acc | -0.0120 | 0 / 3 / 0 |
-| radial_bf vs baseline | macro_auc | -0.0023 | 1 / 2 / 0 |
-| radial_bf vs baseline | run_total_wall_time_s | -64.98 s | 3 / 0 / 0 |
-| radial_bf vs baseline | symbolize_wall_time_s | -42.28 s | 3 / 0 / 0 |
-| radial_bf vs baseline | final_n_edge | +0.33 | 1 / 2 / 0 |
-
-结果解读（当前仅 3 seeds）：
-
-1. 当前样本下 `radial_bf` 在速度上有稳定优势（总时长与符号化时长均 3/3 更快）。
-2. 分类指标上 `baseline(bspline)` 仍占优（`final_acc` 为 0/3 落后）。
-3. 结构复杂度（`final_n_edge`）未见稳定下降，说明这组 `radial_bf` 配置的主要收益是速度而非边数压缩。
-
-### 6.6 numeric_basis 参数用法（bspline / radial_bf）
-
-推荐优先通过 YAML 固化口径：
-
-```yaml
-model:
-  numeric_basis: bspline   # 或 radial_bf
-```
-
-也可在 CLI 做显式覆盖（优先级高于 YAML）：
+baseline/icbr 专用 compare 示例：
 
 ```powershell
 # 运行目录：仓库根目录（symkan-experiments/）
-python -m scripts.symkanbenchmark `
-  --tasks full `
-  --config configs/benchmark_ab/baseline.yaml `
-  --numeric-basis radial_bf `
-  --stagewise-seeds 42,52,62 `
-  --output-dir outputs/rerun_v2_engine_safe_20260327/benchmark_ab/radial_bf_cli_override `
-  --quiet
+python -m scripts.benchmark_ab_compare `
+  --root outputs/rerun_v2_engine_safe_20260401/benchmark_ab `
+  --baseline baseline `
+  --variants baseline_icbr `
+  --output outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison
 ```
 
-口径建议：
+通用输出：
 
-1. 做正式 A/B 对照时，不建议只靠 `--numeric-basis` 临时覆盖，优先保留独立配置文件（如 `baseline.yaml` / `radial_bf.yaml`）。
-2. 报告中请明确说明：`baseline` 是否定义为 `bspline`，避免与其它 baseline 语义混淆。
-3. 导出指标中可直接核对 `metrics.json` 的 `numeric_basis` 字段，确认链路实际生效。
+- `variant_summary.csv`
+- `pairwise_delta_summary.csv`
+- `seedwise_delta.csv`
+- `trace_seedwise.csv`
+- `trace_summary.csv`
+- `comparison_summary.md`
+
+当 compare 对精确为 `baseline` vs `baseline_icbr` 时，还会额外生成：
+
+- `baseline_icbr_shared_check.csv`
+- `baseline_icbr_primary_effect.csv`
+- `baseline_icbr_mechanism_summary.csv`
+
+### 6.5 当前主引用结果：baseline vs baseline_icbr（2026-04-01）
+
+当前 ICBR 接入后的主引用结果位于：
+
+- [outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/comparison_summary.md](../outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/comparison_summary.md)
+- [outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/baseline_icbr_shared_check.csv](../outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/baseline_icbr_shared_check.csv)
+- [outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/baseline_icbr_primary_effect.csv](../outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/baseline_icbr_primary_effect.csv)
+- [outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/baseline_icbr_mechanism_summary.csv](../outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/baseline_icbr_mechanism_summary.csv)
+
+优先关注以下事实：
+
+1. `baseline_icbr_shared_check.csv` 对 `42/52/62` 三个 seed 均报告：
+   - `shared_numeric_aligned=True`
+   - `trace_aligned=True`
+   - `shared_symbolic_prep_aligned=True`
+2. `trace_summary.csv` 中 `baseline` 与 `baseline_icbr` 的 `Symbolize Trace Rhythm` 完全一致。
+3. `baseline_icbr_primary_effect.csv` 报告：
+   - mean `symbolic_core_speedup_vs_baseline = 2.174967`
+   - mean `final_teacher_imitation_mse_shift = -0.006009`
+   - mean `final_target_mse_shift = -0.008364`
+   - mean `final_target_r2_shift = 0.092972`
+4. `variant_summary.csv` 中两边 `final_n_edge` 均值完全一致，说明 ICBR 不再恢复被剪掉的边。
+
+当前报告建议：
+
+1. backend compare 优先使用 `symbolic_core_seconds`，而不是单独使用 `symbolize_wall_time_s`。
+2. 若要证明“比较只发生在后端”，必须先引用 `baseline_icbr_shared_check.csv`。
+3. 若要解释 ICBR 为什么更快，应进一步引用 mechanism summary，而不是只引用最终 wall-time。
+
+### 6.6 历史参考结果
+
+下列结果仍保留为历史或专题参考，但不再是当前 ICBR 接入的主引用：
+
+1. `baseline / adaptive / adaptive_auto`
+   - 主要用于说明 adaptive 系列的历史工程口径。
+2. `rerun_v2_engine_safe_20260327` 的 `baseline (bspline) vs radial_bf`
+   - 主要用于说明 numeric basis 专题，不应与当前 baseline/icbr 后端对照混用。
 
 ## 7. 报告口径
 
@@ -494,20 +436,20 @@ python -m scripts.symkanbenchmark `
 1. 均值与标准差。
 2. 中位数差值。
 3. 相对 baseline 的胜负计数（win/lose/tie）。
-4. 运行代价指标（`run_total_wall_time_s`、`symbolize_wall_time_s`、`symbolic_total_seconds`）与结构指标（`final_n_edge`）。
+4. 运行代价指标（`symbolic_core_seconds`、`symbolize_wall_time_s`、`run_total_wall_time_s`）与结构指标（`final_n_edge`）。
+5. 若 compare 为 `baseline` vs `baseline_icbr`，还应给出 shared-state 检查和机制拆解。
 
 正文可采用以下较为保守的表述方式：
 
-1. “在 `n=3` seeds 下，adaptive 系列在精度指标上未显示稳定优势（`final_acc`: adaptive `1胜2负`，adaptive_auto `0胜3负`；`macro_auc` 均 `0胜3负`）。”
-2. “因此更适宜将 adaptive 视为工程稳定化策略，而非已证实的精度增强策略。”
-3. “后续通过更大 seed 样本与统计检验确认精度结论。”
+1. “在当前 `n=3` seeds 下，baseline 与 baseline_icbr 共享 numeric stage 与 shared symbolic-prep，因此该对照可解释为 backend-only 差异。”
+2. “ICBR 在不改变 `final_n_edge` 的前提下显著降低了 `symbolic_core_seconds`，当前样本下未观察到精度退化。”
+3. “后续若需强化统计结论，应扩展 seed 样本并补充非参数检验。”
 
-若 `final_acc` 与 `macro_auc` 未形成稳定优势，宜表述为“流程改进成立，但精度优势尚未得到验证”，不宜直接写为“显著优于 baseline”。
-
-## 8. 与总文档统一口径（2026-03）
+## 8. 与总文档统一口径（2026-04）
 
 为避免跨文档“默认值”和“项目层设定”混用，统一采用以下写法：
 
 1. **CLI 默认值**：指脚本当前保留的调度参数与少量显式覆盖项默认值。
 2. **项目配置**：指基于实验结论所采用的 `AppConfig` 组合（见 [symkan_usage.md](symkan_usage.md) 与 [design.md](design.md)）。
-3. 对 2 层 KAN：运行稳定与效率优先时可将 `layerwise_finetune_steps` 设为 0；改进版 LayerwiseFT（steps=60 等）仅作为按需实验开关，不默认承诺分类增益。
+3. **默认 symbolic backend**：仍指 `baseline`，`icbr` 仅作为显式 opt-in backend。
+4. **backend compare 主引用**：当前指 `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/` 及其专用 compare 产物。
