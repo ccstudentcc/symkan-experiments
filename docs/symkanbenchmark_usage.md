@@ -327,7 +327,7 @@ outputs/benchmark_runs/
 
 1. layered 库：`LIB_HIDDEN = ["x", "x^2", "tanh"]`，`LIB_OUTPUT = ["x", "x^2"]`。
 2. FAST_LIB：`FAST_LIB = ["x", "x^2", "x^3", "tanh", "sin", "cos", "exp", "log", "sqrt", "abs"]`。
-3. full library：`EXPRESSIVE_LIB = list(_SYM_LIB_REG.keys())`，`FULL_LIB = EXPRESSIVE_LIB`。
+3. full library：`FULL_LIB = ["x", "x^2", "x^3", "x^4", "x^5", "1/x", "1/x^2", "1/x^3", "1/x^4", "1/x^5", "sqrt", "x^0.5", "x^1.5", "1/sqrt(x)", "1/x^0.5", "exp", "log", "abs", "sin", "cos", "tan", "tanh", "sgn", "arcsin", "arccos", "arctan", "arctanh", "0", "gaussian"]`。
 
 ### 6.2 命令模板
 
@@ -351,6 +351,7 @@ python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --conf
 python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/baseline_icbr.yaml --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr --quiet
 python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/baseline_fastlib.yaml --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_fastlib --quiet
 python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/baseline_icbr_fastlib.yaml --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr_fastlib --quiet
+python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --config configs/benchmark_ab/baseline_icbr_fulllib.yaml --output-dir outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr_fulllib --quiet
 ```
 
 当前 `baseline_icbr.yaml` 的设计意图是：保持 baseline 数值训练与 shared symbolic-prep 语义不变，只切换 symbolic backend。
@@ -362,7 +363,7 @@ python -m scripts.symkanbenchmark --tasks full --stagewise-seeds 42,52,62 --conf
 这一组实验不再推荐通过长 CLI 逐项传参。
 
 1. 变体差异应直接体现在各自的 `AppConfig` YAML 中。
-2. 当前仓库已内置 `configs/benchmark_ab/baseline.yaml`、`adaptive.yaml`、`adaptive_auto.yaml`、`baseline_icbr.yaml`、`baseline_fastlib.yaml` 与 `baseline_icbr_fastlib.yaml`。
+2. 当前仓库已内置 `configs/benchmark_ab/baseline.yaml`、`adaptive.yaml`、`adaptive_auto.yaml`、`baseline_icbr.yaml`、`baseline_fastlib.yaml`、`baseline_icbr_fastlib.yaml` 与 `baseline_icbr_fulllib.yaml`。
 3. benchmark CLI 主要保留 `--config`、`--output-dir`、`--stagewise-seeds` 和一小组显式白名单覆盖项。
 4. 若对比目标是 ICBR，优先保留独立的 `baseline_icbr.yaml`，不要只在命令行临时覆盖 `--symbolic-backend icbr` 后丢失可追踪配置。
 
@@ -487,7 +488,7 @@ python -m scripts.benchmark_ab_compare `
    - `final_target_r2 +0.004067`
    - `symbolic_core_seconds +3.227987`
 6. 因此，这一切片适合支持“ICBR 让 full library 方案仍然可跑，并带来一定单边收益”的表述，但不得替代 paired backend compare 证据。
-7. 这一切片的具体库设置是：`EXPRESSIVE_LIB = list(_SYM_LIB_REG.keys())`，`FULL_LIB = EXPRESSIVE_LIB`。
+7. 这一切片的具体库设置是：`FULL_LIB = ["x", "x^2", "x^3", "x^4", "x^5", "1/x", "1/x^2", "1/x^3", "1/x^4", "1/x^5", "sqrt", "x^0.5", "x^1.5", "1/sqrt(x)", "1/x^0.5", "exp", "log", "abs", "sin", "cos", "tan", "tanh", "sgn", "arcsin", "arccos", "arctan", "arctanh", "0", "gaussian"]`。
 
 当前报告建议：
 

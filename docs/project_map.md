@@ -15,7 +15,7 @@
 ## 工程版口径入口（2026-04）
 
 1. 若需要区分“历史参考版”与“当前工程版”的结论边界，优先阅读 [engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
-2. 若需要引用当前 ICBR 接入后的工程版主结果、shared-state 检查与 compare 解释口径，优先阅读 [engineering_rerun_report.md](engineering_rerun_report.md)。
+2. 若需要引用当前 ICBR 接入后的工程版主结果、shared-state 检查与 compare 解释口径，先读 [engineering_rerun_report.md](engineering_rerun_report.md) 获取带日期报告入口，再读当前正式正文 [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)。
 3. 若用于发布或答辩收口，发布前检查项以 [engineering_release_checklist.md](engineering_release_checklist.md) 为准。
 4. 本文是项目结构地图；涉及跨版本结论时，以上述工程版文档为主引用来源。
 

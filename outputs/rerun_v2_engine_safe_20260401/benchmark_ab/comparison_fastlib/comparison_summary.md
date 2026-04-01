@@ -10,16 +10,16 @@
 | baseline_fastlib | final_acc | 0.794000 | 0.799700 | 0.010859 | 0.778800 | 0.803500 |
 | baseline_fastlib | final_n_edge | 88.333333 | 88.000000 | 0.471405 | 88.000000 | 89.000000 |
 | baseline_fastlib | macro_auc | 0.962537 | 0.962713 | 0.000750 | 0.961542 | 0.963354 |
-| baseline_fastlib | run_total_wall_time_s | 334.638446 | 261.478977 | 167.154150 | 176.547860 | 565.888502 |
-| baseline_fastlib | symbolic_core_seconds | 211.949580 | 161.017811 | 95.381006 | 129.245365 | 345.585565 |
-| baseline_fastlib | symbolize_wall_time_s | 328.139783 | 251.685354 | 168.287164 | 171.182740 | 561.551255 |
+| baseline_fastlib | run_total_wall_time_s | 112.233492 | 111.820887 | 0.844226 | 111.469539 | 113.410049 |
+| baseline_fastlib | symbolic_core_seconds | 75.187859 | 75.281426 | 0.151577 | 74.974051 | 75.308100 |
+| baseline_fastlib | symbolize_wall_time_s | 110.162969 | 109.800572 | 0.851764 | 109.349303 | 111.339030 |
 | baseline_fastlib | validation_mean_r2 | -0.451777 | -0.408898 | 0.061204 | -0.538331 | -0.408101 |
 | baseline_icbr_fastlib | final_acc | 0.793233 | 0.799100 | 0.010941 | 0.777900 | 0.802700 |
 | baseline_icbr_fastlib | final_n_edge | 88.333333 | 88.000000 | 0.471405 | 88.000000 | 89.000000 |
 | baseline_icbr_fastlib | macro_auc | 0.962634 | 0.962794 | 0.000690 | 0.961720 | 0.963386 |
-| baseline_icbr_fastlib | run_total_wall_time_s | 76.947981 | 76.821946 | 1.051730 | 75.727530 | 78.294467 |
-| baseline_icbr_fastlib | symbolic_core_seconds | 34.899150 | 34.991668 | 0.261437 | 34.542884 | 35.162897 |
-| baseline_icbr_fastlib | symbolize_wall_time_s | 74.484392 | 74.378946 | 1.135263 | 73.149710 | 75.924521 |
+| baseline_icbr_fastlib | run_total_wall_time_s | 69.944645 | 69.531534 | 0.873096 | 69.143506 | 71.158896 |
+| baseline_icbr_fastlib | symbolic_core_seconds | 31.990798 | 31.856789 | 0.230444 | 31.800533 | 32.315072 |
+| baseline_icbr_fastlib | symbolize_wall_time_s | 67.817348 | 67.364007 | 0.813375 | 67.128468 | 68.959567 |
 | baseline_icbr_fastlib | validation_mean_r2 | -0.456489 | -0.422274 | 0.055795 | -0.535173 | -0.412021 |
 
 ## Baseline Pairwise Delta
@@ -29,9 +29,9 @@
 | baseline_fastlib | baseline_icbr_fastlib | final_acc | -0.000767 | -0.000800 | 0.000125 | 0 | 3 | 0 |
 | baseline_fastlib | baseline_icbr_fastlib | final_n_edge | 0.000000 | 0.000000 | 0.000000 | 0 | 0 | 3 |
 | baseline_fastlib | baseline_icbr_fastlib | macro_auc | 0.000097 | 0.000081 | 0.000061 | 3 | 0 | 0 |
-| baseline_fastlib | baseline_icbr_fastlib | run_total_wall_time_s | -257.690465 | -183.184510 | 167.875424 | 3 | 0 | 0 |
-| baseline_fastlib | baseline_icbr_fastlib | symbolic_core_seconds | -177.050431 | -125.854914 | 95.621133 | 3 | 0 | 0 |
-| baseline_fastlib | baseline_icbr_fastlib | symbolize_wall_time_s | -253.655391 | -175.760834 | 169.091437 | 3 | 0 | 0 |
+| baseline_fastlib | baseline_icbr_fastlib | run_total_wall_time_s | -42.288847 | -42.251153 | 0.303024 | 3 | 0 | 0 |
+| baseline_fastlib | baseline_icbr_fastlib | symbolic_core_seconds | -43.197061 | -43.424637 | 0.381985 | 3 | 0 | 0 |
+| baseline_fastlib | baseline_icbr_fastlib | symbolize_wall_time_s | -42.345621 | -42.379463 | 0.281407 | 3 | 0 | 0 |
 | baseline_fastlib | baseline_icbr_fastlib | validation_mean_r2 | -0.004712 | -0.003920 | 0.006773 | 1 | 2 | 0 |
 
 ## Shared Numeric Stage Check
@@ -46,7 +46,7 @@
 
 | metric | mean | median | std | min | max |
 |---|---:|---:|---:|---:|---:|
-| symbolic_core_speedup_vs_baseline | 6.092446 | 4.579196 | 2.789792 | 3.693604 | 10.004537 |
+| symbolic_core_speedup_vs_baseline | 2.350452 | 2.363120 | 0.021563 | 2.320095 | 2.368140 |
 | final_teacher_imitation_mse_shift | 0.000062 | 0.000060 | 0.000006 | 0.000057 | 0.000070 |
 | final_target_mse_shift | -0.000023 | -0.000015 | 0.000028 | -0.000061 | 0.000006 |
 | final_target_r2_shift | 0.000258 | 0.000162 | 0.000311 | -0.000066 | 0.000678 |
@@ -57,11 +57,11 @@
 
 | metric | mean | median | std | min | max |
 |---|---:|---:|---:|---:|---:|
-| icbr_candidate_generation_wall_time_s | 1.192465 | 1.220830 | 0.045347 | 1.128471 | 1.228094 |
-| icbr_replay_rerank_wall_time_s | 33.592179 | 33.632677 | 0.217455 | 33.307923 | 33.835937 |
-| icbr_candidate_share_of_core_time | 0.034162 | 0.034719 | 0.001067 | 0.032669 | 0.035097 |
-| icbr_replay_share_of_core_time | 0.962558 | 0.962263 | 0.001277 | 0.961162 | 0.964248 |
-| icbr_other_core_seconds | 0.114505 | 0.106490 | 0.011592 | 0.106129 | 0.130897 |
+| icbr_candidate_generation_wall_time_s | 1.138059 | 1.145054 | 0.019440 | 1.111536 | 1.157586 |
+| icbr_replay_rerank_wall_time_s | 30.739668 | 30.606331 | 0.217230 | 30.566650 | 31.046021 |
+| icbr_candidate_share_of_core_time | 0.035573 | 0.035822 | 0.000441 | 0.034953 | 0.035944 |
+| icbr_replay_share_of_core_time | 0.960892 | 0.960748 | 0.000218 | 0.960729 | 0.961199 |
+| icbr_other_core_seconds | 0.113072 | 0.111465 | 0.007009 | 0.105404 | 0.122346 |
 | icbr_replay_rank_inversion_rate | 0.252852 | 0.247191 | 0.014482 | 0.238636 | 0.272727 |
 
 ## Symbolize Trace Rhythm

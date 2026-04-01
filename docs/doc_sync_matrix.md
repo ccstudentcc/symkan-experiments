@@ -16,11 +16,11 @@
 | 设计边界变化（模块职责、配置边界、指标语义） | `docs/design.md`、`docs/index.md`、`README.md` | 设计语义与实现行为一致 |
 | `symkan` 使用语义变化（调用方式、参数语义、返回结构） | `docs/symkan_usage.md`、`docs/kan_parameters.md`（若影响 notebook） | API 说明、参数含义、返回字段一致 |
 | 实验流程变化（执行顺序、关键命令、检查项） | `docs/full_experiment_runbook.md`、`docs/symkanbenchmark_usage.md`、`docs/ablation_usage.md` | 命令可执行、流程顺序与产物检查一致 |
-| benchmark A/B compare 语义或输出产物变化 | `docs/symkanbenchmark_usage.md`、`docs/full_experiment_runbook.md`、`docs/engineering_rerun_report.md`、`docs/engineering_version_rerun_note.md`、`docs/engineering_release_checklist.md` | baseline/variant 定义、专用 compare 产物、shared-state 检查口径一致 |
+| benchmark A/B compare 语义或输出产物变化 | `docs/symkanbenchmark_usage.md`、`docs/full_experiment_runbook.md`、`docs/engineering_rerun_report.md`、最新 `docs/engineering_rerun_report_YYYYMMDD.md`、`docs/engineering_version_rerun_note.md`、`docs/engineering_release_checklist.md` | baseline/variant 定义、专用 compare 产物、shared-state 检查口径，以及入口页与带日期正文的分工一致 |
 | 配置模型/配置来源变化（`AppConfig`、YAML 来源、白名单覆盖） | `docs/symkan_usage.md`、`docs/symkanbenchmark_usage.md`、`docs/design.md`、`README.md` | 配置入口、默认来源、覆盖策略一致 |
 | 输出目录口径变化（默认/手册/工程归档） | `README.md`、`docs/index.md`、`docs/engineering_version_rerun_note.md`、`outputs/README.md` | `outputs/benchmark_*`、`outputs/rerun/*`、`outputs/rerun_v2_engine_safe_<date>/*` 口径一致 |
-| 跨版本指标口径变化（字段映射、新增指标） | `docs/engineering_version_rerun_note.md`、`docs/engineering_rerun_report.md`、`docs/design.md`、`docs/index.md` | `export_wall_time_s -> symbolize_wall_time_s` 映射与新增字段边界清晰 |
-| 工程版主引用目录变化（rerun 日期或归档路径变化） | `docs/engineering_rerun_report.md`、`docs/engineering_version_rerun_note.md`、`README.md`、发布说明 | 目录路径、日期、结论引用一致 |
+| 跨版本指标口径变化（字段映射、新增指标） | `docs/engineering_version_rerun_note.md`、`docs/engineering_rerun_report.md`、最新 `docs/engineering_rerun_report_YYYYMMDD.md`、`docs/design.md`、`docs/index.md` | `export_wall_time_s -> symbolize_wall_time_s` 映射与新增字段边界清晰 |
+| 工程版主引用目录变化（rerun 日期或归档路径变化） | `docs/engineering_rerun_report.md`、最新 `docs/engineering_rerun_report_YYYYMMDD.md`、`docs/engineering_version_rerun_note.md`、`README.md`、发布说明 | 稳定入口、带日期正文、目录路径与日期一致 |
 | 发布记录新增或更新 | `docs/archive/releases/engineering_release_record_YYYYMMDD.md`、`docs/engineering_release_checklist.md`、`docs/index.md` | 归档路径、命名规则、索引入口一致 |
 | 文档导航变化（新增/下线核心文档） | `docs/index.md`、`README.md`、`docs/engineering_release_checklist.md` | 导航链路完整，工程版三件套可达 |
 | 辅助说明文档口径变化（非主 docs） | `outputs/README.md`、`notebooks/README.md`、`examples/README.md` | 不回退到旧入口或旧叙述 |

@@ -89,15 +89,17 @@
 
 ## 8. 建议配套文档
 
-建议同时维护以下两类报告：
+建议同时维护以下三类文档：
 
-1. 工程版总体口径报告。
-2. ICBR 后端对照报告。
+1. 稳定入口页：负责最新带日期报告与历史报告导航。
+2. 带日期正式报告：负责单轮实验的配置、命令、结果表与结论。
+3. benchmark 使用文档：负责命令口径、指标语义与 compare 产物解释。
 
 当前对应文件为：
 
 1. [engineering_rerun_report.md](engineering_rerun_report.md)
-2. [symkanbenchmark_usage.md](symkanbenchmark_usage.md)
+2. [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)
+3. [symkanbenchmark_usage.md](symkanbenchmark_usage.md)
 
 ## 9. 当前状态
 
@@ -105,3 +107,4 @@
 2. 工程版总体口径仍可参考 `2026-03-18` 的 rerun 归档。
 3. 当前关于 ICBR 接入的正式引用应按论点拆分：`comparison/` 用于较保守的 paired backend-only 结论，`comparison_fastlib/` 用于更大候选库下的 paired speed 结论，`baseline_icbr_fulllib/` 只用于补充单变体观察。
 4. 后续若继续扩展 symbolic backend 或 library-only compare 变体，对外口径仍应保持：历史版用于参考，工程版用于正式结论，而 backend compare 需明确共享边界、paired compare 产物与单边补充切片之间的差异。
+5. 以后新增 rerun 报告时，应新建 `engineering_rerun_report_YYYYMMDD.md`，并只在 [engineering_rerun_report.md](engineering_rerun_report.md) 更新 latest/history 导航，不覆盖旧带日期正文。

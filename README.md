@@ -27,7 +27,7 @@
 - 单因素消融：读 [docs/ablation_usage.md](docs/ablation_usage.md)。
 - 结果报告：读 [docs/ablation_report.md](docs/ablation_report.md) 和 [docs/layerwiseft_improved_report.md](docs/layerwiseft_improved_report.md)。
 - 工程版口径说明：读 [docs/engineering_version_rerun_note.md](docs/engineering_version_rerun_note.md)。
-- 工程版复测主报告：读 [docs/engineering_rerun_report.md](docs/engineering_rerun_report.md)。
+- 工程版 rerun 报告总入口：读 [docs/engineering_rerun_report.md](docs/engineering_rerun_report.md)；当前 ICBR 带日期正式正文见 [docs/engineering_rerun_report_20260401.md](docs/engineering_rerun_report_20260401.md)。
 - 工程版发布检查：读 [docs/engineering_release_checklist.md](docs/engineering_release_checklist.md)。
 - 文档同步规则（SSOT）：读 [docs/doc_sync_matrix.md](docs/doc_sync_matrix.md)。
 
@@ -189,7 +189,8 @@ python -m pytest
 - [docs/project_map.md](docs/project_map.md)：项目地图与阅读路线。
 - [docs/symkan_usage.md](docs/symkan_usage.md)：核心库使用说明。
 - [docs/full_experiment_runbook.md](docs/full_experiment_runbook.md)：完整实验复跑步骤与产物检查。
-- [docs/engineering_rerun_report.md](docs/engineering_rerun_report.md)：工程版复测主报告与对照解释。
+- [docs/engineering_rerun_report.md](docs/engineering_rerun_report.md)：工程版 rerun 报告总入口与历史归档导航。
+- [docs/engineering_rerun_report_20260401.md](docs/engineering_rerun_report_20260401.md)：当前 ICBR 对照的带日期正式正文。
 - [docs/doc_sync_matrix.md](docs/doc_sync_matrix.md)：文档同步规则单一真源（SSOT）。
 
 ## 治理文件

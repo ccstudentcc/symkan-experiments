@@ -1,8 +1,8 @@
 ﻿baseline,variant,metric,mean_delta,median_delta,std_delta,win_count,lose_count,tie_count
 baseline_fastlib,baseline_icbr_fastlib,final_acc,-0.0007666945457458496,-0.000800013542175293,0.0001247160594834046,0,3,0
 baseline_fastlib,baseline_icbr_fastlib,macro_auc,9.719390285981937e-05,8.100639155617095e-05,6.055945642269611e-05,3,0,0
-baseline_fastlib,baseline_icbr_fastlib,symbolic_core_seconds,-177.0504305333333,-125.85491359999999,95.62113261232923,3,0,0
-baseline_fastlib,baseline_icbr_fastlib,symbolize_wall_time_s,-253.65539076666664,-175.76083369999998,169.09143735467106,3,0,0
+baseline_fastlib,baseline_icbr_fastlib,symbolic_core_seconds,-43.197061166666685,-43.4246371,0.38198487948086685,3,0,0
+baseline_fastlib,baseline_icbr_fastlib,symbolize_wall_time_s,-42.34562116666664,-42.37946299999997,0.2814073636295065,3,0,0
 baseline_fastlib,baseline_icbr_fastlib,validation_mean_r2,-0.004712289327414354,-0.003919556689084114,0.0067728989393393245,1,2,0
-baseline_fastlib,baseline_icbr_fastlib,run_total_wall_time_s,-257.69046526666665,-183.18450970000004,167.8754236284576,3,0,0
+baseline_fastlib,baseline_icbr_fastlib,run_total_wall_time_s,-42.28884650000002,-42.25115290000001,0.30302370068758083,3,0,0
 baseline_fastlib,baseline_icbr_fastlib,final_n_edge,0.0,0.0,0.0,0,0,3

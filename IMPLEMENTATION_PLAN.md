@@ -177,3 +177,4 @@ The final comparison set under `outputs/rerun_v2_engine_safe_20260401/benchmark_
    - `macro_auc +0.000592`
    - `final_target_r2 +0.004067`
    - `symbolic_core_seconds +3.227987`
+4. Documentation closeout should keep `docs/engineering_rerun_report.md` as the stable index and place per-rerun experimental prose in date-stamped `docs/engineering_rerun_report_YYYYMMDD.md` files.

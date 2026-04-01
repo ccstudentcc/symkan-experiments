@@ -71,8 +71,9 @@
 2. [ablation_usage.md](ablation_usage.md)：单因素消融与 LayerwiseFT 专项实验说明。
 3. [full_experiment_runbook.md](full_experiment_runbook.md)：完整复跑操作手册。
 4. [engineering_version_rerun_note.md](engineering_version_rerun_note.md)：历史版与工程版口径分层说明。
-5. [engineering_rerun_report.md](engineering_rerun_report.md)：当前工程版 ICBR 对照主报告，重点解释 shared symbolic-prep 对齐与 backend-only 差异。
-6. [engineering_release_checklist.md](engineering_release_checklist.md)：工程版发布前检查清单。
+5. [engineering_rerun_report.md](engineering_rerun_report.md)：工程版 rerun 报告总入口，负责最新带日期报告与历史报告导航。
+6. [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)：当前 ICBR 对照的带日期正式正文，重点解释 shared symbolic-prep 对齐与 backend-only 差异。
+7. [engineering_release_checklist.md](engineering_release_checklist.md)：工程版发布前检查清单。
 
 ### 2.4 报告与结论解释
 
@@ -91,8 +92,8 @@
 2. 架构与实现边界梳理：`project_map -> ../ARCHITECTURE.md -> design`
 3. 实验复现：`symkanbenchmark_usage -> ablation_usage`
 4. 全流程复跑：`full_experiment_runbook -> symkanbenchmark_usage -> ablation_usage`
-5. 报告撰写：`engineering_version_rerun_note -> engineering_rerun_report -> symkanbenchmark_usage`
-6. 发布前确认：`engineering_release_checklist -> engineering_version_rerun_note -> engineering_rerun_report`
+5. 报告撰写：`engineering_version_rerun_note -> engineering_rerun_report -> engineering_rerun_report_20260401 -> symkanbenchmark_usage`
+6. 发布前确认：`engineering_release_checklist -> engineering_version_rerun_note -> engineering_rerun_report -> engineering_rerun_report_20260401`
 
 ## 4. 返回项目入口
 

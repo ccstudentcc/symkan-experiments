@@ -27,32 +27,32 @@
     "numeric_cache_hit": true,
     "cached_stage_total_seconds_ref": 64.1409629,
     "symbolic_backend": "baseline",
-    "symbolic_prep_cache_hit": false,
+    "symbolic_prep_cache_hit": true,
     "cached_symbolic_prep_seconds_ref": 3.8308775000000423,
-    "final_acc": 0.78329998254776,
+    "final_acc": 0.7824000120162964,
     "final_n_edge": 89,
-    "final_teacher_imitation_mse": 0.009845672422091572,
-    "final_target_mse": 0.04467566969652648,
-    "final_target_r2": 0.5034103200878893,
+    "final_teacher_imitation_mse": 0.010807503631823728,
+    "final_target_mse": 0.045655567631229216,
+    "final_target_r2": 0.49251832439882626,
     "formula_export_success": true,
     "effective_target_edges": 90,
     "effective_input_dim": 58,
     "valid_expression_count": 10,
     "expr_complexity_mean": 108.4,
-    "macro_auc": 0.9540273528471033,
-    "validation_mean_r2": -0.4642551310801126,
+    "macro_auc": 0.9530592367806939,
+    "validation_mean_r2": -0.4769548791274681,
     "validation_negative_r2_count": 10,
     "stage_total_seconds": 0.0,
     "stage_train_total_seconds": 0.0,
     "stage_prune_total_seconds": 0.0,
     "stage_final_finetune_seconds": 0.0,
-    "symbolic_total_seconds": 36.992289200000016,
-    "symbolic_core_seconds": 36.992289200000016,
-    "symbolize_wall_time_s": 98.02199590000004,
-    "post_symbolic_eval_wall_time_s": 1.4856546999999978,
-    "run_total_wall_time_s": 104.36039740000001,
-    "run_overhead_wall_time_s": 6.338401499999975,
-    "symbolic_non_core_seconds": 61.02970670000002,
+    "symbolic_total_seconds": 33.2713469,
+    "symbolic_core_seconds": 33.2713469,
+    "symbolize_wall_time_s": 77.0039924,
+    "post_symbolic_eval_wall_time_s": 1.4304544000000021,
+    "run_total_wall_time_s": 78.79820850000002,
+    "run_overhead_wall_time_s": 1.794216100000014,
+    "symbolic_non_core_seconds": 43.732645500000004,
     "symbolic_non_core_valid": true,
     "symbolic_abort_stage": null,
     "symbolic_abort_reason": null,
@@ -61,7 +61,7 @@
     "icbr_candidate_generation_wall_time_s": NaN,
     "icbr_replay_rerank_wall_time_s": NaN,
     "icbr_replay_rank_inversion_rate": NaN,
-    "export_wall_time_s": 98.02199590000004,
+    "export_wall_time_s": 77.0039924,
     "pre_symbolic_n_edge": 93,
     "pre_symbolic_too_dense": false,
     "stagewise_enabled": true,
@@ -85,43 +85,43 @@
   "roc": [
     {
       "class": 0,
-      "auc": 0.9917111634010589
+      "auc": 0.9905991221322232
     },
     {
       "class": 1,
-      "auc": 0.9888878453354405
+      "auc": 0.9888044604455972
     },
     {
       "class": 2,
-      "auc": 0.9488594027688457
+      "auc": 0.9455428625638792
     },
     {
       "class": 3,
-      "auc": 0.9631176554807873
+      "auc": 0.9594373286049406
     },
     {
       "class": 4,
-      "auc": 0.9363018136616561
+      "auc": 0.9361189366006615
     },
     {
       "class": 5,
-      "auc": 0.9187352049447487
+      "auc": 0.9177062593176845
     },
     {
       "class": 6,
-      "auc": 0.9710951075449804
+      "auc": 0.9703999059827046
     },
     {
       "class": 7,
-      "auc": 0.948562898234195
+      "auc": 0.9484759979599307
     },
     {
       "class": 8,
-      "auc": 0.9219814899325746
+      "auc": 0.9228433623877359
     },
     {
       "class": 9,
-      "auc": 0.951020947166746
+      "auc": 0.9506641318115825
     }
   ]
 }

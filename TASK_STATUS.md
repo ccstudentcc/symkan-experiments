@@ -106,4 +106,5 @@ Keep the repaired ICBR integration documented and interpretable across both the 
 Current follow-up is documentation-oriented rather than implementation-oriented:
 
 1. Keep `ARCHITECTURE.md`、`SPEC.md` and the `docs/` corpus aligned with both `comparison/` and `comparison_fastlib/`.
-2. If future backend variants are added, extend the compare-only reporting path without polluting the generic benchmark compare contract.
+2. Keep `docs/engineering_rerun_report.md` as the stable rerun index and add future experimental prose to date-stamped `docs/engineering_rerun_report_YYYYMMDD.md` files instead of overwriting older reports.
+3. If future backend variants are added, extend the compare-only reporting path without polluting the generic benchmark compare contract.

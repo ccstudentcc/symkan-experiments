@@ -17,7 +17,7 @@
 - [ ] 工作区无待处理改动（`git status --short` 可解释且可发布）。
 - [ ] 核心测试通过（`python -m pytest`）。
 - [ ] 主要 CLI 入口可用（`python -m scripts.symkanbenchmark --help`、`python -m scripts.ablation_runner --help`）。
-- [ ] 工程版主结论有归档支撑（`engineering_rerun_report.md` 与引用目录一致）。
+- [ ] 工程版主结论有归档支撑（`engineering_rerun_report.md` 指向正确的最新带日期报告，且带日期正文与引用目录一致）。
 - [ ] 历史版与工程版口径已拆分（`engineering_version_rerun_note.md` 可追踪）。
 - [ ] 若本轮主引用结果来自单个 baseline-backend vs icbr-backend compare，则专用 compare 产物完整，且 `shared_symbolic_prep_aligned=True`、trace 节奏一致。
 - [ ] 若本轮还引用了 `baseline_icbr_fulllib` 一类单变体补充切片，文案已明确说明 paired baseline 未跑的原因，且没有把该切片写成 backend-only compare 证据。
@@ -57,7 +57,7 @@ git status --short
 
 1. 新读者能否仅靠 `README.md` 找到正确入口。
 2. 新读者能否从 `docs/index.md` 找到 runbook、口径说明和 rerun 报告。
-3. 若后续 rerun 更新，是否同步更新引用目录、报告日期和 compare 专用产物检查项。
+3. 若后续 rerun 更新，是否新增带日期报告、更新稳定入口的 latest/history、并同步更新引用目录与 compare 专用产物检查项。
 
 ## 7. 相关文档
 

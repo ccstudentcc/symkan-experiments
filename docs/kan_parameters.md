@@ -182,9 +182,8 @@ $$
 
 - `LIB_HIDDEN = ["x", "x^2", "tanh"]`
 - `LIB_OUTPUT = ["x", "x^2"]`
-- `FAST_LIB`
-- `EXPRESSIVE_LIB`
-- `FULL_LIB`
+- `FAST_LIB = ["x", "x^2", "x^3", "tanh", "sin", "cos", "exp", "log", "sqrt", "abs"]`
+- `FULL_LIB = ["x", "x^2", "x^3", "x^4", "x^5", "1/x", "1/x^2", "1/x^3", "1/x^4", "1/x^5", "sqrt", "x^0.5", "x^1.5", "1/sqrt(x)", "1/x^0.5", "exp", "log", "abs", "sin", "cos", "tan", "tanh", "sgn", "arcsin", "arccos", "arctan", "arctanh", "0", "gaussian"]`
 
 ### 7.3 微调参数
 
