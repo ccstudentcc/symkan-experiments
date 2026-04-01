@@ -19,14 +19,16 @@
 ### 2.2 数据、种子与模型骨架
 
 1. 数据路径：`data/X_train.npy`、`data/X_test.npy`、`data/Y_train_cat.npy`、`data/Y_test_cat.npy`。
-2. 类别集合：`[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]`。
-3. stagewise seeds：`42,52,62`。
-4. runtime seeds：`global_seed = 123`，`baseline_seed = 123`，`layerwise_validation_seed = 123`。
-5. 实际 batch size：`64`。
-6. 模型骨架：`inner_dim = 16`、`grid = 5`、`k = 3`、`top_k = 120`。
-7. 评估抽样：`validate_n_sample = 500`。
-8. 共同 workflow：`disable_stagewise_train = false`、`e2e_steps = 0`、`guard_mode = light`。
-9. 结果归档根：`outputs/rerun_v2_engine_safe_20260401/benchmark_ab/`。
+2. 数据形状：`X_train = (60000, 784)`、`Y_train_cat = (60000, 10)`、`X_test = (10000, 784)`、`Y_test_cat = (10000, 10)`。
+3. 数据集口径：固定使用仓库内预制的 MNIST `train/test` 切分，本轮 rerun 不重新随机划分训练集与测试集。
+4. 类别集合：`[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]`。
+5. stagewise seeds：`42,52,62`。
+6. runtime seeds：`global_seed = 123`，`baseline_seed = 123`，`layerwise_validation_seed = 123`。
+7. 实际 batch size：`64`。
+8. 模型骨架：`inner_dim = 16`、`grid = 5`、`k = 3`、`top_k = 120`。
+9. 评估抽样：`validate_n_sample = 500`。
+10. 共同 workflow：`disable_stagewise_train = false`、`e2e_steps = 0`、`guard_mode = light`。
+11. 结果归档根：`outputs/rerun_v2_engine_safe_20260401/benchmark_ab/`。
 
 ### 2.3 三套函数库口径
 
@@ -35,6 +37,17 @@
 3. full library 补充切片：`FULL_LIB = ["x", "x^2", "x^3", "x^4", "x^5", "1/x", "1/x^2", "1/x^3", "1/x^4", "1/x^5", "sqrt", "x^0.5", "x^1.5", "1/sqrt(x)", "1/x^0.5", "exp", "log", "abs", "sin", "cos", "tan", "tanh", "sgn", "arcsin", "arccos", "arctan", "arctanh", "0", "gaussian"]`。
 4. shared symbolize 主参数：`target_edges = 90`、`max_prune_rounds = 30`、`weight_simple = 0.1`。
 5. shared 微调参数：`finetune_steps = 50`、`finetune_lr = 0.0005`、`layerwise_finetune_steps = 60`、`layerwise_finetune_lr = 0.005`、`layerwise_finetune_lamb = 0.00001`、`affine_finetune_steps = 200`。
+
+### 2.4 数据切分与符号阶段样本口径
+
+1. numeric stage 本轮不额外划出验证集，因为 `stagewise.use_validation = false`；因此数值训练与剪枝阶段直接使用全部 `60000` 个训练样本。
+2. symbolize 的逐层微调启用 `layerwise_use_validation = true` 且 `layerwise_validation_ratio = 0.15`，因此在符号阶段会从 `60000` 个训练样本中固定划出 `9000` 个样本作为 layerwise validation，剩余 `51000` 个样本作为 layerwise fit 数据。
+3. 上述 `9000 / 51000` 划分只发生在训练集内部，不会动到 `10000` 个测试样本。
+4. layerwise early stop 的公式验证抽样上限为 `layerwise_validation_n_sample = 300`，因此逐层微调中的公式 R² 选择最多只看验证子集中的前 `300` 个样本。
+5. 最终 `formula_validation.csv` 与文中 `validation_mean_r2` 对应的是 `validate_formula_numerically(..., n_sample=500)`，即在 `10000` 个测试样本上截取前 `500` 个样本做最终公式数值验证。
+6. shared symbolic-prep 的剪枝归因采用自适应样本数；当前这组实验的 `pre_symbolic_n_edge` 约为 `105`、目标边数为 `90`，因此会命中 `attr_n_sample = 2048`，也就是每轮剪枝归因最多使用 `2048` 个训练样本。
+7. input compaction 只压缩输入维度，不压缩样本数；例如 `run_01_seed42` 中 `selected_input_dim = 120`，最终 `effective_input_dim = 58`，但符号拟合阶段可用的训练样本数仍按前述 `51000 / 9000` 切分执行。
+8. ICBR backend 额外引入 `icbr_calibration_n_sample = 512`，实际实现会从符号阶段训练输入中截取前 `512` 个样本作为 backend calibration / replay rerank 输入；baseline backend 没有这一步。
 
 ## 3. 变体定义与配置边界
 

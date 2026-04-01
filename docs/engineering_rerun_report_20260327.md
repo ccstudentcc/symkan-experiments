@@ -21,12 +21,14 @@
 ### 2.2 数据与种子
 
 1. 数据路径：`data/X_train.npy`、`data/X_test.npy`、`data/Y_train_cat.npy`、`data/Y_test_cat.npy`。
-2. 类别集合：`[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]`。
-3. stagewise seeds：`42,52,62`。
-4. runtime seeds：`global_seed = 123`，`baseline_seed = 123`，`layerwise_validation_seed = 123`。
-5. 实际 batch size：`64`。
-6. 评估抽样：`validate_n_sample = 500`。
-7. 结果归档根：`outputs/rerun_v2_engine_safe_20260327/benchmark_ab/`。
+2. 数据形状：`X_train = (60000, 784)`、`Y_train_cat = (60000, 10)`、`X_test = (10000, 784)`、`Y_test_cat = (10000, 10)`。
+3. 数据集口径：固定使用仓库内预制的 MNIST `train/test` 切分，本轮历史 rerun 不重新随机划分训练集与测试集。
+4. 类别集合：`[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]`。
+5. stagewise seeds：`42,52,62`。
+6. runtime seeds：`global_seed = 123`，`baseline_seed = 123`，`layerwise_validation_seed = 123`。
+7. 实际 batch size：`64`。
+8. 评估抽样：`validate_n_sample = 500`。
+9. 结果归档根：`outputs/rerun_v2_engine_safe_20260327/benchmark_ab/`。
 
 ### 2.3 模型与共同设置
 
@@ -39,6 +41,13 @@
 5. symbolize 主参数：`target_edges = 90`、`max_prune_rounds = 30`、`weight_simple = 0.1`。
 6. 微调主参数：`finetune_steps = 50`、`finetune_lr = 0.0005`、`layerwise_finetune_steps = 60`。
 7. stage guard：`guard_mode = light`。
+
+两侧共同的数据切分与样本口径如下：
+
+1. numeric stage 不额外划出验证集，因为 `stagewise.use_validation = false`；因此数值训练与 stagewise 剪枝直接使用全部 `60000` 个训练样本。
+2. symbolize 的逐层微调启用 `layerwise_use_validation = true` 且 `layerwise_validation_ratio = 0.15`，因此符号阶段会在训练集内部切出 `9000` 个 layerwise validation 样本，并保留 `51000` 个 layerwise fit 样本。
+3. 最终公式数值验证使用 `validate_n_sample = 500`，即在 `10000` 个测试样本中截取前 `500` 个样本生成 `formula_validation.csv` 与 `validation_mean_r2`。
+4. shared symbolic-prep 的剪枝归因采用自适应样本数；本轮 `pre_symbolic_n_edge` 约为 `105`、目标边数为 `90`，因此每轮归因使用的上限样本数为 `2048`。
 
 ## 3. 变体定义与配置差异
 

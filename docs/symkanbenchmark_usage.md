@@ -419,6 +419,16 @@ python -m scripts.benchmark_ab_compare `
 
 当前 `2026-04-01` 的 ICBR 结果不宜再写成“只有一个主引用切片”，更稳妥的做法是按论点拆分为两套 paired compare 和一套补充单变体切片。
 
+本轮 `2026-04-01` compare 的共同数据与样本口径如下：
+
+1. 数据固定来自仓库内的 MNIST 预制切分：`X_train = (60000, 784)`、`Y_train_cat = (60000, 10)`、`X_test = (10000, 784)`、`Y_test_cat = (10000, 10)`。
+2. numeric stage 不再从训练集内额外切验证集，因为 `stagewise.use_validation = false`；数值训练与 stagewise 剪枝直接使用全部 `60000` 个训练样本。
+3. symbolize 的逐层微调启用 `layerwise_validation_ratio = 0.15`，因此符号阶段会把训练集切成 `51000` 个 fit 样本和 `9000` 个 validation 样本。
+4. layerwise early stop 的公式验证最多只看 `layerwise_validation_n_sample = 300` 个验证样本。
+5. 最终 `formula_validation.csv` 与 `validation_mean_r2` 使用 `validate_n_sample = 500`，即在 `10000` 个测试样本中截取前 `500` 个样本。
+6. shared symbolic-prep 的剪枝归因使用自适应训练样本数；当前这组实验的边数比例会命中 `attr_n_sample = 2048`。
+7. ICBR backend 还会额外从符号阶段训练输入中截取 `icbr_calibration_n_sample = 512` 个样本用于 calibration / replay rerank；baseline backend 不包含这一步。
+
 #### 6.5.1 layered 库 paired 切片
 
 较保守的 paired backend-only 对照位于：
