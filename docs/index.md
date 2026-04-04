@@ -30,7 +30,14 @@
 5. 指标口径统一：跨版本耗时字段仅允许 `export_wall_time_s -> symbolize_wall_time_s` 语义映射；backend compare 优先使用 `symbolic_core_seconds`。
 6. 发布前一致性检查：每次 release 前应对 `README.md` 与 `docs/` 执行一次“口径同步复核”（见 `engineering_release_checklist.md`）。
 
-## 0.3 文档同步矩阵（SSOT）
+## 0.3 文档治理总则
+
+文档体系的分层角色、维护链路、写作边界与禁止模式，统一见 [documentation_governance.md](documentation_governance.md)。
+
+1. 若本次改动涉及文档结构、文风规则、入口职责或发布收口流程，先读该文档。
+2. 若本次改动只涉及某一类具体语义变更，再按 [doc_sync_matrix.md](doc_sync_matrix.md) 确定同步集合。
+
+## 0.4 文档同步矩阵（SSOT）
 
 文档同步规则的单一真源见 [doc_sync_matrix.md](doc_sync_matrix.md)。
 
@@ -91,6 +98,17 @@
 1. [archive/releases/engineering_release_record_20260319.md](archive/releases/engineering_release_record_20260319.md)：`2026-03-19` 工程版发布记录示例。
 2. 后续发布记录统一归档到 `docs/archive/releases/`，文件命名建议为 `engineering_release_record_YYYYMMDD.md`。
 
+### 2.6 文档治理与发布
+
+1. [documentation_governance.md](documentation_governance.md)：文档系统的分层角色、维护链路与写作边界。
+2. [doc_sync_matrix.md](doc_sync_matrix.md)：改动类型到同步集合的单一真源。
+3. [engineering_release_checklist.md](engineering_release_checklist.md)：发布前文档与结果的最终收口。
+
+### 2.7 协作与任务跟踪
+
+1. [../CONTRIBUTING.md](../CONTRIBUTING.md)：协作流程、提交流程与检查要求。
+2. [../AGENTS.md](../AGENTS.md)：代理可见的仓库级约束与同步规则。
+
 ## 3. 按任务场景选择路径
 
 1. 项目全貌快速建立：`project_map -> symkan_usage -> symkanbenchmark_usage`
@@ -99,6 +117,7 @@
 4. 全流程复跑：`full_experiment_runbook -> symkanbenchmark_usage -> ablation_usage`
 5. 报告撰写：`engineering_version_rerun_note -> engineering_rerun_report -> engineering_rerun_report_20260318 / engineering_rerun_report_20260401 -> symkanbenchmark_usage`
 6. 发布前确认：`engineering_release_checklist -> engineering_version_rerun_note -> engineering_rerun_report -> engineering_rerun_report_20260318 / engineering_rerun_report_20260401`
+7. 文档治理或体系收口：`documentation_governance -> doc_sync_matrix -> README -> engineering_release_checklist`
 
 ## 4. 返回项目入口
 

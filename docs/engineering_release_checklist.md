@@ -17,7 +17,7 @@
 - [ ] 工作区无待处理改动（`git status --short` 可解释且可发布）。
 - [ ] 核心测试通过（`python -m pytest`）。
 - [ ] 主要 CLI 入口可用（`python -m scripts.symkanbenchmark --help`、`python -m scripts.ablation_runner --help`）。
-- [ ] 工程版主结论有归档支撑（`engineering_rerun_report.md` 指向正确的最新带日期报告，且带日期正文与引用目录一致）。
+- [ ] 工程版主结论有归档支撑（`engineering_rerun_report.md` 指向正确的当前主引用带日期报告，必要时可为多份，且带日期正文与引用目录一致）。
 - [ ] 历史版与工程版口径已拆分（`engineering_version_rerun_note.md` 可追踪）。
 - [ ] 若本轮主引用结果来自单个 baseline-backend vs icbr-backend compare，则专用 compare 产物完整，且 `shared_symbolic_prep_aligned=True`、trace 节奏一致。
 - [ ] 若本轮还引用了 `baseline_icbr_fulllib` 一类单变体补充切片，文案已明确说明 paired baseline 未跑的原因，且没有把该切片写成 backend-only compare 证据。
@@ -25,9 +25,12 @@
 ## 3. 文档与口径收口（按矩阵执行）
 
 1. 先按 [doc_sync_matrix.md](doc_sync_matrix.md) 确定本次改动影响的文档集合。
-2. 对矩阵命中的文档逐项完成同步与人工核对。
-3. 勾选全局必检项：
+2. 若本次发布涉及文档体系、入口或写作规则调整，先核对 [documentation_governance.md](documentation_governance.md) 中的分层角色与禁止模式。
+3. 对矩阵命中的文档逐项完成同步与人工核对。
+4. 勾选全局必检项：
    - [ ] 文档导航一致：`README.md` 与 `docs/index.md` 一致。
+   - [ ] 文档治理入口可达：`documentation_governance.md`、`doc_sync_matrix.md`、`engineering_release_checklist.md` 三者互相可追踪。
+   - [ ] 当前任务状态可解释：若本次发布源于多会话任务，`SPEC.md`、`IMPLEMENTATION_PLAN.md`、`TASK_STATUS.md` 已更新到可发布状态。
    - [ ] 工程版三件套可达：`engineering_version_rerun_note`、`engineering_rerun_report`、`engineering_release_checklist`。
    - [ ] 链接完整性通过：`README.md` 与 `docs/` 相对链接无失效项。
 
@@ -57,18 +60,20 @@ git status --short
 
 1. 新读者能否仅靠 `README.md` 找到正确入口。
 2. 新读者能否从 `docs/index.md` 找到 runbook、口径说明和 rerun 报告。
-3. 若后续 rerun 更新，是否新增带日期报告、更新稳定入口的 latest/history、并同步更新引用目录与 compare 专用产物检查项。
+3. 新读者能否从 `docs/index.md` 或 `README.md` 找到文档治理入口与同步规则。
+4. 若后续 rerun 更新，是否新增带日期报告、更新稳定入口的 latest/history、并同步更新引用目录与 compare 专用产物检查项。
 
 ## 7. 相关文档
 
 1. [README.md](../README.md)
 2. [index.md](index.md)
-3. [doc_sync_matrix.md](doc_sync_matrix.md)
-4. [project_map.md](project_map.md)
-5. [design.md](design.md)
-6. [symkan_usage.md](symkan_usage.md)
-7. [full_experiment_runbook.md](full_experiment_runbook.md)
-8. [engineering_version_rerun_note.md](engineering_version_rerun_note.md)
-9. [engineering_rerun_report.md](engineering_rerun_report.md)
-10. [engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md)
-11. [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)
+3. [documentation_governance.md](documentation_governance.md)
+4. [doc_sync_matrix.md](doc_sync_matrix.md)
+5. [project_map.md](project_map.md)
+6. [design.md](design.md)
+7. [symkan_usage.md](symkan_usage.md)
+8. [full_experiment_runbook.md](full_experiment_runbook.md)
+9. [engineering_version_rerun_note.md](engineering_version_rerun_note.md)
+10. [engineering_rerun_report.md](engineering_rerun_report.md)
+11. [engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md)
+12. [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)

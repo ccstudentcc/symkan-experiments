@@ -18,7 +18,7 @@
 1. 历史参考版：`d8e09b5edadb988bd4a1638ea7109cf3ff5ef7d7`，对应 pre-release `v1.0.0-legacy-d8`。
 2. 当前工程版：`main` 分支，包含配置模块化、守护策略分级、共享 symbolic-prep cache 与 ICBR 后端接入等工程化改造。
 
-建议在论文、报告或答辩材料中显式声明：历史版本仅作为参考锚点，工程版本用于当前正式结论。
+论文、报告或答辩材料应显式声明：历史版本仅作为参考锚点，工程版本用于当前正式结论。
 
 ## 3. 两代结果不可直接等价的原因
 
@@ -62,7 +62,7 @@
 2. 若 `shared_numeric_aligned=True`、`trace_aligned=True`、`shared_symbolic_prep_aligned=True`，才可将差异解释为 backend-only 差异。
 3. 若只想扩大函数库但继续复用 numeric/shared-prep cache，应把库覆盖写在 `symbolize.lib` / `symbolize.lib_hidden` / `symbolize.lib_output`，而不是改非 `symbolize` section。
 
-## 6. 推荐执行环境
+## 6. 参考执行环境
 
 1. 操作系统：Windows 11 专业版 `23H2`（OS Build `22631.5472`）。
 2. Python 环境：`Miniconda` 的 `kan` 环境，解释器路径 `C:\Users\chenpeng\miniconda3\envs\kan\python.exe`（Python `3.9.25`）。
@@ -70,9 +70,9 @@
 4. 内存：`16 GB`。
 5. 运行路径：`PyTorch 2.1.2+cpu`。
 
-## 7. 报告书写建议
+## 7. 报告书写结构
 
-建议采用“五层叙述”结构：
+当前维护口径按“五层叙述”结构组织：
 
 1. 历史参考结果：用于提供研究脉络与可复现边界。
 2. 工程版总体复测结果：用于说明工程版相对历史版的总体口径。
@@ -80,16 +80,16 @@
 4. FAST_LIB ICBR 对照：用于说明在更大候选库下 ICBR 的速度潜力。
 5. full symbolic library 单变体补充：用于说明 baseline full library 成本过高时，ICBR 自身在更大全库下仍可运行并带来单边收益，但不承担 paired fairness 证明职责。
 
-同时应设置“差异归因”小节，至少覆盖以下维度：
+“差异归因”小节至少覆盖以下维度：
 
 1. 守护策略变化带来的稳定性与安全收益。
 2. 配置与可观测性增强带来的工程可维护性收益。
 3. shared symbolic-prep cache 与 trace 对齐的公平性含义。
 4. 函数库扩大后，候选生成与 replay rerank 在总耗时中的占比变化。
 
-## 8. 建议配套文档
+## 8. 配套文档结构
 
-建议同时维护以下三类文档：
+当前应同时维护以下三类文档：
 
 1. 稳定入口页：负责最新带日期报告与历史报告导航。
 2. 带日期正式报告：负责单轮实验的配置、命令、结果表与结论。

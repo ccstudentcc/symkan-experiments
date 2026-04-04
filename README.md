@@ -17,19 +17,12 @@
 
 ## 文档路径
 
-可按使用目的选择以下阅读路径：
+完整文档目录与分场景阅读路径以 [docs/index.md](docs/index.md) 为准。仓库级稳定入口如下：
 
-- 项目结构：读 [docs/project_map.md](docs/project_map.md)。
-- 最小示例：读 [docs/symkan_usage.md](docs/symkan_usage.md) 第 4 节。
-- 实验复现：读 [docs/symkanbenchmark_usage.md](docs/symkanbenchmark_usage.md)。
-- 完整复跑手册：读 [docs/full_experiment_runbook.md](docs/full_experiment_runbook.md)。
-- 设计依据：读 [docs/design.md](docs/design.md)。
-- 单因素消融：读 [docs/ablation_usage.md](docs/ablation_usage.md)。
-- 结果报告：读 [docs/ablation_report.md](docs/ablation_report.md) 和 [docs/layerwiseft_improved_report.md](docs/layerwiseft_improved_report.md)。
-- 工程版口径说明：读 [docs/engineering_version_rerun_note.md](docs/engineering_version_rerun_note.md)。
-- 工程版 rerun 报告总入口：读 [docs/engineering_rerun_report.md](docs/engineering_rerun_report.md)；当前工程版总体 rerun 正文见 [docs/engineering_rerun_report_20260318.md](docs/engineering_rerun_report_20260318.md)，当前 ICBR 对照正式正文见 [docs/engineering_rerun_report_20260401.md](docs/engineering_rerun_report_20260401.md)。
-- 工程版发布检查：读 [docs/engineering_release_checklist.md](docs/engineering_release_checklist.md)。
-- 文档同步规则（SSOT）：读 [docs/doc_sync_matrix.md](docs/doc_sync_matrix.md)。
+- [docs/index.md](docs/index.md)：`docs/` 目录统一入口与主题导航。
+- [docs/project_map.md](docs/project_map.md)：仓库结构、代码入口与结果位置地图。
+- [docs/documentation_governance.md](docs/documentation_governance.md)：文档治理分层、维护链路与写作边界。
+- [docs/engineering_rerun_report.md](docs/engineering_rerun_report.md)：工程版 rerun 报告稳定入口与历史归档导航。
 
 ## 统一口径（2026-03-19）
 
@@ -41,7 +34,7 @@
 4. 跨版本指标口径：仅将 `export_wall_time_s` 语义映射到 `symbolize_wall_time_s`；`run_total_wall_time_s` 为工程版新增字段，历史版无同名可比项。
 5. 导航口径：`README.md` 中“文档路径/文档导航”与 `docs/index.md` 必须保持一致；发生冲突时以 `docs/index.md` 为准并同步回写。
 
-若后续继续迭代 `main`，请同步更新 [docs/index.md](docs/index.md) 的“统一口径速查”与本文对应段落，避免 README 与 docs 叙述漂移。
+后续若继续迭代 `main`，应同步更新 [docs/index.md](docs/index.md) 的“统一口径速查”与本文对应段落，避免 README 与 docs 叙述漂移。
 
 ## 基本运行
 
@@ -185,18 +178,11 @@ python -m pytest
 
 ## 文档导航
 
-为减少重复维护，完整文档目录与分场景阅读路径以 [docs/index.md](docs/index.md) 为准。常用入口如下：
-
-- [docs/project_map.md](docs/project_map.md)：项目地图与阅读路线。
-- [docs/symkan_usage.md](docs/symkan_usage.md)：核心库使用说明。
-- [docs/full_experiment_runbook.md](docs/full_experiment_runbook.md)：完整实验复跑步骤与产物检查。
-- [docs/engineering_rerun_report.md](docs/engineering_rerun_report.md)：工程版 rerun 报告总入口与历史归档导航。
-- [docs/engineering_rerun_report_20260318.md](docs/engineering_rerun_report_20260318.md)：当前工程版总体 rerun 的带日期正式正文。
-- [docs/engineering_rerun_report_20260401.md](docs/engineering_rerun_report_20260401.md)：当前 ICBR 对照的带日期正式正文。
-- [docs/doc_sync_matrix.md](docs/doc_sync_matrix.md)：文档同步规则单一真源（SSOT）。
+完整文档目录与分场景阅读路径见前文“文档路径”，并以 [docs/index.md](docs/index.md) 为准。
 
 ## 治理文件
 
+- [AGENTS.md](AGENTS.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - [SECURITY.md](SECURITY.md)

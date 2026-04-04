@@ -6,7 +6,7 @@
 2. 各文档与代码入口之间的关系是什么。
 3. 在实验复现、代码阅读和报告撰写情形下，应参考哪些位置。
 
-对于初次接触该仓库的读者，本文可作为文档与代码入口的总览。
+本文提供仓库结构、代码入口与结果位置的结构化地图；完整文档导航以 [index.md](index.md) 为准。
 
 ## 概述
 
@@ -14,10 +14,10 @@
 
 ## 工程版口径入口（2026-04）
 
-1. 若需要区分“历史参考版”与“当前工程版”的结论边界，优先阅读 [engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
-2. 若需要引用当前工程版总体 rerun、ICBR 接入后的 shared-state 检查与 compare 解释口径，先读 [engineering_rerun_report.md](engineering_rerun_report.md) 获取带日期报告入口，再按主题进入 [engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md) 或 [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)。
-3. 若用于发布或答辩收口，发布前检查项以 [engineering_release_checklist.md](engineering_release_checklist.md) 为准。
-4. 本文是项目结构地图；涉及跨版本结论时，以上述工程版文档为主引用来源。
+1. 口径边界入口：[engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
+2. 工程版实验报告稳定入口：[engineering_rerun_report.md](engineering_rerun_report.md)。
+3. 发布收口入口：[engineering_release_checklist.md](engineering_release_checklist.md)。
+4. 本文只负责结构地图；跨版本结论与正式证据引用以上述文档为准。
 
 ## 仓库组成
 
@@ -65,6 +65,8 @@
 
 该目录用于集中放置面向读者的说明性文档。
 
+- 导航文档：`index.md`、`project_map.md`，负责入口与阅读路径。
+- 治理文档：`documentation_governance.md`、`doc_sync_matrix.md`、`engineering_release_checklist.md`，负责维护链路、同步规则与发布收口。
 - 用法文档：说明运行方式与参数。
 - 设计文档：说明设计动机与约束。
 - 实验报告：说明当前证据所支持的结论范围。
@@ -86,42 +88,16 @@
 1. `symkan.config.notebook`：负责旧 notebook flat kwargs 的参数转换、canonical 名字归一化与 alias 兜底兼容。
 2. `symkan.notebook_compat`：负责将 notebook 风格调用接到现有 `stagewise_train` / `symbolize_pipeline` 运行时入口。
 
-## 阅读入口
+## 结构相关入口
 
-### 总览阅读
+完整文档导航见 [index.md](index.md)。本页只保留与仓库结构、代码入口和结果位置直接相关的入口：
 
-可按以下顺序阅读：
-
-1. [../README.md](../README.md)
-2. [symkan_usage.md](symkan_usage.md)
-3. [symkanbenchmark_usage.md](symkanbenchmark_usage.md)
-
-### 架构阅读
-
-可按以下顺序阅读：
-
-1. [../ARCHITECTURE.md](../ARCHITECTURE.md)
-2. [design.md](design.md)
-3. [symkan_usage.md](symkan_usage.md)
-
-### 实验复现
-
-可按以下顺序阅读：
-
-1. [symkanbenchmark_usage.md](symkanbenchmark_usage.md)
-2. [ablation_usage.md](ablation_usage.md)
-3. [ablation_report.md](ablation_report.md)
-
-### 方法说明与结果表述
-
-可按以下顺序阅读：
-
-1. [design.md](design.md)
-2. [ablation_report.md](ablation_report.md)
-3. [layerwiseft_improved_report.md](layerwiseft_improved_report.md)
-4. [engineering_rerun_report.md](engineering_rerun_report.md)
-5. [engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md)
-6. [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)
+1. 仓库总览：[../README.md](../README.md)
+2. 系统级架构：[../ARCHITECTURE.md](../ARCHITECTURE.md)
+3. 核心库与参数说明：[symkan_usage.md](symkan_usage.md)
+4. 主 benchmark 入口与输出：[symkanbenchmark_usage.md](symkanbenchmark_usage.md)
+5. 设计与结论入口：[design.md](design.md)、[engineering_rerun_report.md](engineering_rerun_report.md)
+6. 文档治理与发布收口：[documentation_governance.md](documentation_governance.md)、[doc_sync_matrix.md](doc_sync_matrix.md)、[engineering_release_checklist.md](engineering_release_checklist.md)
 
 ## 主工作流
 
@@ -152,24 +128,8 @@
 
 这些位置共同决定了配置流、数据流、结果落盘方式以及实验脚本与公共库之间的接口关系。
 
-## 当前可引用的主要结论
+## 结论入口
 
-当前文档中相对稳定的结论包括以下三项：
-
-1. `stagewise_train` 不是装饰品，而是整条符号化链路可用性的前提。
-2. 渐进剪枝和输入压缩主要负责复杂度与耗时治理，不应简单表述成“默认提精度模块”。
-3. 对典型 2 层 KAN，LayerwiseFT 目前更像按需开关，而不是默认收益项。
-
-当前新增的稳定工程结论还包括：
-
-4. `baseline` 与 `baseline_icbr` 现在可以共享 numeric stage 与 shared symbolic-prep，因此 compare 结果可以被解释为后端差异，而不是训练差异。
-5. 当前 `2026-04-01` 的 paired compare 需要分层引用：`comparison/` 负责较保守的 layered 库 backend-only 对照，`comparison_fastlib/` 负责更大候选库下的 paired speed slice，而 `baseline_icbr_fulllib/` 仅是补充单变体观察。
-
-这些结论的详细证据都在：
-
-- [ablation_report.md](ablation_report.md)
-- [layerwiseft_improved_report.md](layerwiseft_improved_report.md)
-
-## 说明
-
-在进入专题文档前先建立项目地图，有助于降低跨文档跳转带来的理解成本。
+1. 默认流程、模块职责与设计边界：见 [design.md](design.md) 与 [ablation_report.md](ablation_report.md)。
+2. LayerwiseFT 专题结论：见 [layerwiseft_improved_report.md](layerwiseft_improved_report.md)。
+3. 工程版总体 rerun 与 ICBR backend compare 的正式结论：见 [engineering_rerun_report.md](engineering_rerun_report.md) 及对应带日期正文。

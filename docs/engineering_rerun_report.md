@@ -2,12 +2,18 @@
 
 本文档不再承载单轮实验的完整正文，而是作为带日期实验报告的统一入口。
 
-## 当前使用规则
+## 当前主引用
 
-1. 若需要查看当前 ICBR backend 对照的正式正文，读 [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)。
-2. 若需要查看 `bspline baseline` vs `radial_bf` 的历史工程专题结果，读 [engineering_rerun_report_20260327.md](engineering_rerun_report_20260327.md)。
-3. 若需要查看当前工程版总体 rerun 的正式正文，读 [engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md)。
-4. 若需要先理解“历史版、当前工程版、paired compare、单边补充切片”的口径边界，先读 [engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
+1. 当前 ICBR backend 对照正式正文：[engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)。
+2. 当前工程版总体 rerun 正式正文：[engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md)。
+
+## 历史专题
+
+1. `bspline baseline` vs `radial_bf` 工程专题：[engineering_rerun_report_20260327.md](engineering_rerun_report_20260327.md)。
+
+## 口径边界
+
+1. 历史版、当前工程版、paired compare 与补充单边切片的口径分层：[engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
 
 ## 报告清单
 
@@ -41,5 +47,5 @@
 ## 维护规则
 
 1. 新增或重写工程实验报告时，优先新建带日期文件，而不是覆盖旧报告正文。
-2. 本入口只负责导航、分层和推荐阅读顺序；具体数值、命令和实验条件应写入对应的带日期报告。
-3. 若某轮实验会成为新的主引用，应在本文件、[README.md](../README.md)、[index.md](index.md) 与 [engineering_version_rerun_note.md](engineering_version_rerun_note.md) 中同步更新入口。
+2. 本入口只负责导航、分层和 stable link；具体数值、命令和实验条件应写入对应的带日期报告。
+3. 若某轮实验会成为新的主引用，应同步更新本文件、[README.md](../README.md)、[index.md](index.md)、[engineering_version_rerun_note.md](engineering_version_rerun_note.md) 与 [engineering_release_checklist.md](engineering_release_checklist.md)。

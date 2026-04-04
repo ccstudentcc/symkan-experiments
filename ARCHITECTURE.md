@@ -199,9 +199,15 @@
 进一步阅读时，可按以下顺序：
 
 1. [README.md](README.md)
-2. [SPEC.md](SPEC.md)
-3. [docs/project_map.md](docs/project_map.md)
+2. [docs/project_map.md](docs/project_map.md)
+3. [docs/documentation_governance.md](docs/documentation_governance.md)
 4. [docs/design.md](docs/design.md)
 5. [docs/symkan_usage.md](docs/symkan_usage.md)
 6. [docs/symkanbenchmark_usage.md](docs/symkanbenchmark_usage.md)
 7. [docs/engineering_rerun_report.md](docs/engineering_rerun_report.md)
+
+若正在接手一个复杂或多会话任务，再补读：
+
+1. [SPEC.md](SPEC.md)
+2. [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)
+3. [TASK_STATUS.md](TASK_STATUS.md)
