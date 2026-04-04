@@ -1,223 +1,589 @@
-# symkan 设计文档
+# SymKAN Design
 
-本文讨论系统设计的动机、边界与约束，不涉及命令级使用说明。仓库结构可参考 [project_map](project_map.md) 与 [../ARCHITECTURE.md](../ARCHITECTURE.md)。
+状态: Rewritten as a paper-style design manuscript
+日期: 2026-04-04
+范围: 以当前 `symkan-experiments` 仓库为对象，说明 SymKAN 如何在不改写 `pykan` 数值训练语义的前提下，把 KAN 的训练、剪枝、符号化、验证与结果归档组织成可复现、可比较、可引用的工程化研究流程。
 
-## 文档导航
+## 1. 摘要
 
-- 返回总览：[README](../README.md)
-- docs 总入口：[index](index.md)
-- 项目地图：[project_map](project_map.md)
-- 架构总览：[../ARCHITECTURE.md](../ARCHITECTURE.md)
-- 使用说明：[symkan_usage](symkan_usage.md)
-- benchmark 参数与产物：[symkanbenchmark_usage](symkanbenchmark_usage.md)
-- 参数细节：[kan_parameters](kan_parameters.md)
-- 消融说明：[ablation_usage](ablation_usage.md)
+本文将 SymKAN 重新表述为一个面向符号化实验的工程化流水线，而不是对 `pykan` 的替代实现，也不是单一算法模块的说明书。其核心目标不是重新发明 KAN 训练器，而是在保持既有 notebook、CLI 与脚本入口兼容的前提下，把数值训练后的 KAN 模型推进到可验证、可导出、可比较的符号表达式状态，并把相关证据落实到结构化文件而非终端输出。
 
-## 工程版口径入口（2026-04）
+当前版本的设计主张固定为以下五点：
 
-1. 若需要“历史参考版 vs 当前工程版”的版本边界，优先阅读 [engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
-2. 若需要当前工程版的主引用结果与指标解释，优先阅读 [engineering_rerun_report.md](engineering_rerun_report.md)。
-3. 若用于发布口径确认，请同步检查 [engineering_release_checklist.md](engineering_release_checklist.md)。
-4. 本文聚焦设计原则与约束；跨版本叙述以上述工程版文档为准。
+1. `AppConfig` 作为 notebook、CLI 与库层共享的配置边界，负责把“程序如何运行”的描述统一到同一对象上。
+2. `stagewise_train` 与 `symbolize_pipeline` 必须分离；前者负责把模型送入可符号化区间，后者负责在受控复杂度下完成符号替换与验证。
+3. 符号化流程内部需要区分 shared symbolic-prep 与 backend-specific symbolic completion，以保证 `baseline` 与 `icbr` 的 backend-only compare 具有清晰的公平性边界。
+4. 结果归档必须依赖结构化输出，包括运行主表、阶段日志、轨迹表、公式验证表和 compare 汇总，而不是散落的临时记录。
+5. 设计层结论必须以维护中的证据目录为依据，并显式区分 paired evidence、supplementary evidence 与不可混写的历史切片。
 
-## 目录
+相应地，本文明确不作以下主张：
 
-- [目标](#目标)
-- [非目标](#非目标)
-- [数据结构](#数据结构)
-- [stagewise_train 与 symbolize_pipeline 的分离](#stagewise_train-与-symbolize_pipeline-的分离)
-- [关键算法选型](#关键算法选型)
-- [行内注释策略](#行内注释策略)
-- [风险与边界](#风险与边界)
-- [工程化改动落地（2026-03-19）](#工程化改动落地2026-03-19)
-- [ICBR 接入后的设计收敛（2026-04）](#icbr-接入后的设计收敛2026-04)
-- [实验回证后的设计收敛（2026-03）](#实验回证后的设计收敛2026-03)
-- [默认设定与兼容约束](#默认设定与兼容约束)
-- [后续演进方向](#后续演进方向)
+- 不把 SymKAN 描述为新的 KAN 数值训练算法。
+- 不把 SymKAN 描述为从原始样本直接发现闭式公式的通用 symbolic regression 系统。
+- 不把工程版 `n=3` seeds 结果表述为充分的统计显著性结论。
+- 不把 `formula_export_success_rate=1.0` 表述为“真实公式恢复成功率”。
+- 不把 `baseline_icbr_fulllib` 的单边结果表述为 paired backend-only compare 证据。
 
-## 目标
+为防止后文在不同证据来源之间混写，本文在摘要阶段固定如下证据矩阵。
 
-symkan 的关注点不在于重新实现 KAN，而在于将 KAN 的训练结果推进到可验证、可复现且可导出的符号表达式。其核心目标包括：
+| 论断类型 | 允许引用的来源 | 不应混入的来源 |
+| --- | --- | --- |
+| 模块角色、默认设定、Stagewise/剪枝/压缩/LayerwiseFT 的职责判断 | [docs/ablation_report.md](ablation_report.md), [docs/layerwiseft_improved_report.md](layerwiseft_improved_report.md), `outputs/benchmark_ablation/` | `benchmark_ab` 的 backend compare 结果 |
+| `baseline` vs `baseline_icbr` 的 backend-only compare | [docs/engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md), `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/` | 历史 `radial_bf` 工程切片、单边 full library 切片 |
+| `baseline_fastlib` vs `baseline_icbr_fastlib` 的更大函数库 paired compare | [docs/engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md), `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib/` | layered paired compare 之外的旧 compare 目录 |
+| full library 下 ICBR 的可运行性补充说明 | [docs/engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md), `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr_fulllib/` | 任何 paired backend-only 语义表述 |
 
-1. 保持 pykan 的表达能力和公开行为，不破坏现有 notebook 与 benchmark 工作流。
-2. 把训练、剪枝、符号化拆成边界清晰的阶段，减少一次性大流程的不可控性。
-3. 为实验提供结构化输出，而不是只留下临时 print 和裸字典。
+本文余下结构安排如下。第 2-4 节说明设计前提、实现约束与当前 baseline 流水线的真实语义；第 5-8 节给出 SymKAN 的方法重定义、形式化对象与关键设计；第 9-10 节说明接口落点、实验问题与证据边界；第 11 节汇总当前可引用结果；第 12-13 节收束风险、适用边界与结论。
 
-## 非目标
+## 2. 设计前提
 
-- 不重写 pykan 的底层 KAN 实现。
-- 不把所有返回值强行升级成新类型，旧接口仍然需要可用。
-- 不为了“更智能”的策略引入过重的调度系统或分布式框架。
+### 2.1 控制变量原则
 
-## 数据结构
+SymKAN 的核心对象不是“任意神经网络”，而是已经训练完成并可继续进入符号阶段的数值 KAN。设计时必须坚持以下控制变量原则：
 
-整个包围绕三类对象组织：
+1. 不改写 `pykan` 的基础训练语义。
+2. 不把数值训练、剪枝、符号替换、公式验证混成一个不可分解的黑箱步骤。
+3. 对同一组实验，只允许在被显式声明的阶段引入差异；其余阶段必须共享。
 
-1. dataset 字典：统一使用 `train_input/train_label/val_input/val_label/test_input/test_label`。
-2. KAN 模型实例：训练、剪枝和符号化都围绕同一个 pykan 模型对象展开。
-3. 结构化结果对象：`FitReport`、`AttributeReport`、`StagewiseResult`、`SymbolizeResult` 用于补足旧接口的可读性和可观测性。
+这一原则在当前仓库中有两个直接后果：
 
-这一设计首先强调数据结构的稳定性。若数据结构不统一，后续的回滚、日志记录和结果导出都将缺乏一致的组织基础。
+1. 模块级默认设定要由单点消融结果约束，而不是由局部直觉决定。
+2. backend compare 必须把差异严格限制在 backend-specific symbolic completion，而不能回溯污染 numeric stage 或 shared symbolic-prep。
 
-## stagewise_train 与 symbolize_pipeline 的分离
+### 2.2 当前仓库中的真实任务
 
-### stagewise_train 的职责
+在当前实现中，SymKAN 面对的真实任务不是“从原始数据直接搜索完整公式树”，而是：
 
-`stagewise_train` 负责把模型推进到可符号化区间，而不是直接产出最终公式。其原因有两点：
+1. 训练一个数值 KAN；
+2. 通过 `stagewise_train` 与相关治理机制把模型推进到可符号化区间；
+3. 在可控复杂度下执行符号替换；
+4. 对导出公式做数值验证；
+5. 将运行过程与结果整理为结构化产物。
 
-1. 符号化前的模型通常边数太多，直接做符号搜索会让搜索空间爆炸。
-2. 稀疏化过程有明显的精度风险，必须引入阶段快照、验证集评估和回滚保护。
+因此，SymKAN 更准确的定位是：
 
-因此，`stagewise_train` 的流程是：
+**一个围绕训练后 KAN 的符号化实验与比较框架。**
 
-```mermaid
-flowchart LR
-    A[fit current stage] --> B[evaluate acc and edges]
-    B --> C{allow prune?}
-    C -- no --> D[record snapshot]
-    C -- yes --> E[attribute and prune]
-    E --> F{acc drop acceptable?}
-    F -- no --> G[rollback snapshot]
-    F -- yes --> H[post-prune finetune]
-    G --> D
-    H --> D
+### 2.3 第一版允许改什么，不改什么
+
+允许改动的对象包括：
+
+- 配置边界与参数归一化方式；
+- 流水线阶段划分；
+- 缓存边界与 compare 语义；
+- 结构化导出与报告层组织；
+- 符号后端的实现与比较方式。
+
+不改动的对象包括：
+
+- `pykan` 的基础数值训练器；
+- notebook / CLI / CSV 的既有使用习惯；
+- 根目录 shim 入口的兼容职责；
+- “YAML 负责描述运行方式、CSV 负责承载输入与结果”的分层约束。
+
+## 3. KAN 与当前实现给出的直接约束
+
+### 3.1 KAN 的符号化不是从零开始的公式搜索
+
+当前 SymKAN 处理的是“训练后 KAN 的符号替换问题”，而不是从原始输入输出对直接进行全局 symbolic regression。KAN 的多变量结构仍由层级组合给出，符号化阶段处理的对象主要是一元边函数及其组合关系。
+
+这一点决定了三个事实：
+
+1. 符号阶段必须尊重已经形成的数值结构；
+2. 复杂度治理必须发生在符号搜索之前，而不是之后；
+3. 公式导出结果应被视为训练后模型的符号近似，而不是对真实生成机制的自动恢复证明。
+
+### 3.2 `symbolic_formula()` 与 fully symbolic 收口约束
+
+当前导出语义要求有效边在导出前处于符号状态。由此可知，符号阶段不仅要找到候选函数，还要保证导出状态、掩码、仿射参数与相关结构保持一致。这意味着：
+
+1. 符号化不是单纯的局部打分问题，而是状态一致性问题；
+2. 任何“部分替换、部分残留”的策略都需要谨慎，否则导出语义会失真；
+3. 显式的阶段边界与结构化轨迹记录是必要条件，而不是装饰性工程。
+
+### 3.3 符号化入口的复杂度必须受控
+
+当前单点消融已经表明，若不对数值模型做阶段训练、剪枝与输入治理，符号化入口将迅速失控。其直接原因在于：
+
+1. 候选空间对有效边数和有效输入维度高度敏感；
+2. 数值模型若过密，符号搜索的计算负担和误差传播风险都会扩大；
+3. 复杂度治理不足时，单次训练指标即使可接受，也不意味着导出公式具备可解释性和可验证性。
+
+### 3.4 兼容性不是附属要求，而是设计约束
+
+SymKAN 不是全新仓库，而是对 `pykan` 使用方式的工程化组织。由此必须保留：
+
+1. notebook 入口；
+2. CLI 入口；
+3. 根目录 shim；
+4. CSV 与报告工作流；
+5. 既有 `python -m scripts.*` 的运行习惯。
+
+因此，任何设计改动都必须回答一个问题：它是否在提升可复现性的同时维持了既有工作流的连续性。
+
+## 4. 当前 baseline 流水线的真实语义
+
+### 4.1 当前主链路
+
+以当前仓库实现为准，SymKAN 主链路可概括为六步：
+
+1. 读取数据并构造统一的数据集对象；
+2. `stagewise_train` 训练并筛选更适合符号化的模型状态；
+3. 共享 symbolic-prep 处理，包括渐进剪枝、输入压缩与 pre-symbolic fit；
+4. backend-specific symbolic completion；
+5. 公式数值验证；
+6. 导出结构化日志、表格与 compare 产物。
+
+### 4.2 baseline 的角色
+
+在当前仓库中，`baseline` 不是“旧版实现的残留别名”，而是默认符号后端。其含义是：
+
+1. 若未显式指定 `symbolic_backend`，系统使用 `baseline`；
+2. paired backend compare 的基线语义由 `baseline` 提供；
+3. 所有 opt-in backend 都必须在不破坏 `baseline` 默认行为的前提下接入。
+
+### 4.3 模块角色的经验边界
+
+来自 [docs/ablation_report.md](ablation_report.md) 与 [docs/layerwiseft_improved_report.md](layerwiseft_improved_report.md) 的当前结论表明：
+
+1. `stagewise_train` 是“可用/不可用”的分界，而不是装饰性增强模块。
+2. progressive pruning 的主要职责是复杂度控制，而不是默认的精度提升器。
+3. input compaction 是速度与公式数值一致性之间的明确权衡开关。
+4. 在典型 2 层 KAN 下，LayerwiseFT 不构成稳定的默认净收益。
+
+因此，当前 baseline 流水线应被理解为一套经过模块角色约束后的默认工程方案，而不是随意堆叠的启发式集合。
+
+## 5. SymKAN 的重新定义
+
+### 5.1 方法定义
+
+本文将 SymKAN 重新定义为：
+
+**一个面向训练后 KAN 的工程化符号实验流水线，其任务是在兼容既有工作流的前提下，为符号化过程提供统一配置边界、可控的复杂度治理、可解释的 backend compare 语义和结构化结果归档。**
+
+### 5.2 核心组成
+
+在这一重新定义下，SymKAN 的核心不再是单个函数，而是四类协同对象：
+
+1. 配置对象：`AppConfig`
+2. 训练后模型对象：数值 KAN 与 prepared symbolic bundle
+3. 过程对象：stagewise、shared symbolic-prep、backend completion、validation
+4. 结果对象：CSV / JSON / markdown compare artifacts
+
+### 5.3 第一版只保留的核心设计点
+
+当前版本的核心设计点可压缩为以下六条：
+
+1. 用 `AppConfig` 统一 notebook、CLI 与库层配置来源。
+2. 将 `stagewise_train` 从符号阶段显式分离。
+3. 把 shared symbolic-prep 作为 backend-only compare 的公平性边界。
+4. 把 backend-specific symbolic completion 视作 compare 的真实差异来源。
+5. 用结构化输出而非终端日志承载结果。
+6. 用 evidence-boundary 文档约束结果叙述，而不是让结论漂浮在目录之外。
+
+### 5.4 第一版明确不包含的内容
+
+为保持问题边界清晰，当前版本明确不把以下内容写成 SymKAN 的核心贡献：
+
+- 新的 KAN 数值训练算法；
+- 分布式或大规模任务调度框架；
+- 全局公式树搜索系统；
+- 脱离仓库实现的纯理论性能保证；
+- 任何超出当前维护结果目录的“默认显著提升”表述。
+
+## 6. 问题形式化
+
+### 6.1 对象定义
+
+记数据对象为
+
+$$
+\mathcal{D}=(X_{\text{train}}, Y_{\text{train}}, X_{\text{test}}, Y_{\text{test}}),
+$$
+
+配置对象为
+
+$$
+c \in \mathcal{C},
+$$
+
+其中 `c` 由 `AppConfig` 表示。记数值训练与阶段筛选后的模型为
+
+$$
+M_{\text{num}} = T(\mathcal{D}, c_{\text{stagewise}}),
+$$
+
+shared symbolic-prep 之后的 prepared state 为
+
+$$
+B = P(M_{\text{num}}, c_{\text{shared}}),
+$$
+
+backend-specific symbolic completion 之后的符号模型为
+
+$$
+M_{\text{sym}} = S(B, c_{\text{backend}}),
+$$
+
+结构化结果集合为
+
+$$
+R = E(M_{\text{sym}}, \mathcal{D}, c_{\text{eval}}).
+$$
+
+### 6.2 流水线目标
+
+SymKAN 当前追求的不是单一标量最优，而是受约束的多目标平衡：
+
+1. 保持任务指标可接受；
+2. 控制表达式复杂度与符号阶段时间；
+3. 保持导出与验证链路稳定；
+4. 保证结果可复现、可比较、可归档；
+5. 不破坏现有 notebook / CLI / CSV 工作流。
+
+因此，当前设计更接近如下约束优化问题：
+
+$$
+\max \; \text{quality}(R)
+\quad
+\text{s.t.}
+\quad
+\text{complexity}(R), \text{runtime}(R), \text{compatibility}(c), \text{traceability}(R)
+$$
+
+其中 `quality` 不是单一精度指标，而是由 `final_acc`、`macro_auc`、`validation_mean_r2`、target-side 指标等共同描述。
+
+### 6.3 readiness score 与可符号化状态
+
+`stagewise_train` 的职责不是直接给出最终公式，而是把模型推进到可符号化区间。当前仓库中用于阶段选择的思路可抽象为精度与稀疏度的折中，即：
+
+$$
+\text{score}
+=
+w_{\text{acc}} \cdot \text{acc}
+
++ (1-w_{\text{acc}}) \cdot \text{sparsity}.
+$$
+
+这一定义的作用不是宣称理论最优，而是说明：当前阶段选择必须同时考虑任务可用性与符号阶段负担，不能只看单次精度。
+
+### 6.4 backend-only compare 的公平性约束
+
+当比较 `baseline` 与 `baseline_icbr` 时，当前设计要求：
+
+$$
+M_{\text{num}}^{\text{baseline}} = M_{\text{num}}^{\text{icbr}},
+$$
+
+$$
+B^{\text{baseline}} = B^{\text{icbr}},
+$$
+
+并要求 compare 结果满足：
+
+1. `shared_numeric_aligned=True`
+2. `trace_aligned=True`
+3. `shared_symbolic_prep_aligned=True`
+
+只有在这些条件成立时，当前 paired compare 才可被解释为“backend-only compare”。
+
+## 7. 关键设计
+
+### 7.1 `AppConfig` 作为统一配置边界
+
+配置统一的主要价值不在于“更优雅”，而在于减少 notebook、CLI 与脚本实现之间的漂移。当前仓库选择让 `AppConfig` 成为唯一正式配置对象，并把旧 notebook 风格参数归一化到该对象之下。这一设计的直接收益是：
+
+1. 校验逻辑不再在多处分裂；
+2. YAML 与 CLI 的覆盖关系更易追踪；
+3. 后续比较与缓存键定义可以围绕同一配置对象进行。
+
+### 7.2 `stagewise_train` 的独立地位
+
+单点消融表明，去掉 `stagewise_train` 后，`final_acc` 从 `0.7807` 降到 `0.4430`，`macro_auc` 从 `0.9548` 降到 `0.8379`；虽然时间下降，但输出失去可用性。由此可见，`stagewise_train` 在当前体系中的角色不是“让结果再好一点”，而是建立可符号化入口。
+
+### 7.3 progressive pruning 与 input compaction 的治理角色
+
+当前证据显示：
+
+1. 去掉 progressive pruning 后，`final_acc` 略升到 `0.8017`，但表达式复杂度从 `126.90` 增至 `194.33`，`symbolic_total_seconds` 从 `33.58s` 增至 `43.51s`。
+2. 去掉 input compaction 后，`validation_mean_r2` 从 `-0.6135` 升至 `+0.0275`，但有效输入维数翻倍到 `120`，`symbolic_total_seconds` 增至 `41.34s`。
+
+因此，这两个模块的主要职责应分别表述为：
+
+- pruning：复杂度治理；
+- compaction：时间与数值一致性之间的显式权衡。
+
+### 7.4 shared symbolic-prep 作为 compare 公平性边界
+
+当前架构最重要的工程性收敛之一，是把符号流程显式拆为：
+
+1. shared symbolic-prep；
+2. backend-specific symbolic completion。
+
+这一拆分的意义有三层：
+
+1. 它把比较边界从“整条符号链”收紧到“后端差异真正发生的位置”；
+2. 它使 `_numeric_cache/` 与 `_symbolic_prep_cache/` 的职责更明确；
+3. 它使 `baseline` 与 `icbr` 的公平性不再依赖口头解释，而能通过 shared-check 文件验证。
+
+### 7.5 generic compare 与 specialized compare 的分层
+
+当前 `benchmark_ab_compare` 的设计并不追求“一种表覆盖所有语义”。相反，它坚持两层输出：
+
+1. generic compare：适用于一般 A/B 工作流；
+2. specialized compare：仅在单个 baseline-backend vs icbr-backend pair 时生成。
+
+这一分层的价值在于：既保留通用工作流的稳定性，又避免把 backend-only compare 的特殊语义污染到所有 compare 结果中。
+
+### 7.6 结构化导出与指标卫生
+
+SymKAN 当前强调以下结果对象：
+
+- `symkanbenchmark_runs.csv`
+- `kan_stage_logs.csv`
+- `symbolize_trace.csv`
+- `formula_validation.csv`
+- `metrics.json`
+- compare 目录下的 summary 表与 markdown
+
+这意味着“实验结论”必须能够回指到具体文件。对应的指标卫生约束包括：
+
+1. backend 速度比较优先使用 `symbolic_core_seconds`；
+2. `symbolize_wall_time_s` 仍可报告，但不应替代核心后端指标；
+3. `formula_export_success_rate` 只表示导出链路成功，不等于真实公式恢复成功。
+
+### 7.7 LayerwiseFT 在 2 层 KAN 中的默认决策
+
+来自 [docs/layerwiseft_improved_report.md](layerwiseft_improved_report.md) 的当前结论是：在 2 层 KAN 下，改进版 LayerwiseFT 相对 `wolayerwiseft` 没有形成稳定净收益，却引入约 `63%` 的符号阶段时间增量。因此，更准确的默认表述应为：
+
+**LayerwiseFT 是可选微调开关，而不是当前 2 层 KAN 的默认收益模块。**
+
+## 8. 流水线伪代码
+
+```text
+Input:
+  dataset D
+  config c = AppConfig(...)
+
+1. normalize config sources
+   c <- load_config(yaml, cli_overrides, notebook_kwargs)
+
+2. numeric preparation
+   M_num <- stagewise_train(D, c.stagewise, c.training)
+
+3. shared symbolic preparation
+   B <- prepare_symbolic_bundle(M_num, D, c.symbolize_shared)
+
+4. backend-specific completion
+   if c.symbolize.symbolic_backend == baseline:
+       M_sym <- baseline_completion(B, c.symbolize)
+   else if c.symbolize.symbolic_backend == icbr:
+       M_sym <- icbr_completion(B, c.symbolize)
+
+5. validation and export
+   R_single <- validate_formula_numerically(M_sym, D, c.eval)
+   export metrics, traces, validation tables, structured artifacts
+
+6. benchmark compare (optional)
+   if benchmark_ab workflow is enabled:
+       emit generic compare outputs
+       if exactly one baseline-backend vs one icbr-backend pair:
+           emit specialized shared-check and mechanism outputs
+
+Output:
+  symbolic model, validation tables, benchmark summaries, compare artifacts
 ```
 
-这一设计的重点不在于阶段数量本身，而在于将每轮剪枝置于精度约束之下。若剪枝幅度失控，后续微调往往难以恢复有效性能。
+该伪代码的重点不在于列出所有函数，而在于明确：当前仓库把配置统一、可符号化准备、后端差异、结果验证和报告导出视为相互独立但可衔接的阶段。
 
-### symbolize_pipeline 的职责
+## 9. 接口、工作流与文档分层
 
-`symbolize_pipeline` 接管的是另一件事：把已经足够稀疏的模型变成解析式。当前公开入口未变，但内部已拆成“共享 symbolic-prep + backend-specific completion”两段。若从内部职责看，它分成五段：
+### 9.1 与 `pykan` 的关系
 
-1. 渐进剪枝：继续向目标边数靠近，但每轮都有限幅和回滚保护。
-2. 输入压缩：删掉第一层已经完全失活的输入，降低后续符号搜索维度。
-3. pre-symbolic fit：在 shared symbolic-prep 边界上把 prepared model 稳定到可进入后端的状态。
-4. backend-specific symbolic completion：按 `baseline` 或 `icbr` 后端完成符号拟合。
-5. 强化微调：在固定符号函数后恢复仿射参数和整体精度。
+SymKAN 不取代 `pykan`，而是围绕其训练后模型组织实验流程。换言之，`pykan` 提供模型本体与基本能力，SymKAN 提供工程化实验边界、比较语义与结果组织。
 
-这一划分还与 `pykan` 中 `suggest_symbolic` 会临时修改模型状态有关。共享同一模型进行并行搜索会引入额外风险，因此当前实现优先保证正确性，再考虑并行效率。
+### 9.2 与脚本层的关系
 
-## 关键算法选型
+脚本层承担批量实验与结果管理职责，而不是重新定义库层语义。当前仓库中：
 
-### 1. readiness score 的选模作用
+- `scripts/symkanbenchmark.py` 负责多 seed 运行、缓存复用与结果汇总；
+- `scripts/benchmark_ab_compare.py` 负责 compare 汇总；
+- 根目录 shim 负责兼容入口，而不是实现主体。
 
-只按精度选模型是不够的，因为符号化前还需要考虑边数负担；只按边数选模型更糟，因为可能把几乎不可用的低精度模型选出来。
+### 9.3 与文档体系的关系
 
-因此 `sym_readiness_score` 把精度和稀疏度揉进同一个分数：
+当前文档分层应理解为：
 
-$$
-score = w_{acc} \cdot acc + (1 - w_{acc}) \cdot sparsity
-$$
+1. [README.md](../README.md)：总入口与阅读路径；
+2. [../ARCHITECTURE.md](../ARCHITECTURE.md)：模块边界与数据流；
+3. 本文：设计动机、阶段划分、证据边界与结果口径；
+4. [symkanbenchmark_usage.md](symkanbenchmark_usage.md) 与 [full_experiment_runbook.md](full_experiment_runbook.md)：运行契约与操作步骤；
+5. [engineering_rerun_report.md](engineering_rerun_report.md)：日期化实验报告入口。
 
-该分数设计并不追求理论上的最优性，而是强调可解释性与可调性。考虑到当前问题规模，引入更复杂的多目标优化器并无明显必要。
+因此，本文不承担命令级教程职责，也不重复 runbook 内容。
 
-### 2. adaptive threshold 的作用
+## 10. 实验设计与证据边界
 
-固定阈值的主要问题在于其难以同时适应早期和后期阶段：阈值过小会导致剪枝不足，阈值过大则可能引起过剪。自适应阈值控制器据此根据近期收益与精度回落调整阈值。
+### 10.1 当前需要回答的三个问题
 
-### 3. 保留旧返回值的原因
+本文当前只回答三个与设计直接相关的问题：
 
-保留旧返回值首先是兼容性要求。现有 notebook、脚本和 benchmark 已经依赖旧接口返回的 tuple 和 dict，直接修改返回类型将破坏既有工作流。
+1. 哪些模块决定了 SymKAN 默认流水线的职责分配与默认设定。
+2. 在 shared numeric 与 shared symbolic-prep 对齐时，`baseline` 与 `icbr` 的差异能否被解释为 backend-only compare。
+3. 当 paired full library compare 不可得时，单边 ICBR 切片最多能支持什么层次的补充结论。
 
-所以当前做法是：
+### 10.2 指标口径
 
-- 保留 `stagewise_train`、`symbolize_pipeline` 的公开入口与主返回结构，避免破坏 notebook / 脚本工作流。
-- `safe_fit` 默认仍兼容旧接口：失败时打印错误并返回空字典；若调用方需要严格失败边界，可使用 `raise_on_failure=True` 或直接改用 `safe_fit_report`。
-- 额外提供 `safe_fit_report`、`safe_attribute_report`、`stagewise_train_report`、`symbolize_pipeline_report`。
+本文使用四类指标：
 
-因此，现有实现采取“保留旧接口、增补结构化报告接口”的方式。
+1. 任务指标：`final_acc`、`macro_auc`
+2. 复杂度与结构指标：`final_n_edge`、`effective_input_dim`、表达式复杂度
+3. 速度指标：`symbolic_core_seconds`、`symbolize_wall_time_s`、`run_total_wall_time_s`
+4. 验证与机制指标：`validation_mean_r2`、target-side 指标、shared-check 指标、mechanism breakdown 指标
 
-## 行内注释策略
+其中，backend 主速度指标固定为 `symbolic_core_seconds`。
 
-代码里的行内注释只放在三类位置：
+### 10.3 当前证据边界
 
-1. 隐含约束：例如 `suggest_symbolic` 不能安全共享模型并行执行。
-2. 容错回退：例如从 `inference_mode` 退回 `no_grad` 的原因。
-3. 阶段性技巧：例如先做短微调再决定是否保留剪枝结果。
+当前可直接用于本文的结果边界如下：
 
-除此之外，不再增加重复性注释，以避免代码与注释之间形成冗余映射。
+1. `outputs/benchmark_ablation/`：
+   - 回答模块职责与默认设定问题；
+   - 不回答 backend-only compare 问题。
+2. `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/`：
+   - 回答 layered paired backend-only compare；
+   - 是当前最保守的 ICBR paired evidence。
+3. `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib/`：
+   - 回答更大函数库下的 paired speed/quality 边界；
+   - 不应替代 layered paired evidence 的公平性叙述。
+4. `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/baseline_icbr_fulllib/`：
+   - 只回答“ICBR 让 full library 路径仍可运行”的补充问题；
+   - 不得写成 paired compare 证据。
 
-## 风险与边界
+## 11. 当前结果与讨论
 
-当前实现最需要警惕的点有五个：
+### 11.1 模块消融给出的默认设定依据
 
-1. pykan 内部状态不是完全无副作用，任何“共享模型并行搜索”都必须非常谨慎。
-2. 环境可能缺少部分依赖，验证和运行脚本不应把导入错误伪装成算法错误。
-3. 宽松的目标边数策略会影响 benchmark 公平性，因此需要明确区分默认行为和实验行为。
-4. `load_export_bundle()` 基于 `pickle`，只能用于本地生成且来源可信的 bundle。
-5. 配置中的环境变量占位符只在 YAML 解析后的标量字符串上展开，数据自动补齐默认也只允许写入仓库 `data/`，两者都属于显式安全边界而非隐式便利行为。
-
-## 工程化改动落地（2026-03-19）
-
-本节用于记录近期工程化改动已经改变的“设计层事实”，避免仅在用法文档中描述而在设计文档缺位。
-
-1. 配置收敛：Notebook / CLI / 库层统一以 `AppConfig` 为配置边界，脚本层仅做小范围白名单覆盖。
-2. notebook 兼容职责拆分：`symkan.config.notebook` 负责 flat kwargs 到 canonical 配置的归一化；`symkan.notebook_compat` 仅保留执行桥接职责。
-3. 入口口径收敛：常规执行入口统一为 `python -m scripts.*`；`scripts/run_engineering_rerun.ps1` 作为工程复测编排入口。
-4. 输出目录分层：默认运行输出为 `outputs/benchmark_*`，手册示例输出为 `outputs/rerun/*`，工程归档输出为 `outputs/rerun_v2_engine_safe_<date>/*`。
-5. 跨版本指标边界：仅允许 `export_wall_time_s` 到 `symbolize_wall_time_s` 的语义映射；`run_total_wall_time_s` 是工程版新增字段，不与历史版做同名比较。
-6. 文档治理约束：当入口、配置、指标或目录语义发生变化时，`README.md`、`docs/index.md`、`docs/project_map.md` 与本文必须同步更新。
-
-## ICBR 接入后的设计收敛（2026-04）
-
-本节记录 ICBR 接入后已经固定下来的设计层事实。
-
-1. `baseline` 仍是默认符号后端。
-   - `icbr` 是显式 opt-in backend，而不是新的训练模式；文档与实现都不应把它描述成对数值训练路径的替换。
-2. 符号化流程已显式拆为 shared symbolic-prep 与 backend-specific completion。
-   - `prepare_symbolic_bundle(...)` 负责渐进剪枝、输入压缩与 pre-symbolic fit。
-   - `symbolize_pipeline_from_prepared(...)` 负责 `baseline` 或 `icbr` 的后端完成。
-3. benchmark compare 的公平性边界前移到了 shared symbolic-prep。
-   - numeric cache 排除了 `symbolize` 配置。
-   - symbolic-prep cache 只绑定共享预处理所需设置，不绑定 backend-only 差异。
-4. baseline/icbr 对照使用专用 compare 产物表达结论。
-   - 通用 compare 仍保留。
-   - 只有在 `baseline` vs `baseline_icbr` 时，才额外生成 shared-check、primary-effect 与 mechanism-summary。
-5. 当前设计更强调“边界可证明正确”，而不是“把所有 ICBR 指标都并入通用 benchmark”。
-   - 共享阶段指标与专用 compare 指标只服务于 baseline/icbr 对照，不回写为所有 compare 的默认叙述。
-
-## 实验结果支持下的设计收敛（2026-03）
-
-基于 `outputs/benchmark_ablation/` 与 `outputs/benchmark_ab/comparison/` 的结果，当前若干设计决策具备成为项目层默认设定的经验依据：
+当前模块角色可以收敛为四条：
 
 1. `stagewise_train` 必须保留。
-    - 去掉分阶段训练会让符号化入口过密（pre-symbolic too dense），最终精度从约 0.78 掉到约 0.44，流水线失去可用性。
-2. 渐进剪枝默认保留，但它的价值主要是复杂度控制而非提精度。
-    - 关闭渐进剪枝后精度变化不大，但表达式复杂度与符号化耗时明显上升。
-3. 输入压缩是明确的速度-公式质量权衡开关，不是一刀切增益项。
-    - 保留压缩可显著降符号化耗时；关闭压缩常能提升公式数值验证 R2，但会放大搜索维度与耗时。
-4. 对典型 2 层 KAN（`[in, hidden, class]`）默认关闭层间微调。
-    - 原始 LayerwiseFT 是高耗时低收益模块；改进版（早停+轻正则+短步数）虽然比旧版更稳，但综合性价比仍弱于直接关闭。
-    - 理论上这是“有损符号替换 + 函数族冻结”带来的结构限制：2 层网络只有一次层间补偿窗口，难形成稳定净增益。
+   - 去掉后 `final_acc` 由 `0.7807` 降到 `0.4430`，`macro_auc` 由 `0.9548` 降到 `0.8379`。
+   - 这说明它是“可用/不可用”的边界，而不是普通调参项。
+2. progressive pruning 默认保留。
+   - 去掉后虽然 `final_acc` 升至 `0.8017`，但复杂度增至 `194.33`，`symbolic_total_seconds` 升至 `43.51s`。
+   - 因此它主要是复杂度治理模块。
+3. input compaction 需要按目标取舍。
+   - 去掉后 `validation_mean_r2` 从 `-0.6135` 升到 `+0.0275`，但输入维数升至 `120`，符号时间升至 `41.34s`。
+   - 因此它是速度与公式一致性之间的明确权衡。
+4. 2 层 KAN 默认关闭 LayerwiseFT 仍然合理。
+   - 相对 `wolayerwiseft`，改进版 LayerwiseFT 未形成稳定质量净收益，却显著增加符号时间。
 
-这些结论的意义主要在于明确模块职责：
+这些结论共同说明：当前默认流水线不是“平均意义上都更好”，而是围绕可复现性、复杂度治理与工程成本做出的约束性选择。
 
-- Stagewise 负责把模型送进可符号化区间。
-- Progressive pruning 负责表达式体积治理。
-- Input compaction 负责推理/导出速度治理。
-- LayerwiseFT 只在明确追求极小精度增益时按需开启。
+### 11.2 layered paired compare：当前最保守的 backend-only 证据
 
-## 默认设定与兼容约束
+来自 `comparison/baseline_icbr_shared_check.csv` 的 `42/52/62` 三个 seeds 均报告：
 
-项目层默认设定必须与现有公开行为兼容，并且可由 CLI 显式覆盖：
+- `shared_numeric_aligned=True`
+- `trace_aligned=True`
+- `shared_symbolic_prep_aligned=True`
 
-1. 保持现有返回值与主入口不变（兼容 notebook/脚本）。
-2. 项目层设定按“稳定复现优先”排序：
-    - 启用 stagewise；
-    - 保留渐进剪枝；
-    - 输入压缩默认开启；
-    - 2 层网络默认关闭 LayerwiseFT（可通过参数开启改进版）。
-    - 默认 symbolic backend 保持 `baseline`。
-3. A/B 结果用于说明这些设定的经验依据：
-    - 当前统计结果中，`baseline` 在 `final_acc` 与 `macro_auc` 上均领先 `adaptive`/`adaptive_auto`。
-    - `adaptive` 系列的主要价值仍是流程控制与部分耗时场景的工程可调性，不应表述为“默认精度增强”。
-    - 因此项目层默认设定强调兼容性、可复现性与开关语义的明确性，而非预设其必然带来精度提升。
+这意味着 layered paired compare 可以被解释为 backend-only compare。在这一前提下，当前主结果为：
 
-## 后续演进
+1. `final_n_edge` 两侧均值同为 `88.333333`；
+2. `final_acc` 从 `0.777467` 升至 `0.788667`；
+3. `macro_auc` 从 `0.951264` 升至 `0.961440`；
+4. `symbolic_core_seconds` 从 `33.297856s` 降至 `19.013927s`；
+5. `symbolic_core_speedup_vs_baseline` 均值约为 `1.751763`。
 
-1. 如果要做真正的并行符号搜索，前提是每个 worker 使用隔离模型副本。
-2. 如果要提高评估质量，优先补更稳定的公式验证与异常表达式筛除。
-3. 对输入压缩，增加“按累计归因质量保留”的保守策略，避免 Top-K 过早丢失弱相关维度。
-4. 对 LayerwiseFT，只保留改进版路径（验证早停+轻正则+短步数），并继续评估是否值得长期保留。
-5. 若后续继续扩展 symbolic backend，优先保持 shared symbolic-prep 边界稳定，再增加 compare-only 专用指标，而不要直接污染 generic compare 结果对象。
-6. 如果要继续扩展接口，优先在结构化结果对象里加字段，不要直接破坏旧返回值。
+因此，当前 layered 切片支持的更稳妥表述是：
+
+**在保持 shared numeric、trace 与 shared symbolic-prep 对齐的前提下，ICBR 在当前 layered 函数库设置中实现了约 `1.75x` 的核心符号阶段提速，并伴随质量指标改善。**
+
+### 11.3 FAST_LIB paired compare：更大候选库下的速度边界
+
+在 FAST_LIB paired compare 中，shared-check 条件同样全部成立，因此仍可解释为 backend-only compare。当前主结果为：
+
+1. `final_n_edge` 两侧均值仍同为 `88.333333`；
+2. `symbolic_core_seconds` 从 `75.187859s` 降至 `31.990798s`；
+3. `symbolic_core_speedup_vs_baseline` 均值约为 `2.350452`；
+4. `final_acc` 均值仅有 `-0.000767` 的微小下降；
+5. `macro_auc` 与 target-side 指标变化接近持平。
+
+因此，FAST_LIB 切片支持的更准确写法不是“更大函数库下质量全面提升”，而是：
+
+**在更大候选库下，ICBR 的主要收益体现在约 `2.35x` 的核心符号阶段提速，而质量侧整体近似持平。**
+
+### 11.4 full library 单边补充切片：可运行性而非 paired fairness
+
+`baseline_icbr_fulllib` 的当前单边均值包括：
+
+- `final_acc = 0.795433`
+- `macro_auc = 0.963225`
+- `final_target_r2 = 0.601003`
+- `symbolic_core_seconds = 35.218785`
+
+相对 `baseline_icbr_fastlib`，该切片表现为轻微质量收益和有限的时间增加。但由于 `baseline_fulllib` 本轮未跑，这一结果只能支持以下补充结论：
+
+**ICBR 让 full library 路径在工程上仍保持可运行，并带来单边质量收益。**
+
+它不支持以下表述：
+
+- “full library 下 ICBR 相对 baseline 仍保持 backend-only fairness”
+- “full library paired compare 证明 ICBR 全面优于 baseline”
+
+### 11.5 当前结果真正支持的设计结论
+
+综合当前可引用结果，本文能够稳定支持的结论只有以下四条：
+
+1. SymKAN 的默认流水线是由模块角色约束出来的工程方案，而不是任意模块堆叠。
+2. shared symbolic-prep 边界使 paired backend compare 具备了可检查的公平性条件。
+3. ICBR 在当前 layered 与 FAST_LIB paired compare 中都呈现出明确的核心符号阶段提速。
+4. 当前工程证据更适合支持“设计与比较语义已经收敛”，而不是支持广义统计显著性的总括结论。
+
+## 12. 风险与应对
+
+### 风险 1：缓存边界漂移破坏 compare 公平性
+
+若后续配置项变化进入 numeric cache key 或 symbolic-prep cache key 的方式不一致，paired compare 的 shared-state 语义就会失效。当前应对方式是：
+
+1. 保持 compare 公平性由 shared-check 文件落盘验证；
+2. 在文档中坚持只有 shared-check 成立时才使用 backend-only compare 表述。
+
+### 风险 2：指标被误读
+
+最常见的误读有两种：
+
+1. 用 `symbolize_wall_time_s` 替代 `symbolic_core_seconds` 作为 backend 主速度指标；
+2. 把 `formula_export_success_rate` 解释成真实公式恢复成功率。
+
+当前应对方式是：在设计文档中固定指标优先级与解释边界，不让结果章节自行扩义。
+
+### 风险 3：兼容层长期演化成本
+
+notebook 兼容层、根目录 shim 与脚本入口共同保证了使用连续性，但也带来维护成本。当前更稳妥的策略不是删除兼容层，而是继续把配置转换职责收敛到 `AppConfig`，把桥接层保持为薄接口。
+
+### 风险 4：文档与实现漂移
+
+本仓库已有较完整的文档分层，真正的风险不在于“文档太少”，而在于：
+
+1. compare 语义变化后设计文档未同步；
+2. 结果目录更新后工程报告与设计文档混写；
+3. 操作性 runbook 内容侵入设计文档。
+
+因此，本文必须保持设计角色，只承载设计论证和证据边界，不承载命令级说明。
+
+## 13. 结论
+
+SymKAN 当前最准确的定位，不是新的 KAN 数值训练器，也不是通用 symbolic regression 框架，而是一个围绕训练后 KAN 组织起来的工程化符号实验流水线。它的核心价值在于把配置、复杂度治理、后端差异、结果验证与 compare 语义放到同一套可复现的结构中。
+
+基于当前仓库实现与维护中的证据，本文最终收束为以下六条稳定表述：
+
+1. `AppConfig` 统一了配置边界，使 notebook、CLI 与脚本层围绕同一对象协同。
+2. `stagewise_train`、progressive pruning 与 input compaction 构成了当前可符号化入口的治理基础。
+3. LayerwiseFT 在当前 2 层 KAN 设定下更适合作为可选微调开关，而不是默认收益模块。
+4. shared symbolic-prep 与 backend-specific symbolic completion 的分离，使 `baseline` 与 `icbr` 的 paired compare 具备了可检查的公平性边界。
+5. layered 与 FAST_LIB paired compare 都支持 ICBR 的核心符号阶段提速结论，但 layered 证据更适合承载保守的 backend-only 主叙述，FAST_LIB 证据更适合承载更大候选库下的速度边界说明。
+6. `baseline_icbr_fulllib` 只能被写成 full library 可运行性的补充单边证据，不能替代 paired compare。
+
+因此，当前 SymKAN 设计文档更适合被理解为一篇“关于工程化符号流水线如何被约束、如何被比较、以及当前证据允许怎样写”的论文式说明，而不是一份命令手册或泛化过度的性能宣言。
