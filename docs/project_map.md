@@ -15,7 +15,7 @@
 ## 工程版口径入口（2026-04）
 
 1. 若需要区分“历史参考版”与“当前工程版”的结论边界，优先阅读 [engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
-2. 若需要引用当前 ICBR 接入后的工程版主结果、shared-state 检查与 compare 解释口径，先读 [engineering_rerun_report.md](engineering_rerun_report.md) 获取带日期报告入口，再读当前正式正文 [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)。
+2. 若需要引用当前工程版总体 rerun、ICBR 接入后的 shared-state 检查与 compare 解释口径，先读 [engineering_rerun_report.md](engineering_rerun_report.md) 获取带日期报告入口，再按主题进入 [engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md) 或 [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)。
 3. 若用于发布或答辩收口，发布前检查项以 [engineering_release_checklist.md](engineering_release_checklist.md) 为准。
 4. 本文是项目结构地图；涉及跨版本结论时，以上述工程版文档为主引用来源。
 
@@ -48,7 +48,7 @@
 - `ablation_runner.py`
   单因素消融矩阵。用统一参数运行 `full / wostagewise / wopruning / wocompact / wolayerwiseft`。
 - `benchmark_ab_compare.py`
-  A/B 对比汇总。默认生成通用 compare 表；当比较对精确为 `baseline` vs `baseline_icbr` 时，会额外生成 shared-check、primary-effect 与 mechanism-summary 三份专用 compare 产物。
+  A/B 对比汇总。默认生成通用 compare 表；当比较对为单个 baseline-backend vs 单个 icbr-backend pair 时，会额外生成 shared-check、primary-effect 与 mechanism-summary 三份专用 compare 产物。
 - `analyze_layerwiseft.py`
   专门分析 `full` 和 `wolayerwiseft` 的差异。
 - `compare_layerwiseft_improved.py`
@@ -74,6 +74,7 @@
 - `outputs/benchmark_ab/`：A/B 对比结果。
 - `outputs/benchmark_ablation/`：单因素消融与 LayerwiseFT 分析结果。
 - `outputs/notebooks/`：`notebooks/kan.ipynb` 导出的结构化 CSV。
+- `outputs/rerun_v2_engine_safe_20260318_rerun/`：当前工程版总体 rerun 的正式归档目录。
 - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/`：当前 ICBR 接入结果的工程归档目录。
 
 这些目录既保存实验产物，也构成当前文档结论的主要证据来源。
@@ -118,6 +119,9 @@
 1. [design.md](design.md)
 2. [ablation_report.md](ablation_report.md)
 3. [layerwiseft_improved_report.md](layerwiseft_improved_report.md)
+4. [engineering_rerun_report.md](engineering_rerun_report.md)
+5. [engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md)
+6. [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)
 
 ## 主工作流
 

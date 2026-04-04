@@ -473,29 +473,47 @@ python -m scripts.compare_layerwiseft_improved `
 
 ## 8. 预期输出目录树
 
-若按本文全部跑完，`outputs/rerun/` 下大致会出现如下结构：
+若按本文全部跑完，输出目录大致会出现如下结构：
 
 ```plaintext
-outputs/rerun/
-  benchmark_runs/
-    symkanbenchmark_runs.csv
-    run_01_seed42/
-    run_02_seed52/
-    run_03_seed62/
-  benchmark_ab/
-    baseline/
+outputs/
+  rerun/
+    benchmark_runs/
       symkanbenchmark_runs.csv
-    adaptive/
-      symkanbenchmark_runs.csv
-    adaptive_auto/
-      symkanbenchmark_runs.csv
-    comparison/
-      variant_summary.csv
-      pairwise_delta_summary.csv
-      seedwise_delta.csv
-      trace_seedwise.csv
-      trace_summary.csv
-      comparison_summary.md
+      run_01_seed42/
+      run_02_seed52/
+      run_03_seed62/
+    benchmark_ab/
+      baseline/
+        symkanbenchmark_runs.csv
+      adaptive/
+        symkanbenchmark_runs.csv
+      adaptive_auto/
+        symkanbenchmark_runs.csv
+      comparison/
+        variant_summary.csv
+        pairwise_delta_summary.csv
+        seedwise_delta.csv
+        trace_seedwise.csv
+        trace_summary.csv
+        comparison_summary.md
+    benchmark_ablation/
+      ablation_runs_raw.csv
+      ablation_runs_summary.csv
+      full/
+      wostagewise/
+      wopruning/
+      wocompact/
+      wolayerwiseft/
+      layerwiseft_analysis/
+        run_level_comparison.csv
+        class_level_comparison.csv
+      layerwiseft_esreg/
+      layerwiseft_improved_analysis/
+        comparison_raw.csv
+        comparison_summary.csv
+        delta_new_vs_full.csv
+        delta_new_vs_wolayerwiseft.csv
   rerun_v2_engine_safe_20260401/
     benchmark_ab/
       baseline/
@@ -523,23 +541,6 @@ outputs/rerun/
         baseline_icbr_shared_check.csv
         baseline_icbr_primary_effect.csv
         baseline_icbr_mechanism_summary.csv
-  benchmark_ablation/
-    ablation_runs_raw.csv
-    ablation_runs_summary.csv
-    full/
-    wostagewise/
-    wopruning/
-    wocompact/
-    wolayerwiseft/
-    layerwiseft_analysis/
-      run_level_comparison.csv
-      class_level_comparison.csv
-    layerwiseft_esreg/
-    layerwiseft_improved_analysis/
-      comparison_raw.csv
-      comparison_summary.csv
-      delta_new_vs_full.csv
-      delta_new_vs_wolayerwiseft.csv
 ```
 
 ## 9. 复跑后快速检查清单
@@ -566,3 +567,7 @@ outputs/rerun/
 - [ablation_usage.md](ablation_usage.md)
 - [ablation_report.md](ablation_report.md)
 - [layerwiseft_improved_report.md](layerwiseft_improved_report.md)
+- [engineering_version_rerun_note.md](engineering_version_rerun_note.md)
+- [engineering_rerun_report.md](engineering_rerun_report.md)
+- [engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md)
+- [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)

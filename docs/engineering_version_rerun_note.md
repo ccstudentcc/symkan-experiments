@@ -34,8 +34,8 @@
 当前工程版建议区分四个锚点：
 
 1. 工程版总体口径锚点：
-   - `outputs/rerun_v2_engine_safe_20260318/`
-   - `outputs/rerun_v2_engine_safe_20260318_rerun/`
+   - 正式主引用归档：`outputs/rerun_v2_engine_safe_20260318_rerun/`
+   - 同日较早归档：`outputs/rerun_v2_engine_safe_20260318/`（前序结果保留，不作为当前总体 rerun 正式正文主锚点）
 2. layered 库 ICBR 对照锚点：
    - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/`
 3. FAST_LIB ICBR 对照锚点：
@@ -98,13 +98,14 @@
 当前对应文件为：
 
 1. [engineering_rerun_report.md](engineering_rerun_report.md)
-2. [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)
-3. [symkanbenchmark_usage.md](symkanbenchmark_usage.md)
+2. [engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md)
+3. [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)
+4. [symkanbenchmark_usage.md](symkanbenchmark_usage.md)
 
 ## 9. 当前状态
 
 1. 历史参考版已通过 release 冻结，不再建议频繁回切旧版本重跑。
-2. 工程版总体口径仍可参考 `2026-03-18` 的 rerun 归档。
+2. 工程版总体口径当前以 `2026-03-18` 的带日期正式正文和 `outputs/rerun_v2_engine_safe_20260318_rerun/` 为主引用。
 3. 当前关于 ICBR 接入的正式引用应按论点拆分：`comparison/` 用于较保守的 paired backend-only 结论，`comparison_fastlib/` 用于更大候选库下的 paired speed 结论，`baseline_icbr_fulllib/` 只用于补充单变体观察。
 4. 后续若继续扩展 symbolic backend 或 library-only compare 变体，对外口径仍应保持：历史版用于参考，工程版用于正式结论，而 backend compare 需明确共享边界、paired compare 产物与单边补充切片之间的差异。
 5. 以后新增 rerun 报告时，应新建 `engineering_rerun_report_YYYYMMDD.md`，并只在 [engineering_rerun_report.md](engineering_rerun_report.md) 更新 latest/history 导航，不覆盖旧带日期正文。

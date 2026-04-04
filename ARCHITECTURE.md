@@ -154,7 +154,7 @@
 - `outputs/.../comparison/variant_summary.csv`、`pairwise_delta_summary.csv`、`trace_summary.csv`
   通用 compare 产物。
 - `outputs/.../comparison/baseline_icbr_shared_check.csv`、`baseline_icbr_primary_effect.csv`、`baseline_icbr_mechanism_summary.csv`
-  仅在单个 baseline-backend vs 单个 icbr-backend pair 时生成的专用 compare 产物，文件名保持不变。
+  仅在单个 baseline-backend vs 单个 icbr-backend pair 时生成的专用 compare 产物，文件名保持不变，不要求变体名必须精确为 `baseline` 与 `baseline_icbr`。
 
 当前时长口径需要区分：
 

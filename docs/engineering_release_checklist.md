@@ -70,3 +70,5 @@ git status --short
 7. [full_experiment_runbook.md](full_experiment_runbook.md)
 8. [engineering_version_rerun_note.md](engineering_version_rerun_note.md)
 9. [engineering_rerun_report.md](engineering_rerun_report.md)
+10. [engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md)
+11. [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)

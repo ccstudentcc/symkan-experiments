@@ -18,6 +18,9 @@ Rewrite `docs/design.md` into a paper-style SymKAN design manuscript that matche
 - Task-tracking files are being refreshed for this document rewrite.
 - `SPEC.md`, `IMPLEMENTATION_PLAN.md`, and `TASK_STATUS.md` have been updated for this rewrite task.
 - `docs/design.md` has been rewritten into a paper-style manuscript with explicit evidence and claim boundaries.
+- `docs/engineering_rerun_report.md` has been synced so the stable rerun index now points readers to the new dated `2026-03-18` overall rerun body.
+- `README.md`, `docs/index.md`, `docs/project_map.md`, `docs/engineering_version_rerun_note.md`, `docs/full_experiment_runbook.md`, `docs/engineering_release_checklist.md`, and `ARCHITECTURE.md` have been reviewed and selectively updated where the new experiment-line split changed navigation or wording.
+- `AGENTS.md` now includes a routing rule for future `docs/design.md` experiment-section rewrites, reducing repeated document-discovery work.
 - `git diff --check` has passed.
 - Relative links referenced from `docs/design.md` have been sanity-checked successfully.
 
@@ -46,4 +49,4 @@ Rewrite `docs/design.md` into a paper-style SymKAN design manuscript that matche
 
 ## Next Step
 
-The current rewrite task is complete. The next optional step is a second editorial pass if a stricter thesis voice or a shorter conference-paper variant is needed.
+The current rewrite-and-sync task is complete. The next optional step is a second editorial pass if a stricter thesis voice or a shorter conference-paper variant is needed.

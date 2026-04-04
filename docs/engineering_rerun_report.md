@@ -6,7 +6,8 @@
 
 1. 若需要查看当前 ICBR backend 对照的正式正文，读 [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)。
 2. 若需要查看 `bspline baseline` vs `radial_bf` 的历史工程专题结果，读 [engineering_rerun_report_20260327.md](engineering_rerun_report_20260327.md)。
-3. 若需要先理解“历史版、当前工程版、paired compare、单边补充切片”的口径边界，先读 [engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
+3. 若需要查看当前工程版总体 rerun 的正式正文，读 [engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md)。
+4. 若需要先理解“历史版、当前工程版、paired compare、单边补充切片”的口径边界，先读 [engineering_version_rerun_note.md](engineering_version_rerun_note.md)。
 
 ## 报告清单
 
@@ -27,6 +28,15 @@
   - 历史工程参考
   - `radial_bf` 路径的速度/质量权衡
   - 与当前 ICBR backend 对照区分开来的旧专题结果
+
+### 3. 2026-03-18 当前工程版总体 rerun
+
+- 文件：[engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md)
+- 主题：当前工程版总体复测、`baseline/adaptive/adaptive_auto` 工程策略对照，以及 `benchmark_ablation` 单因素消融矩阵。
+- 关键用途：
+  - 当前工程版总体 rerun 主引用
+  - `benchmark_runs`、`benchmark_ab` 与 `benchmark_ablation` 的口径分层
+  - Full Pipeline 默认设定的工程化依据
 
 ## 维护规则
 
