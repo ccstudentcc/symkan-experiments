@@ -1,73 +1,70 @@
-# SymKAN Design Manuscript Rewrite Plan
+# Documentation Governance Reinforcement Plan
 
 ## Goal
 
-Turn `docs/design.md` into a paper-style SymKAN design manuscript that is consistent with the current repository, current engineering evidence, and current documentation role split.
+Add a governance layer for the documentation system and propagate it through the repository's navigation, sync, contribution, release, and agent-facing entry points.
 
-## Stage 1: Repository and Reference Baseline
+## Stage 1: Baseline Review
 
-- Goal: Re-open the current repo documents, recent commits, and the reference paper-style structure.
+- Goal: Re-open the current repo-level documentation system and identify where governance is already partially encoded.
 - Success criteria:
-  - `README.md` and `ARCHITECTURE.md` are reviewed.
-  - current `docs/design.md` weaknesses are identified.
-  - `ICBR-KAN_design.md` structure is mapped for reuse, not copying.
+  - `README.md`, `ARCHITECTURE.md`, and the last 10 commits are reviewed.
+  - `docs/index.md`, `docs/project_map.md`, `docs/doc_sync_matrix.md`, `docs/engineering_release_checklist.md`, `CONTRIBUTING.md`, and `AGENTS.md` are reviewed.
+  - the current task-tracking files are re-opened and confirmed to be stale for this task.
 - Validation:
   - local file inspection only
 - Status: Complete
 
-## Stage 2: Evidence and Claim Boundary Mapping
+## Stage 2: Parallel Audit
 
-- Goal: Identify which current results can support which parts of the rewritten manuscript.
+- Goal: Use bounded subagents to audit topology gaps and style/maintenance weaknesses without overlapping writes.
 - Success criteria:
-  - ablation evidence is mapped to module-role claims.
-  - 2026-04-01 engineering rerun evidence is mapped to backend-only compare claims.
-  - supplementary evidence is explicitly separated from paired evidence.
+  - one audit covers document layers, routing, and missing governance hooks.
+  - one audit covers tone, structure, and maintenance-flow weaknesses.
+  - both audits return concrete parent-edit targets.
 - Validation:
-  - local file inspection only
+  - subagent read-only reports
 - Status: Complete
 
-## Stage 3: Task Tracking Refresh
+## Stage 3: Governance Layer Draft
 
-- Goal: Update `SPEC.md`, `IMPLEMENTATION_PLAN.md`, and `TASK_STATUS.md` for this rewrite task before editing the main document.
+- Goal: Add or update the files that define the documentation governance contract.
+- Planned files:
+  1. `docs/documentation_governance.md`
+  2. `README.md`
+  3. `docs/index.md`
+  4. `docs/project_map.md`
+  5. `docs/doc_sync_matrix.md`
+  6. `docs/engineering_release_checklist.md`
+  7. `docs/engineering_rerun_report.md`
+  8. `docs/engineering_version_rerun_note.md`
+  9. `CONTRIBUTING.md`
+  10. `ARCHITECTURE.md`
 - Success criteria:
-  - current objective is the paper-style rewrite of `docs/design.md`.
-  - acceptance boundaries and prohibited claim patterns are recorded.
+  - the new governance doc defines roles, flow, writing boundaries, prohibited patterns, and validation.
+  - each synced entry point points to the governance layer where appropriate.
+- Validation:
+  - manual review of edited files
+- Status: Complete
+
+## Stage 4: Task Tracking Refresh
+
+- Goal: Rewrite `SPEC.md`, `IMPLEMENTATION_PLAN.md`, and `TASK_STATUS.md` so they describe the current governance task.
+- Success criteria:
+  - the previous design-manuscript task is no longer shown as the current objective.
+  - current scope, risks, and acceptance criteria are recorded.
 - Validation:
   - manual review of the three task-tracking files
 - Status: Complete
 
-## Stage 4: Manuscript Rewrite
-
-- Goal: Replace the existing design-note structure with a paper-style argument flow.
-- Planned sections:
-  1. Abstract
-  2. Design Premises
-  3. Constraints from KAN and the current implementation
-  4. Baseline workflow semantics
-  5. SymKAN redefinition
-  6. Formalization
-  7. Key design decisions
-  8. Pipeline pseudocode
-  9. Interface and workflow relation
-  10. Experiment design and evidence boundaries
-  11. Results and discussion
-  12. Risks and conclusion
-- Success criteria:
-  - the doc uses restrained, academic wording.
-  - the doc cites only repository-backed evidence.
-  - the doc no longer reads like a runbook or tutorial.
-- Validation:
-  - manual read-through
-- Status: Complete
-
 ## Stage 5: Verification and Cleanup
 
-- Goal: Run the smallest meaningful verification for a doc-only rewrite and check for obvious integrity issues.
+- Goal: Run the smallest meaningful checks for a doc-governance-only change set and integrate the audit feedback.
 - Success criteria:
-  - relative links and referenced file paths in `docs/design.md` resolve.
-  - no malformed diff hunks or whitespace errors remain.
-  - task tracking reflects the completed rewrite.
+  - edited files have no diff-format or whitespace issues.
+  - navigation, command-style, and core link expectations are checked.
+  - task tracking is updated to final status.
 - Validation:
   - `git diff --check`
-  - local path/link sanity check
+  - targeted `rg` checks
 - Status: Complete

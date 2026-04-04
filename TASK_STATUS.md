@@ -2,51 +2,48 @@
 
 ## Current Objective
 
-Rewrite `docs/design.md` into a paper-style SymKAN design manuscript that matches the current repository structure, the current engineering evidence, and the current documentation role split.
+Reinforce the documentation governance layer so that the repository's entry docs, sync rules, contribution workflow, release checklist, and agent routing all point to the same document-system contract.
 
 ## Current Status
 
 - `README.md`, `ARCHITECTURE.md`, and the last 10 commits have been reviewed.
-- The current `docs/design.md` has been identified as a design-note style document rather than a thesis-style manuscript.
-- The reference structure from `..\\ICBR-KAN\\ICBR-KAN_design.md` has been analyzed.
-- Current evidence sources have been mapped:
-  - `docs/ablation_report.md`
-  - `docs/layerwiseft_improved_report.md`
-  - `docs/engineering_rerun_report_20260401.md`
-  - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison/*`
-  - `outputs/rerun_v2_engine_safe_20260401/benchmark_ab/comparison_fastlib/*`
-- Task-tracking files are being refreshed for this document rewrite.
-- `SPEC.md`, `IMPLEMENTATION_PLAN.md`, and `TASK_STATUS.md` have been updated for this rewrite task.
-- `docs/design.md` has been rewritten into a paper-style manuscript with explicit evidence and claim boundaries.
-- `docs/engineering_rerun_report.md` has been synced so the stable rerun index now points readers to the new dated `2026-03-18` overall rerun body.
-- `README.md`, `docs/index.md`, `docs/project_map.md`, `docs/engineering_version_rerun_note.md`, `docs/full_experiment_runbook.md`, `docs/engineering_release_checklist.md`, and `ARCHITECTURE.md` have been reviewed and selectively updated where the new experiment-line split changed navigation or wording.
-- `AGENTS.md` now includes a routing rule for future `docs/design.md` experiment-section rewrites, reducing repeated document-discovery work.
-- `git diff --check` has passed.
-- Relative links referenced from `docs/design.md` have been sanity-checked successfully.
+- `docs/index.md`, `docs/project_map.md`, `docs/doc_sync_matrix.md`, `docs/engineering_release_checklist.md`, `docs/engineering_rerun_report.md`, `CONTRIBUTING.md`, and `AGENTS.md` have been reviewed as the current governance surface.
+- Existing task-tracking files were confirmed to be stale because they still described the earlier `docs/design.md` manuscript rewrite.
+- Two bounded read-only subagents have been dispatched:
+  - one for documentation topology and routing gaps
+  - one for tone, structure, and maintenance-flow weaknesses
+- The subagent findings have been integrated into the final edits:
+  - duplicated navigation in `README.md` has been compressed into stable entry points
+  - `docs/project_map.md` now routes to conclusions instead of restating them
+  - governance and task-tracking entry points are exposed in `docs/index.md`, `README.md`, and `ARCHITECTURE.md`
+- `docs/documentation_governance.md` has been added as the governance-layer contract.
+- `README.md`, `docs/index.md`, `docs/project_map.md`, `docs/doc_sync_matrix.md`, `docs/engineering_release_checklist.md`, `CONTRIBUTING.md`, and `AGENTS.md` have been updated to expose or enforce the new governance layer.
+- `ARCHITECTURE.md`, `docs/engineering_rerun_report.md`, and `docs/engineering_version_rerun_note.md` have been tightened so routing, stable-link rules, and report-writing language match the governance layer.
+- `SPEC.md`, `IMPLEMENTATION_PLAN.md`, and `TASK_STATUS.md` have been rewritten for this governance task.
+- Validation is complete:
+  - `git diff --check` passed
+  - fixed-string scans found no `````bash``, `````sh``, or `````shell`` code blocks in `README.md`, `docs/`, `CONTRIBUTING.md`, or `ARCHITECTURE.md`
+  - no direct `python scripts.*` / `python symkanbenchmark.py` / `python ablation_runner.py` command-form regressions were found in `README.md` or `docs/`
+  - governance and task-tracking cross-links were confirmed with targeted `rg` checks
 
 ## Key Decisions
 
-1. Use the paper-style section order from `ICBR-KAN_design.md`, but adapt it from a single-algorithm narrative to an engineering-pipeline narrative.
-2. Keep SymKAN's primary object as a reproducible pipeline:
-   - configuration normalization
-   - stagewise preparation
-   - symbolic completion
-   - validation
-   - structured export and compare
-3. Preserve the repository's live behavior boundaries:
-   - `baseline` is still the default backend.
-   - `icbr` is still opt-in.
-   - backend-only fairness begins only after shared numeric and shared symbolic-prep alignment.
-4. Use ablation evidence for module-role claims and backend compare evidence for ICBR-specific claims.
-5. Treat `baseline_icbr_fulllib` as supplementary single-arm evidence only.
+1. Use a dedicated governance document instead of embedding more rules into `docs/index.md` or `doc_sync_matrix.md` alone.
+2. Keep the role split explicit:
+   - entry docs define where to look
+   - method docs define design and usage semantics
+   - report docs define dated evidence
+   - governance docs define maintenance rules
+3. Preserve the stable-index vs dated-body pattern for engineering rerun reports.
+4. Keep `doc_sync_matrix.md` as the impacted-file SSOT, while `documentation_governance.md` defines the higher-level document-system contract.
+5. Mirror governance rules into `AGENTS.md` only where they help future routing and prevent repeated discovery work.
 
 ## Residual Risks
 
-1. The rewritten document could drift into runbook language unless section roles stay strict.
-2. The document could overclaim quality improvements if layered and FAST_LIB evidence are not separated carefully.
-3. The full-library supplementary slice could be misread as paired backend-only evidence if not explicitly fenced.
-4. `formula_export_success_rate` could be overstated unless the export-vs-recovery boundary is stated plainly.
+1. Some older topic documents may still contain tutorial-like phrasing that this pass does not rewrite.
+2. Future contributors may update topic documents without revisiting the governance layer unless the new entry points are used consistently.
+3. The working tree now contains a doc-only governance change set that still requires explicit user direction for staging, commit, or push.
 
 ## Next Step
 
-The current rewrite-and-sync task is complete. The next optional step is a second editorial pass if a stricter thesis voice or a shorter conference-paper variant is needed.
+The governance-layer reinforcement task is complete. The next optional step is a scoped commit if this doc-only change set should be recorded now.
