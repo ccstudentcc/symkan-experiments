@@ -60,9 +60,16 @@
 
 1. [project_map.md](project_map.md)：项目地图与阅读入口。
 2. [design.md](design.md)：模块边界、设计约束与默认策略依据。
-3. [../ARCHITECTURE.md](../ARCHITECTURE.md)：库层与脚本层的系统级架构。
+3. [symkan_manuscript.md](symkan_manuscript.md)：面向论文正文或学位正文的手稿式主叙述稿。
+4. [../ARCHITECTURE.md](../ARCHITECTURE.md)：库层与脚本层的系统级架构。
 
-### 2.2 核心库与参数体系
+### 2.2 手稿与展示
+
+1. [symkan_manuscript.md](symkan_manuscript.md)：论文式主叙述，包含外部学术定位与内部证据层级。
+2. [slides/README.md](slides/README.md)：与手稿对齐的 Beamer 展示层入口、编译说明与维护边界。
+3. [slides/symkan_manuscript_companion.tex](slides/symkan_manuscript_companion.tex)：主 deck 源文件。
+
+### 2.3 核心库与参数体系
 
 1. [symkan_usage.md](symkan_usage.md)：核心 API、`AppConfig` 与结果字段语义。
 2. [kan_parameters.md](kan_parameters.md)：`notebooks/kan.ipynb` 的参数位置、作用与调节顺序。
@@ -72,7 +79,7 @@
 1. `symkan.config` 不只负责 YAML；旧 notebook 的函数式参数兼容与 canonical 名字归一化也收敛在该层。
 2. `symkan.notebook_compat` 仅保留 notebook 调用到现有运行时入口的薄桥接职责。
 
-### 2.3 实验执行与复现
+### 2.4 实验执行与复现
 
 1. [symkanbenchmark_usage.md](symkanbenchmark_usage.md)：主 benchmark CLI、A/B 结果口径与单个 baseline-backend vs icbr-backend pair 的专用 compare 产物。
 2. [ablation_usage.md](ablation_usage.md)：单因素消融与 LayerwiseFT 专项实验说明。
@@ -84,27 +91,28 @@
 8. [engineering_rerun_report_20260327.md](engineering_rerun_report_20260327.md)：历史 `radial_bf` 工程专题结果。
 9. [engineering_release_checklist.md](engineering_release_checklist.md)：工程版发布前检查清单。
 
-### 2.4 报告与结论解释
+### 2.5 报告与结论解释
 
-1. [ablation_report.md](ablation_report.md)：单因素消融结论与解释边界。
-2. [layerwiseft_improved_report.md](layerwiseft_improved_report.md)：改进版 LayerwiseFT 比较结果。
-3. [engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md)：当前工程版总体 rerun 的正式结果与引用边界。
-4. [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)：paired backend compare、FAST_LIB speed slice 与 full-library supplementary slice 的正式结果。
-5. [engineering_rerun_report_20260327.md](engineering_rerun_report_20260327.md)：历史工程专题，不与当前正式结论混写。
-6. [ablation_plan.md](ablation_plan.md)：实验设计目标、约束与风险控制。
+1. [symkan_manuscript.md](symkan_manuscript.md)：将设计、实验协议与结果重组为论文式主叙述。
+2. [ablation_report.md](ablation_report.md)：单因素消融结论与解释边界。
+3. [layerwiseft_improved_report.md](layerwiseft_improved_report.md)：改进版 LayerwiseFT 比较结果。
+4. [engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md)：当前工程版总体 rerun 的正式结果与引用边界。
+5. [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)：paired backend compare、FAST_LIB speed slice 与 full-library supplementary slice 的正式结果。
+6. [engineering_rerun_report_20260327.md](engineering_rerun_report_20260327.md)：历史工程专题，不与当前正式结论混写。
+7. [ablation_plan.md](ablation_plan.md)：实验设计目标、约束与风险控制。
 
-### 2.5 发布记录归档
+### 2.6 发布记录归档
 
 1. [archive/releases/engineering_release_record_20260319.md](archive/releases/engineering_release_record_20260319.md)：`2026-03-19` 工程版发布记录示例。
 2. 后续发布记录统一归档到 `docs/archive/releases/`，文件命名建议为 `engineering_release_record_YYYYMMDD.md`。
 
-### 2.6 文档治理与发布
+### 2.7 文档治理与发布
 
 1. [documentation_governance.md](documentation_governance.md)：文档系统的分层角色、维护链路与写作边界。
 2. [doc_sync_matrix.md](doc_sync_matrix.md)：改动类型到同步集合的单一真源。
 3. [engineering_release_checklist.md](engineering_release_checklist.md)：发布前文档与结果的最终收口。
 
-### 2.7 协作与任务跟踪
+### 2.8 协作与任务跟踪
 
 1. [../CONTRIBUTING.md](../CONTRIBUTING.md)：协作流程、提交流程与检查要求。
 2. [../AGENTS.md](../AGENTS.md)：代理可见的仓库级约束与同步规则。
@@ -113,11 +121,12 @@
 
 1. 项目全貌快速建立：`project_map -> symkan_usage -> symkanbenchmark_usage`
 2. 架构与实现边界梳理：`project_map -> ../ARCHITECTURE.md -> design`
-3. 实验复现：`symkanbenchmark_usage -> ablation_usage`
-4. 全流程复跑：`full_experiment_runbook -> symkanbenchmark_usage -> ablation_usage`
-5. 报告撰写：`engineering_version_rerun_note -> engineering_rerun_report -> engineering_rerun_report_20260318 / engineering_rerun_report_20260401 -> symkanbenchmark_usage`
-6. 发布前确认：`engineering_release_checklist -> engineering_version_rerun_note -> engineering_rerun_report -> engineering_rerun_report_20260318 / engineering_rerun_report_20260401`
-7. 文档治理或体系收口：`documentation_governance -> doc_sync_matrix -> README -> engineering_release_checklist`
+3. 论文正文或答辩主叙述：`symkan_manuscript -> slides/README -> engineering_rerun_report_20260318 / engineering_rerun_report_20260401 -> ablation_report`
+4. 实验复现：`symkanbenchmark_usage -> ablation_usage`
+5. 全流程复跑：`full_experiment_runbook -> symkanbenchmark_usage -> ablation_usage`
+6. 报告撰写：`engineering_version_rerun_note -> engineering_rerun_report -> engineering_rerun_report_20260318 / engineering_rerun_report_20260401 -> symkanbenchmark_usage`
+7. 发布前确认：`engineering_release_checklist -> engineering_version_rerun_note -> engineering_rerun_report -> engineering_rerun_report_20260318 / engineering_rerun_report_20260401`
+8. 文档治理或体系收口：`documentation_governance -> doc_sync_matrix -> README -> engineering_release_checklist`
 
 ## 4. 返回项目入口
 

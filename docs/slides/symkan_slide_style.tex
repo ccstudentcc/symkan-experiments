@@ -1,0 +1,123 @@
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage[round,authoryear]{natbib}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{pgfplotstable}
+\usepackage{appendixnumberbeamer}
+\usetikzlibrary{arrows.meta,backgrounds,calc,fit,positioning,shapes.geometric}
+\usepgfplotslibrary{groupplots}
+\pgfplotsset{compat=1.18}
+
+\definecolor{SymNavy}{HTML}{12314A}
+\definecolor{SymTeal}{HTML}{1E6F78}
+\definecolor{SymGold}{HTML}{D89B2B}
+\definecolor{SymSand}{HTML}{F5F1E8}
+\definecolor{SymSlate}{HTML}{53636F}
+\definecolor{SymInk}{HTML}{1F2328}
+\definecolor{SymSoftRed}{HTML}{B75D4A}
+\definecolor{SymSoftGreen}{HTML}{4F7A4A}
+\definecolor{SymSoftBlue}{HTML}{5B82B8}
+\definecolor{SymSoftGray}{HTML}{B9C1C7}
+
+\setbeamercolor{background canvas}{bg=SymSand}
+\setbeamercolor{normal text}{fg=SymInk,bg=SymSand}
+\setbeamercolor{frametitle}{fg=SymNavy}
+\setbeamercolor{title}{fg=white,bg=SymNavy}
+\setbeamercolor{subtitle}{fg=SymSand}
+\setbeamercolor{structure}{fg=SymTeal}
+\setbeamercolor{alerted text}{fg=SymSoftRed}
+\setbeamercolor{block title}{fg=white,bg=SymTeal}
+\setbeamercolor{block body}{fg=SymInk,bg=white}
+\setbeamercolor{footline}{fg=SymSand,bg=SymNavy}
+
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{itemize item}{\color{SymGold}$\blacktriangleright$}
+\setbeamertemplate{itemize subitem}{\color{SymTeal}$\circ$}
+\setbeamertemplate{frametitle}{
+  \vspace{0.2em}
+  \insertframetitle\par
+  \vspace{0.25em}
+  {\color{SymGold}\rule{\linewidth}{1pt}}
+}
+\setbeamertemplate{footline}{
+  \leavevmode
+  \hbox{
+    \begin{beamercolorbox}[wd=.8\paperwidth,ht=2.8ex,dp=1.2ex,leftskip=1em]{footline}
+      \insertshorttitle
+    \end{beamercolorbox}
+    \begin{beamercolorbox}[wd=.2\paperwidth,ht=2.8ex,dp=1.2ex,rightskip=1em]{footline}
+      \hfill\insertframenumber/\inserttotalframenumber
+    \end{beamercolorbox}
+  }
+}
+
+\newcommand{\decktitle}[2]{
+  \begin{frame}[plain]
+    \begin{tikzpicture}[remember picture,overlay]
+      \fill[SymNavy] (current page.south west) rectangle (current page.north east);
+      \fill[SymTeal] ([xshift=-0.5cm,yshift=-2.3cm]current page.north east)
+        rectangle ([xshift=0cm,yshift=0cm]current page.north east);
+      \fill[SymGold] ([xshift=0cm,yshift=0cm]current page.south west)
+        rectangle ([xshift=\paperwidth,yshift=0.28cm]current page.south west);
+    \end{tikzpicture}
+    \vspace{1.8cm}
+    {\usebeamerfont{title}\color{white}\LARGE #1\par}
+    \vspace{0.4cm}
+    {\usebeamerfont{subtitle}\color{SymSand}\large #2\par}
+    \vfill
+    {\color{SymSand}\small Companion source for \texttt{docs/symkan\_manuscript.md}\par}
+    \vspace{0.3cm}
+  \end{frame}
+}
+
+\newcommand{\evidence}[1]{
+  \vfill
+  {\color{SymSlate}\tiny\textbf{Evidence boundary:} #1\par}
+}
+
+\newcommand{\takeaway}[1]{
+  \begin{block}{Takeaway}
+    #1
+  \end{block}
+}
+
+\newcommand{\metricbox}[3]{
+  \begin{tikzpicture}
+    \node[
+      rounded corners=4pt,
+      draw=SymSoftGray,
+      fill=white,
+      minimum width=\linewidth,
+      inner sep=8pt
+    ] {
+      \begin{minipage}{0.92\linewidth}
+        {\footnotesize\color{SymSlate}#1\par}
+        {\Large\color{SymNavy}\textbf{#2}\par}
+        {\scriptsize\color{SymSlate}#3\par}
+      \end{minipage}
+    };
+  \end{tikzpicture}
+}
+
+\newcommand{\auditpill}[2]{
+  \tikz[baseline=(label.base)]{
+    \node[
+      rounded corners=5pt,
+      fill=#1!18,
+      draw=#1!55!black,
+      inner xsep=6pt,
+      inner ysep=2pt
+    ] (label) {\scriptsize\textbf{#2}};
+  }
+}
+
+\newcommand{\smallsource}[1]{{\scriptsize\color{SymSlate}#1}}
+
+\newcommand{\literature}[1]{
+  {\color{SymSlate}\tiny\textbf{Research context:} #1\par}
+}

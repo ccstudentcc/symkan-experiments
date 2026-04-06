@@ -30,6 +30,8 @@
 4. 勾选全局必检项：
    - [ ] 文档导航一致：`README.md` 与 `docs/index.md` 一致。
    - [ ] 文档治理入口可达：`documentation_governance.md`、`doc_sync_matrix.md`、`engineering_release_checklist.md` 三者互相可追踪。
+   - [ ] 方法/手稿入口清晰：`design.md` 与 `symkan_manuscript.md`（若存在）职责不混写，且能从 `docs/index.md` 到达。
+   - [ ] 若 `docs/slides/` 存在：其 README、主 deck 与引用资产仍被明确描述为手稿 companion，而非独立证据源。
    - [ ] 当前任务状态可解释：若本次发布源于多会话任务，`SPEC.md`、`IMPLEMENTATION_PLAN.md`、`TASK_STATUS.md` 已更新到可发布状态。
    - [ ] 工程版三件套可达：`engineering_version_rerun_note`、`engineering_rerun_report`、`engineering_release_checklist`。
    - [ ] 链接完整性通过：`README.md` 与 `docs/` 相对链接无失效项。
@@ -71,9 +73,11 @@ git status --short
 4. [doc_sync_matrix.md](doc_sync_matrix.md)
 5. [project_map.md](project_map.md)
 6. [design.md](design.md)
-7. [symkan_usage.md](symkan_usage.md)
-8. [full_experiment_runbook.md](full_experiment_runbook.md)
-9. [engineering_version_rerun_note.md](engineering_version_rerun_note.md)
-10. [engineering_rerun_report.md](engineering_rerun_report.md)
-11. [engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md)
-12. [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)
+7. [symkan_manuscript.md](symkan_manuscript.md)
+8. [slides/README.md](slides/README.md)
+9. [symkan_usage.md](symkan_usage.md)
+10. [full_experiment_runbook.md](full_experiment_runbook.md)
+11. [engineering_version_rerun_note.md](engineering_version_rerun_note.md)
+12. [engineering_rerun_report.md](engineering_rerun_report.md)
+13. [engineering_rerun_report_20260318.md](engineering_rerun_report_20260318.md)
+14. [engineering_rerun_report_20260401.md](engineering_rerun_report_20260401.md)

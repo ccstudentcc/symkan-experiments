@@ -1,0 +1,44 @@
+% Values copied from docs/symkan_manuscript.md.
+
+\pgfplotstableread{
+variant acc auc runtime core val
+baseline 0.777433 0.956107 153.470521 33.867724 -0.672284
+adaptive 0.742533 0.945706 209.552334 47.499191 -0.646339
+adaptiveauto 0.751467 0.946249 130.715215 33.259280 -0.552361
+}\defaultstrategydata
+
+\pgfplotstableread{
+variant acc complexity symtime
+full 0.7807 126.90 33.58
+wostagewise 0.4430 48.44 16.64
+wopruning 0.8017 194.33 43.51
+wocompact 0.7577 120.10 41.34
+wolayerwiseft 0.7838 126.90 20.41
+}\ablationdata
+
+\pgfplotstableread{
+variant acc auc val symtime
+full 0.7807 0.9548 -0.6135 33.58
+layerwiseftesreg 0.7807 0.9548 -0.6135 33.28
+wolayerwiseft 0.7838 0.9544 -0.5937 20.41
+}\layerwiseftdata
+
+\pgfplotstableread{
+variant acc auc runtime core val
+baseline 0.777467 0.951264 69.864499 33.297856 -0.486988
+baselineicbr 0.788667 0.961440 62.462939 19.013927 -0.409281
+}\layeredcomparedata
+
+\pgfplotstableread{
+variant acc auc runtime core val
+baselinefastlib 0.794000 0.962537 112.233492 75.187859 -0.451777
+baselineicbrfastlib 0.793233 0.962634 69.944645 31.990798 -0.456489
+}\fastlibcomparedata
+
+\def\LayeredSpeedup{1.751763}
+\def\FastlibSpeedup{2.350452}
+\def\FullLibAcc{0.795433}
+\def\FullLibAuc{0.963225}
+\def\FullLibCore{35.218785}
+\def\FullLibRuntime{41.757397}
+\def\FullLibTargetRtwo{0.601003}

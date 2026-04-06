@@ -1,54 +1,61 @@
-# Documentation Governance Reinforcement Specification
+# SymKAN Manuscript and Slide Companion Specification
 
 ## 1. Objective
 
-Add a durable documentation-governance layer for `symkan-experiments` so that entry docs, execution docs, evidence docs, and release docs stay synchronized through explicit role boundaries and maintenance rules.
+Add a paper-oriented companion manuscript under `docs/` that preserves `docs/design.md`, upgrade it with formal citations, and add a companion Beamer slide source pack under `docs/slides/`.
 
 ## 2. Audience
 
 The primary readers are:
 
-1. Maintainers who need a stable process for keeping docs synchronized with code and experiment outputs.
-2. Contributors who need to know which document to update for which kind of change.
-3. Agentic tooling that must route documentation edits without re-discovering the repo-wide conventions each time.
+1. Authors who need a manuscript-style summary for papers, theses, or defense writing.
+2. Maintainers who must keep the new manuscript aligned with the repo's design, report, and governance layers.
+3. Readers who need a reusable slide deck for research talks or thesis-defense sections without weakening evidence boundaries.
+4. Agentic tooling that needs an explicit role split between design docs, runbooks, dated reports, manuscript-style synthesis, and slide sources.
 
 ## 3. In Scope
 
-1. Add a dedicated governance document for documentation roles, maintenance flow, writing boundaries, and validation requirements.
-2. Sync the governance layer into the main navigation and contribution entry points:
-   - `README.md`
+1. Add a new core doc, `docs/symkan_manuscript.md`, as a paper-style main narrative.
+2. Keep `docs/design.md` in place and preserve its role as the design-boundary document.
+3. Add formal external citations to the manuscript and keep repo-internal dated reports as internal evidence rather than pretending they are external references.
+4. Add `docs/slides/` with Beamer sources that align with the manuscript's claim boundaries.
+5. Sync the new manuscript and slide layer into the doc-governance and navigation chain:
+   - `docs/documentation_governance.md`
    - `docs/index.md`
    - `docs/project_map.md`
-   - `docs/doc_sync_matrix.md`
-   - `docs/engineering_release_checklist.md`
-   - `docs/engineering_rerun_report.md`
-   - `docs/engineering_version_rerun_note.md`
+   - `README.md`
    - `CONTRIBUTING.md`
-   - `ARCHITECTURE.md`
-3. Refresh task-tracking files so they match the current governance task instead of the previous design-manuscript task.
+   - `docs/engineering_release_checklist.md`
+   - `AGENTS.md`
+6. Refresh task-tracking files so they describe the expanded manuscript-and-slides task rather than the earlier governance-only task.
 
 ## 4. Out of Scope
 
-1. No code-path behavior changes.
-2. No benchmark reruns or result rewrites.
-3. No large-scale rewriting of unrelated method or report documents.
-4. No weakening of the existing backend-compare evidence boundaries.
+1. No benchmark reruns.
+2. No code-path behavior changes.
+3. No weakening of the current backend-compare evidence boundaries.
+4. No conversion of `docs/design.md` into a runbook or dated report.
+5. No invention of new experimental claims beyond maintained docs and existing outputs.
+6. No fabricated references or unverified bibliographic metadata.
 
 ## 5. Required Writing Properties
 
-1. Tone must remain rigorous, restrained, and operational.
-2. The governance layer must be layered:
-   - role definition
-   - maintenance flow
-   - update triggers
-   - prohibited patterns
-   - validation checklist
-3. The new wording must avoid AI-assistant phrasing, tutorial chatter, and second-person filler unless an execution step genuinely requires imperative wording.
+1. The new manuscript must read as a restrained, paper-style narrative rather than a tutorial.
+2. It must define SymKAN as an engineering pipeline for post-training KAN symbolization, not as a new numeric trainer or generic symbolic regression system.
+3. The manuscript should follow a scientific-writing style more closely: continuous prose, explicit section roles, and a clear separation between results and interpretation.
+4. Results and discussion must respect the maintained evidence hierarchy:
+   - `2026-03-18` overall rerun for engineering baseline and strategy tradeoffs
+   - ablation and LayerwiseFT reports for module roles
+   - `2026-04-01` layered/FAST_LIB paired compare for backend-only evidence
+   - `baseline_icbr_fulllib` only as supplementary single-arm evidence
+5. External references should support KAN background, symbolic regression context, post-hoc symbolic modeling, and reproducibility or benchmark methodology, while repo-internal reports remain separate evidence anchors.
+6. The Beamer deck should function as a talk-ready compression of the manuscript rather than a runbook or result dump.
 
 ## 6. Acceptance Criteria
 
-1. A dedicated governance document exists and matches the current repository doc system.
-2. `README.md` and `docs/index.md` both expose the governance entry.
-3. `docs/doc_sync_matrix.md`, `docs/engineering_release_checklist.md`, `CONTRIBUTING.md`, and `AGENTS.md` all reference the same governance contract without conflicting rules.
-4. Task-tracking files reflect this governance task.
-5. Basic doc-consistency checks pass after the edits.
+1. `docs/symkan_manuscript.md` exists, presents a paper-style main narrative distinct from `docs/design.md`, and contains verified external references plus a references section.
+2. `docs/slides/` exists and contains a Beamer-based companion deck aligned with the manuscript's evidence hierarchy.
+3. The synced doc-system entry points expose the manuscript and slide layer without blurring document roles.
+4. `AGENTS.md` reflects any newly discovered core-doc routing rule needed to prevent future misses.
+5. `SPEC.md`, `IMPLEMENTATION_PLAN.md`, and `TASK_STATUS.md` all reflect the expanded manuscript-and-slides task.
+6. Basic doc-consistency checks pass after the edits.

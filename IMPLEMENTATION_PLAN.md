@@ -1,70 +1,96 @@
-# Documentation Governance Reinforcement Plan
+# SymKAN Manuscript and Slide Companion Plan
 
 ## Goal
 
-Add a governance layer for the documentation system and propagate it through the repository's navigation, sync, contribution, release, and agent-facing entry points.
+Add a manuscript-style companion doc with formal citations, add a companion Beamer slide source pack, and wire both into the repo's documentation system without re-scoping `docs/design.md`.
 
-## Stage 1: Baseline Review
+## Stage 1: Repo and Evidence Review
 
-- Goal: Re-open the current repo-level documentation system and identify where governance is already partially encoded.
+- Goal: Re-open the current design doc, report docs, governance docs, and recent repo context.
 - Success criteria:
   - `README.md`, `ARCHITECTURE.md`, and the last 10 commits are reviewed.
-  - `docs/index.md`, `docs/project_map.md`, `docs/doc_sync_matrix.md`, `docs/engineering_release_checklist.md`, `CONTRIBUTING.md`, and `AGENTS.md` are reviewed.
-  - the current task-tracking files are re-opened and confirmed to be stale for this task.
+  - `docs/design.md`, `docs/ablation_report.md`, `docs/layerwiseft_improved_report.md`, `docs/engineering_rerun_report_20260318.md`, and `docs/engineering_rerun_report_20260401.md` are reviewed.
+  - governance entry points and task-tracking files are re-opened.
 - Validation:
   - local file inspection only
 - Status: Complete
 
-## Stage 2: Parallel Audit
+## Stage 2: Parallel Sidecar Review
 
-- Goal: Use bounded subagents to audit topology gaps and style/maintenance weaknesses without overlapping writes.
+- Goal: Use bounded subagents to gather non-overlapping guidance for manuscript structure, presentation narrative, visualization planning, and doc-sync impact.
 - Success criteria:
-  - one audit covers document layers, routing, and missing governance hooks.
-  - one audit covers tone, structure, and maintenance-flow weaknesses.
-  - both audits return concrete parent-edit targets.
+  - academic-writing guidance is collected
+  - presentation-story guidance is collected
+  - figure/table planning guidance is collected
+  - doc-sync impact analysis is collected
 - Validation:
-  - subagent read-only reports
+  - read-only subagent reports
 - Status: Complete
 
-## Stage 3: Governance Layer Draft
+## Stage 3: Manuscript Draft
 
-- Goal: Add or update the files that define the documentation governance contract.
+- Goal: Add `docs/symkan_manuscript.md` as a paper-style narrative that reorganizes current maintained evidence.
+- Success criteria:
+  - the new manuscript defines SymKAN as a post-training symbolization pipeline
+  - the manuscript keeps evidence slices separate
+  - the manuscript includes reusable paper/slide display planning without becoming a runbook
+- Validation:
+  - manual review of the new doc against repo evidence
+- Status: Complete
+
+## Stage 4: Manuscript Citation and Scientific-Writing Upgrade
+
+- Goal: Rework the manuscript toward a stricter scientific-writing style and add verified external citations.
+- Success criteria:
+  - the manuscript drops the prior metadata-heavy opening and reads as continuous academic prose
+  - external references are added for KAN background, symbolic regression context, post-hoc symbolic modeling, and reproducibility or benchmark methodology
+  - results and discussion are separated more clearly
+  - repo-internal evidence remains distinct from external references
+- Validation:
+  - manual review against the maintained evidence hierarchy
+  - metadata spot-checks against live external sources
+- Status: Complete
+
+## Stage 5: Slide Source Pack
+
+- Goal: Add `docs/slides/` as a Beamer companion deck aligned with the manuscript.
+- Success criteria:
+  - `docs/slides/` contains a Beamer main file, local bibliography, and minimal usage notes
+  - slide claims match the manuscript's evidence boundaries
+  - the deck is organized for a 10-15 minute research presentation rather than an operations walkthrough
+- Validation:
+  - manual review of slide structure and citations handling
+  - optional lightweight tex sanity check if the environment allows it
+- Status: Complete
+
+## Stage 6: Doc-System Sync
+
+- Goal: Register the new manuscript and slide layer in the repo's governance, navigation, project-map, contribution, and release-check surfaces.
 - Planned files:
   1. `docs/documentation_governance.md`
-  2. `README.md`
-  3. `docs/index.md`
-  4. `docs/project_map.md`
-  5. `docs/doc_sync_matrix.md`
+  2. `docs/index.md`
+  3. `docs/project_map.md`
+  4. `README.md`
+  5. `CONTRIBUTING.md`
   6. `docs/engineering_release_checklist.md`
-  7. `docs/engineering_rerun_report.md`
-  8. `docs/engineering_version_rerun_note.md`
-  9. `CONTRIBUTING.md`
-  10. `ARCHITECTURE.md`
+  7. `AGENTS.md`
 - Success criteria:
-  - the new governance doc defines roles, flow, writing boundaries, prohibited patterns, and validation.
-  - each synced entry point points to the governance layer where appropriate.
+  - the new manuscript and `docs/slides/` are discoverable from stable entry points
+  - `docs/design.md` keeps its existing role
+  - project-map sync is explicitly enforced
 - Validation:
-  - manual review of edited files
+  - manual diff review
 - Status: Complete
 
-## Stage 4: Task Tracking Refresh
+## Stage 7: Verification and Closeout
 
-- Goal: Rewrite `SPEC.md`, `IMPLEMENTATION_PLAN.md`, and `TASK_STATUS.md` so they describe the current governance task.
+- Goal: Run the smallest meaningful doc-consistency checks and finalize task tracking.
 - Success criteria:
-  - the previous design-manuscript task is no longer shown as the current objective.
-  - current scope, risks, and acceptance criteria are recorded.
-- Validation:
-  - manual review of the three task-tracking files
-- Status: Complete
-
-## Stage 5: Verification and Cleanup
-
-- Goal: Run the smallest meaningful checks for a doc-governance-only change set and integrate the audit feedback.
-- Success criteria:
-  - edited files have no diff-format or whitespace issues.
-  - navigation, command-style, and core link expectations are checked.
-  - task tracking is updated to final status.
+  - task-tracking files reflect the expanded task
+  - doc diffs have no whitespace or patch-format issues
+  - manuscript and slide links are discoverable through the synced entry points
 - Validation:
   - `git diff --check`
   - targeted `rg` checks
+  - `git status --short`
 - Status: Complete

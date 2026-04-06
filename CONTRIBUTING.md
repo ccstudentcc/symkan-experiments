@@ -39,7 +39,7 @@
 - 向后兼容优先于接口重塑。
 - 代码、参数与文档中的表述应保持一致。
 - 不在仓库中写入密钥、令牌、机器相关路径或其他敏感配置。
-- 文档系统变更应先明确分层角色，再同步入口、矩阵与发布清单。
+- 文档系统变更应先明确分层角色，再同步入口、项目地图、矩阵与发布清单。
 
 ## 提交流程
 
@@ -90,7 +90,9 @@
 3. 导航一致性：`README.md` 的“文档路径/文档导航”与 `docs/index.md` 是否一致。
 4. 工程版三件套：`engineering_version_rerun_note`、`engineering_rerun_report`、`engineering_release_checklist` 是否在相关文档中可追踪可跳转。
 5. 链接有效性：`README.md` 与 `docs/` 相对链接是否均可访问。
-6. 若为复杂任务：`SPEC.md`、`IMPLEMENTATION_PLAN.md`、`TASK_STATUS.md` 是否仍与当前改动范围一致。
+6. 若新增、移除或重定义核心文档：`docs/project_map.md` 是否已同步，且 `docs/index.md` 中的阅读路径已更新。
+7. 若为复杂任务：`SPEC.md`、`IMPLEMENTATION_PLAN.md`、`TASK_STATUS.md` 是否仍与当前改动范围一致。
+8. 若 `docs/slides/` 作为手稿 companion 存在：其 README、主 deck 与引用资产是否仍与 `docs/symkan_manuscript.md` 保持同一证据边界。
 
 ## 检查要求
 
@@ -121,7 +123,7 @@ rg -n "python\\s+scripts\\.|python\\s+symkanbenchmark\\.py|python\\s+ablation_ru
 
 1. 第一条用于发现不符合规范的代码块语言标记。
 2. 第二条用于发现入口命令口径回退（应统一为 `python -m scripts.*`）。
-3. 若本次改动涉及文档体系角色或入口，应再人工核对 `README.md`、`docs/index.md`、`docs/documentation_governance.md` 与 `docs/engineering_release_checklist.md` 的交叉链接。
+3. 若本次改动涉及文档体系角色或入口，应再人工核对 `README.md`、`docs/index.md`、`docs/project_map.md`、`docs/documentation_governance.md` 与 `docs/engineering_release_checklist.md` 的交叉链接。
 
 若改动影响公共接口或项目入口，通常还需要同步更新：
 

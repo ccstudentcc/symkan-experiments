@@ -24,6 +24,23 @@ notebooks/model/
 .ipynb_checkpoints/
 tmp/
 
+# docs/slides build artifacts
+docs/slides/*.aux
+docs/slides/*.bbl
+docs/slides/*.bcf
+docs/slides/*.blg
+docs/slides/*.fdb_latexmk
+docs/slides/*.fls
+docs/slides/*.log
+docs/slides/*.nav
+docs/slides/*.out
+docs/slides/*.run.xml
+docs/slides/*.snm
+docs/slides/*.synctex.gz
+docs/slides/*.toc
+docs/slides/*.vrb
+docs/slides/symkan_manuscript_companion.pdf
+
 _safe_copy_temp*
 
 .claude/

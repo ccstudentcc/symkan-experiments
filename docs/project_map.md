@@ -68,7 +68,8 @@
 - 导航文档：`index.md`、`project_map.md`，负责入口与阅读路径。
 - 治理文档：`documentation_governance.md`、`doc_sync_matrix.md`、`engineering_release_checklist.md`，负责维护链路、同步规则与发布收口。
 - 用法文档：说明运行方式与参数。
-- 设计文档：说明设计动机与约束。
+- 设计/手稿文档：`design.md` 负责设计动机、约束与证据边界，`symkan_manuscript.md` 负责论文式主叙述。
+- 展示文档：`docs/slides/` 负责与手稿对齐的 Beamer 源码与口头报告压缩叙事。
 - 实验报告：说明当前证据所支持的结论范围。
 
 ### 5. 结果目录
@@ -96,7 +97,7 @@
 2. 系统级架构：[../ARCHITECTURE.md](../ARCHITECTURE.md)
 3. 核心库与参数说明：[symkan_usage.md](symkan_usage.md)
 4. 主 benchmark 入口与输出：[symkanbenchmark_usage.md](symkanbenchmark_usage.md)
-5. 设计与结论入口：[design.md](design.md)、[engineering_rerun_report.md](engineering_rerun_report.md)
+5. 设计与结论入口：[design.md](design.md)、[symkan_manuscript.md](symkan_manuscript.md)、[slides/README.md](slides/README.md)、[engineering_rerun_report.md](engineering_rerun_report.md)
 6. 文档治理与发布收口：[documentation_governance.md](documentation_governance.md)、[doc_sync_matrix.md](doc_sync_matrix.md)、[engineering_release_checklist.md](engineering_release_checklist.md)
 
 ## 主工作流
@@ -130,6 +131,6 @@
 
 ## 结论入口
 
-1. 默认流程、模块职责与设计边界：见 [design.md](design.md) 与 [ablation_report.md](ablation_report.md)。
+1. 默认流程、模块职责与设计边界：见 [design.md](design.md)、[symkan_manuscript.md](symkan_manuscript.md)、[slides/README.md](slides/README.md) 与 [ablation_report.md](ablation_report.md)。
 2. LayerwiseFT 专题结论：见 [layerwiseft_improved_report.md](layerwiseft_improved_report.md)。
 3. 工程版总体 rerun 与 ICBR backend compare 的正式结论：见 [engineering_rerun_report.md](engineering_rerun_report.md) 及对应带日期正文。

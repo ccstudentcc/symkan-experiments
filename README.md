@@ -21,6 +21,8 @@
 
 - [docs/index.md](docs/index.md)：`docs/` 目录统一入口与主题导航。
 - [docs/project_map.md](docs/project_map.md)：仓库结构、代码入口与结果位置地图。
+- [docs/symkan_manuscript.md](docs/symkan_manuscript.md)：面向论文正文或学位正文的手稿式主叙述稿。
+- [docs/slides/README.md](docs/slides/README.md)：与手稿对齐的 Beamer 展示层入口与编译说明。
 - [docs/documentation_governance.md](docs/documentation_governance.md)：文档治理分层、维护链路与写作边界。
 - [docs/engineering_rerun_report.md](docs/engineering_rerun_report.md)：工程版 rerun 报告稳定入口与历史归档导航。
 
@@ -147,7 +149,7 @@ symkan-experiments/
 - `symkan.eval`：ROC/AUC、公式数值验证。
 - `symkan.io`：CSV / bundle 导出。
 
-架构视角的完整说明见 [ARCHITECTURE.md](ARCHITECTURE.md) 和 [docs/design.md](docs/design.md)。
+架构视角的完整说明见 [ARCHITECTURE.md](ARCHITECTURE.md) 和 [docs/design.md](docs/design.md)；若需要面向论文正文的整合叙述，见 [docs/symkan_manuscript.md](docs/symkan_manuscript.md)；若需要面向答辩或研究汇报的展示层源码，见 [docs/slides/README.md](docs/slides/README.md)。
 
 ## 项目层默认设定
 
@@ -161,6 +163,8 @@ symkan-experiments/
 相关依据见：
 
 - [docs/design.md](docs/design.md)
+- [docs/symkan_manuscript.md](docs/symkan_manuscript.md)
+- [docs/slides/README.md](docs/slides/README.md)
 - [docs/ablation_report.md](docs/ablation_report.md)
 - [docs/layerwiseft_improved_report.md](docs/layerwiseft_improved_report.md)
 - [docs/engineering_rerun_report_20260318.md](docs/engineering_rerun_report_20260318.md)

@@ -2,48 +2,44 @@
 
 ## Current Objective
 
-Reinforce the documentation governance layer so that the repository's entry docs, sync rules, contribution workflow, release checklist, and agent routing all point to the same document-system contract.
+Upgrade `docs/symkan_manuscript.md` into a citation-backed paper-style manuscript, add a companion Beamer deck under `docs/slides/`, and synchronize the doc system around both artifacts while keeping `docs/design.md` intact.
 
 ## Current Status
 
-- `README.md`, `ARCHITECTURE.md`, and the last 10 commits have been reviewed.
-- `docs/index.md`, `docs/project_map.md`, `docs/doc_sync_matrix.md`, `docs/engineering_release_checklist.md`, `docs/engineering_rerun_report.md`, `CONTRIBUTING.md`, and `AGENTS.md` have been reviewed as the current governance surface.
-- Existing task-tracking files were confirmed to be stale because they still described the earlier `docs/design.md` manuscript rewrite.
-- Two bounded read-only subagents have been dispatched:
-  - one for documentation topology and routing gaps
-  - one for tone, structure, and maintenance-flow weaknesses
-- The subagent findings have been integrated into the final edits:
-  - duplicated navigation in `README.md` has been compressed into stable entry points
-  - `docs/project_map.md` now routes to conclusions instead of restating them
-  - governance and task-tracking entry points are exposed in `docs/index.md`, `README.md`, and `ARCHITECTURE.md`
-- `docs/documentation_governance.md` has been added as the governance-layer contract.
-- `README.md`, `docs/index.md`, `docs/project_map.md`, `docs/doc_sync_matrix.md`, `docs/engineering_release_checklist.md`, `CONTRIBUTING.md`, and `AGENTS.md` have been updated to expose or enforce the new governance layer.
-- `ARCHITECTURE.md`, `docs/engineering_rerun_report.md`, and `docs/engineering_version_rerun_note.md` have been tightened so routing, stable-link rules, and report-writing language match the governance layer.
-- `SPEC.md`, `IMPLEMENTATION_PLAN.md`, and `TASK_STATUS.md` have been rewritten for this governance task.
+- `README.md`, `ARCHITECTURE.md`, the last 10 commits, and the key SymKAN design/report docs have been reviewed.
+- The initial manuscript companion and its first-round doc-system sync have already been added.
+- A second bounded subagent round has been completed for:
+  - scientific-writing compliance review
+  - citation-placement review
+  - Beamer deck planning
+- Those review-only subagents have been closed after their outputs were integrated.
+- `docs/symkan_manuscript.md` has been rewritten toward a stricter scientific-writing style and now includes formal external references plus a references section.
+- `docs/slides/` now contains the Beamer companion deck, local style/data files, a slide-level `references.bib`, and a README with root-level build commands.
+- The Beamer deck now renders page-level external citations plus a closing references frame from `references.bib` via BibTeX.
+- `README.md`, `docs/index.md`, `docs/project_map.md`, `docs/documentation_governance.md`, `docs/doc_sync_matrix.md`, `CONTRIBUTING.md`, `docs/engineering_release_checklist.md`, and `AGENTS.md` have been synchronized for the new slide layer and revised manuscript role.
+- `.gitignore` now ignores LaTeX intermediates and the compiled deck PDF under `docs/slides/`, and `AGENTS.md` now records that only Beamer sources belong in git by default.
+- `SPEC.md`, `IMPLEMENTATION_PLAN.md`, and `TASK_STATUS.md` have been refreshed to reflect the expanded manuscript-and-slides scope.
 - Validation is complete:
-  - `git diff --check` passed
-  - fixed-string scans found no `````bash``, `````sh``, or `````shell`` code blocks in `README.md`, `docs/`, `CONTRIBUTING.md`, or `ARCHITECTURE.md`
-  - no direct `python scripts.*` / `python symkanbenchmark.py` / `python ablation_runner.py` command-form regressions were found in `README.md` or `docs/`
-  - governance and task-tracking cross-links were confirmed with targeted `rg` checks
+  - `git diff --check` passed with no patch-format errors; only CRLF normalization warnings were emitted.
+  - targeted `rg` checks confirmed the revised manuscript and `docs/slides/` are wired into the required entry points.
+  - `pdflatex` was run twice against `docs/slides/symkan_manuscript_companion.tex`, producing a smoke-check PDF under `tmp/slides_compile_check/`.
+  - `git status --short` shows a scoped doc-only worktree with the manuscript, slides, and synchronized governance/navigation files.
 
 ## Key Decisions
 
-1. Use a dedicated governance document instead of embedding more rules into `docs/index.md` or `doc_sync_matrix.md` alone.
-2. Keep the role split explicit:
-   - entry docs define where to look
-   - method docs define design and usage semantics
-   - report docs define dated evidence
-   - governance docs define maintenance rules
-3. Preserve the stable-index vs dated-body pattern for engineering rerun reports.
-4. Keep `doc_sync_matrix.md` as the impacted-file SSOT, while `documentation_governance.md` defines the higher-level document-system contract.
-5. Mirror governance rules into `AGENTS.md` only where they help future routing and prevent repeated discovery work.
+1. Keep `docs/design.md` as the design-boundary document and add a separate manuscript companion instead of rewriting the existing design doc again.
+2. Keep the new manuscript inside the current governance structure rather than inventing a new document category.
+3. Treat the new manuscript as a synthesis surface: it may reorganize maintained evidence, but it must not invent stronger claims than the underlying dated reports support.
+4. Use numbered external citations for academic positioning, but keep repo-internal dated reports and compare artifacts as internal evidence rather than formal literature.
+5. Move presentation planning out of the manuscript body and into the new `docs/slides/` layer so the manuscript stays closer to a paper-style narrative.
+6. Extend `AGENTS.md` so future core-doc changes must also sync `docs/project_map.md`.
 
 ## Residual Risks
 
-1. Some older topic documents may still contain tutorial-like phrasing that this pass does not rewrite.
-2. Future contributors may update topic documents without revisiting the governance layer unless the new entry points are used consistently.
-3. The working tree now contains a doc-only governance change set that still requires explicit user direction for staging, commit, or push.
+1. The Beamer deck now compiles, but the compile log still reports overfull box and overflow warnings, so a later typography pass may still be desirable.
+2. Future result updates must continue propagating into both the manuscript and `docs/slides/`, otherwise the two layers can drift.
+3. The working tree contains a coordinated doc-only change set that still requires explicit user direction for staging, commit, or push.
 
 ## Next Step
 
-The governance-layer reinforcement task is complete. The next optional step is a scoped commit if this doc-only change set should be recorded now.
+The expanded manuscript-and-slides task is complete. The next optional step is staging, committing, or doing a dedicated slide-layout polish pass based on the current TeX warnings.

@@ -23,7 +23,7 @@
 | 跨版本指标口径变化（字段映射、新增指标） | `docs/engineering_version_rerun_note.md`、`docs/engineering_rerun_report.md`、最新 `docs/engineering_rerun_report_YYYYMMDD.md`、`docs/design.md`、`docs/index.md` | `export_wall_time_s -> symbolize_wall_time_s` 映射与新增字段边界清晰 |
 | 工程版主引用目录变化（rerun 日期或归档路径变化） | `docs/engineering_rerun_report.md`、最新 `docs/engineering_rerun_report_YYYYMMDD.md`、`docs/engineering_version_rerun_note.md`、`docs/index.md`、`docs/engineering_release_checklist.md`、`README.md`、发布说明 | 稳定入口、带日期正文、目录路径与日期一致 |
 | 发布记录新增或更新 | `docs/archive/releases/engineering_release_record_YYYYMMDD.md`、`docs/engineering_release_checklist.md`、`docs/index.md` | 归档路径、命名规则、索引入口一致 |
-| 文档导航变化（新增/下线核心文档） | `docs/index.md`、`docs/project_map.md`、`README.md`、`docs/documentation_governance.md`、`CONTRIBUTING.md`、`docs/engineering_release_checklist.md` | 导航链路完整，工程版三件套可达 |
+| 文档导航变化（新增/下线核心文档或展示层 companion） | `docs/index.md`、`docs/project_map.md`、`README.md`、`docs/documentation_governance.md`、`CONTRIBUTING.md`、`docs/engineering_release_checklist.md` | 导航链路完整，方法/手稿/展示层职责不混写，工程版三件套可达 |
 | 文档治理规则变化（分层角色、写作边界、维护链路变化） | `docs/documentation_governance.md`、`docs/index.md`、`docs/project_map.md`、`README.md`、`CONTRIBUTING.md`、`AGENTS.md`、`docs/engineering_release_checklist.md` | 角色定义、入口链路、代理约束与发布收口一致 |
 | 复杂任务范围或阶段变化（多会话任务的目标、计划、状态变化） | `SPEC.md`、`IMPLEMENTATION_PLAN.md`、`TASK_STATUS.md`、`docs/documentation_governance.md`（若规则层发生变化） | 当前目标、阶段状态、风险与下一步一致 |
 | 辅助说明文档口径变化（非主 docs） | `outputs/README.md`、`notebooks/README.md`、`examples/README.md` | 不回退到旧入口或旧叙述 |
